@@ -6,4 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: group-sample
 spec:
-  # TODO(user): Add fields here
+  group_name: test
+  members:
+  - vinamra28
+  backends:
+  - name: fivetran

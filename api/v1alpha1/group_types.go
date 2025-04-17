@@ -20,26 +20,33 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+const (
+	GroupReadyCondition = "GroupReadyCondition"
+)
+
+type Backend struct {
+	Name string `json:"name"`
+	ID   string `json:"id,omitempty"`
+}
 
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of Group. Edit group_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	GroupName string    `json:"group_name"`
+	Members   []string  `json:"members"`
+	Backends  []Backend `json:"backends"`
 }
 
 // GroupStatus defines the observed state of Group
 type GroupStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	Conditions            []metav1.Condition `json:"conditions,omitempty"`
+	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
+	Backends              []Backend          `json:"backends,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="GroupReadyCondition")].status`
+// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="GroupReadyCondition")].message`
 
 // Group is the Schema for the groups API
 type Group struct {
