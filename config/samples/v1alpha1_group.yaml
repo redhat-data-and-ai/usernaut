@@ -6,8 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: group-sample
 spec:
-  group_name: test
+  group_name: platformadmin_group
   members:
-  - vinamra28
+  - vinjain
   backends:
   - name: fivetran
