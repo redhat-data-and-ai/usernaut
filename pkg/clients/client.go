@@ -16,13 +16,17 @@ type Client interface {
 	FetchUserDetails(ctx context.Context, userID string) (*structs.User, error)
 	// Onboards the user on the backend
 	CreateUser(ctx context.Context, u *structs.User) (*structs.User, error)
+	// Drop User from the backend
+	DeleteUser(ctx context.Context, userID string) error
 
 	// Fetches all the teams on the backend
-	FetchAllTeams(ctx context.Context) (map[string]*structs.Team, error)
+	FetchAllTeams(ctx context.Context) (map[string]structs.Team, error)
 	// Fetch team details by ID or unique key
 	FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error)
 	// Create a new team/role
-	CreateTeam(context.Context, *structs.Team) (*structs.Team, error)
+	CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error)
+	// Drop the team from respective backend
+	DeleteTeamByID(ctx context.Context, teamID string) error
 
 	// Returns the list of users present under a team
 	FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error)

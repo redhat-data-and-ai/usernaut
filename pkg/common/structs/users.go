@@ -7,6 +7,7 @@ type User struct {
 	FirstName   string `json:"first_name,omitempty"`
 	LastName    string `json:"last_name,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
+	Role        string `json:"role,omitempty"`
 }
 
 func (u *User) GetID() string {
@@ -31,4 +32,8 @@ func (u *User) GetLastName() string {
 
 func (u *User) GetDisplayName() string {
 	return u.DisplayName
+}
+
+func (u *User) GetRole() string {
+	return u.Role
 }
