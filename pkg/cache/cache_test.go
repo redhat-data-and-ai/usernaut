@@ -2,7 +2,6 @@ package cache
 
 import (
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
@@ -14,8 +13,8 @@ func TestNewInMemoryCacheInstance(t *testing.T) {
 	config := Config{
 		Driver: "memory",
 		InMemory: &inmemory.Config{
-			DefaultExpiration: 15 * time.Second,
-			CleanupInterval:   30 * time.Second,
+			DefaultExpiration: 15,
+			CleanupInterval:   30,
 		},
 	}
 

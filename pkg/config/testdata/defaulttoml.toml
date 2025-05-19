@@ -1,0 +1,7 @@
+appEnv = "default"
+[cache]
+    driver = "redis"
+    [cache.redis]
+        host = "localhost"
+        port = "6379"
+        database = 0

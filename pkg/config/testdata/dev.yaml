@@ -1,0 +1,10 @@
+appEnv: dev
+cache:
+  driver: redis
+  redis:
+    host: localhost
+    port: "6379"
+    database: 5
+    password: "env|CACHE_REDIS_PASSWORD"
+    defaultExpiration: -1
+    cleanupInterval: 500

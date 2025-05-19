@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -26,6 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
 )
@@ -33,8 +36,13 @@ import (
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	AppConfig *config.AppConfig
 }
+
+const (
+	NoExpiration = -1 * time.Second
+)
 
 // +kubebuilder:rbac:groups=usernaut.dev,resources=groups,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=usernaut.dev,resources=groups/status,verbs=get;update;patch
@@ -46,6 +54,14 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"request": req.NamespacedName.String(),
 	})
 
+	store, err := cache.New(&r.AppConfig.Cache)
+	if err != nil {
+		log.Error(err, "failed to initialize cache")
+		return ctrl.Result{}, err
+	}
+
+	store.Set(ctx, "hello", "world", NoExpiration)
+
 	log.Info("reconciling the group")
 
 	groupCR := &usernautdevv1alpha1.Group{}
@@ -53,6 +69,19 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Error(err, "error fetching the group CR")
 		return ctrl.Result{}, err
 	}
+
+	backends := r.AppConfig.Backends
+	client, err := backends.New("fivetran", "fivetran")
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	users, _, err := client.FetchAllUsers(ctx)
+	if err != nil {
+		log.Error(err, "error fetching users")
+		return ctrl.Result{}, err
+	}
+	log.WithField("user_count", len(users)).Info("fetched users successfully")
 
 	return ctrl.Result{}, nil
 }

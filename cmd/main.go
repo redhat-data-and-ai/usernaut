@@ -37,6 +37,7 @@ import (
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/internal/controller"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	// +kubebuilder:scaffold:imports
 )
@@ -149,9 +150,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	appConf, err := config.GetConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to create config")
+		os.Exit(1)
+	}
+
 	if err = (&controller.GroupReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		AppConfig: appConf,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Group")
 		os.Exit(1)

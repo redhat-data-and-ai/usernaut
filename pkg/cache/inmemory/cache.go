@@ -15,8 +15,8 @@ type InMemoryCache struct {
 
 // Config is the configuration for the in-memory cache
 type Config struct {
-	DefaultExpiration time.Duration
-	CleanupInterval   time.Duration
+	DefaultExpiration int32
+	CleanupInterval   int32
 }
 
 // InMemoryCacheConfig is the configuration for the in-memory cache
@@ -25,13 +25,16 @@ func NewCache(config *Config) (*InMemoryCache, error) {
 		config = getDefaultConfig()
 	}
 
-	client := gocache.New(config.DefaultExpiration, config.CleanupInterval)
+	defaultExpiration := time.Duration(config.DefaultExpiration) * time.Second
+	cleanupExpiration := time.Duration(config.CleanupInterval) * time.Second
 
-	imc := InMemoryCache{
+	client := gocache.New(defaultExpiration, cleanupExpiration)
+
+	inMem := &InMemoryCache{
 		client: client,
 	}
 
-	return &imc, nil
+	return inMem, nil
 }
 
 // Set implements inmemory
@@ -63,10 +66,15 @@ func (imc *InMemoryCache) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// Flushes out all the keys from Cache.
+func (imc *InMemoryCache) Flush(ctx context.Context) {
+	imc.client.Flush()
+}
+
 // getDefaultConfig returns the default configuration for the in-memory cache
 func getDefaultConfig() *Config {
 	return &Config{
-		DefaultExpiration: 5 * time.Minute,
-		CleanupInterval:   10 * time.Minute,
+		DefaultExpiration: -1,
+		CleanupInterval:   -1,
 	}
 }

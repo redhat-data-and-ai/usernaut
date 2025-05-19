@@ -10,8 +10,8 @@ import (
 
 func TestNewCacheInstance(t *testing.T) {
 	config := &Config{
-		DefaultExpiration: 15 * time.Second,
-		CleanupInterval:   30 * time.Minute,
+		DefaultExpiration: 15,
+		CleanupInterval:   30,
 	}
 
 	mem, err := NewCache(config)
@@ -21,8 +21,8 @@ func TestNewCacheInstance(t *testing.T) {
 
 func TestInMemoryCache_Set(t *testing.T) {
 	config := &Config{
-		DefaultExpiration: 15 * time.Second,
-		CleanupInterval:   30 * time.Minute,
+		DefaultExpiration: 15,
+		CleanupInterval:   30,
 	}
 
 	mem, err := NewCache(config)
@@ -39,8 +39,8 @@ func TestInMemoryCache_Set(t *testing.T) {
 
 func TestInMemoryGetWithoutSet(t *testing.T) {
 	config := &Config{
-		DefaultExpiration: 15 * time.Second,
-		CleanupInterval:   30 * time.Minute,
+		DefaultExpiration: 15,
+		CleanupInterval:   30,
 	}
 
 	mem, err := NewCache(config)
@@ -55,8 +55,8 @@ func TestInMemoryGetWithoutSet(t *testing.T) {
 
 func TestInMemoryCache_Delete(t *testing.T) {
 	config := &Config{
-		DefaultExpiration: 15 * time.Second,
-		CleanupInterval:   30 * time.Minute,
+		DefaultExpiration: 15,
+		CleanupInterval:   30,
 	}
 
 	mem, err := NewCache(config)

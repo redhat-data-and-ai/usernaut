@@ -1,0 +1,19 @@
+appEnv: default
+cache:
+  driver: redis
+  redis:
+    host: localhost
+    port: "6379"
+    database: 0
+backends:
+  snowflake:
+    rhsandbox:
+      url: google.com
+      account: rhsandbox
+    rhdev:
+      url: gmail.com
+      account: rhdev
+  fivetran:
+    fivetran-0:
+      apiKey: key
+      apiSecret: secret

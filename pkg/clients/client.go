@@ -1,9 +1,33 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package clients
 
 import (
 	"context"
+	"errors"
+	"strings"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
+)
+
+var (
+	// ErrInvalidBackend is returned when an invalid backend type is provided
+	ErrInvalidBackend = errors.New("invalid backend")
 )
 
 type Client interface {
@@ -34,4 +58,22 @@ type Client interface {
 	AddUserToTeam(ctx context.Context, teamID, userID string) error
 	// Removes a member from the team
 	RemoveUserFromTeam(ctx context.Context, teamID, userID string) error
+}
+
+type Backends struct {
+	// Snowflake map[string]Snowflake
+	Fivetran map[string]*fivetran.FivetranConfig
+}
+
+func (backends *Backends) New(name, backendType string) (Client, error) {
+	switch strings.ToLower(backendType) {
+	case "fivetran":
+		fivetranConfig := backends.Fivetran[name]
+		if fivetranConfig == nil {
+			return nil, errors.New("fivetran client isn't configured")
+		}
+		return fivetran.NewClient(fivetranConfig.ApiKey, fivetranConfig.ApiSecret), nil
+	default:
+		return nil, ErrInvalidBackend
+	}
 }
