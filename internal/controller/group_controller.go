@@ -38,6 +38,7 @@ type GroupReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
 	AppConfig *config.AppConfig
+	Cache     cache.Cache
 }
 
 const (
@@ -54,14 +55,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"request": req.NamespacedName.String(),
 	})
 
-	store, err := cache.New(&r.AppConfig.Cache)
-	if err != nil {
-		log.Error(err, "failed to initialize cache")
-		return ctrl.Result{}, err
-	}
-
-	store.Set(ctx, "hello", "world", NoExpiration)
-
 	log.Info("reconciling the group")
 
 	groupCR := &usernautdevv1alpha1.Group{}
@@ -71,17 +64,17 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	backends := r.AppConfig.Backends
-	client, err := backends.New("fivetran", "fivetran")
+	_, err := backends.New("fivetran", "fivetran")
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	users, _, err := client.FetchAllUsers(ctx)
-	if err != nil {
-		log.Error(err, "error fetching users")
-		return ctrl.Result{}, err
-	}
-	log.WithField("user_count", len(users)).Info("fetched users successfully")
+	// users, _, err := client.FetchAllUsers(ctx)
+	// if err != nil {
+	// 	log.Error(err, "error fetching users")
+	// 	return ctrl.Result{}, err
+	// }
+	// log.WithField("user_count", len(users)).Info("fetched users successfully")
 
 	return ctrl.Result{}, nil
 }

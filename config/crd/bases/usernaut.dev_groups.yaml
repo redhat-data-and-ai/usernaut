@@ -49,12 +49,13 @@ spec:
               backends:
                 items:
                   properties:
-                    id:
-                      type: string
                     name:
+                      type: string
+                    type:
                       type: string
                   required:
                   - name
+                  - type
                   type: object
                 type: array
               group_name:
@@ -74,12 +75,13 @@ spec:
               backends:
                 items:
                   properties:
-                    id:
-                      type: string
                     name:
+                      type: string
+                    type:
                       type: string
                   required:
                   - name
+                  - type
                   type: object
                 type: array
               conditions:

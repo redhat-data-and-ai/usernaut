@@ -26,7 +26,7 @@ const (
 
 type Backend struct {
 	Name string `json:"name"`
-	ID   string `json:"id,omitempty"`
+	Type string `json:"type"`
 }
 
 // GroupSpec defines the desired state of Group

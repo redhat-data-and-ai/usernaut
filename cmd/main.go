@@ -37,6 +37,7 @@ import (
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/internal/controller"
+	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	// +kubebuilder:scaffold:imports
@@ -156,10 +157,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	cache, err := cache.New(&appConf.Cache)
+	if err != nil {
+		setupLog.Error(err, "failed to initialize cache")
+	}
+
 	if err = (&controller.GroupReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		AppConfig: appConf,
+		Cache:     cache,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Group")
 		os.Exit(1)

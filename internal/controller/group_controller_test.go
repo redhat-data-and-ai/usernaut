@@ -28,6 +28,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
+	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
 var _ = Describe("Group Controller", func() {
@@ -51,7 +56,16 @@ var _ = Describe("Group Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: usernautdevv1alpha1.GroupSpec{
+						GroupName: "test-resource-group",
+						Members:   []string{"test-user-1", "test-user-2"},
+						Backends: []usernautdevv1alpha1.Backend{
+							{
+								Name: "fivetran",
+								Type: "fivetran",
+							},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -68,12 +82,39 @@ var _ = Describe("Group Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &GroupReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+
+			appConfig := config.AppConfig{
+				Application: config.AppInfo{
+					Name: "usernaut-test",
+				},
+				Backends: clients.Backends{
+					Fivetran: map[string]*fivetran.FivetranConfig{
+						"fivetran": {
+							ApiKey:    "testKey",
+							ApiSecret: "testSecret",
+						},
+					},
+				},
+				Cache: cache.Config{
+					Driver: "memory",
+					InMemory: &inmemory.Config{
+						DefaultExpiration: int32(-1),
+						CleanupInterval:   int32(-1),
+					},
+				},
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+			cache, err := cache.New(&appConfig.Cache)
+			Expect(err).NotTo(HaveOccurred())
+
+			controllerReconciler := &GroupReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				AppConfig: &appConfig,
+				Cache:     cache,
+			}
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())

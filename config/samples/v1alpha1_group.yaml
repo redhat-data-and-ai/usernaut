@@ -11,3 +11,4 @@ spec:
   - vinjain
   backends:
   - name: fivetran
+    type: fivetran
