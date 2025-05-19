@@ -4,7 +4,7 @@ go 1.24.2
 
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
-	github.com/fivetran/go-fivetran v1.1.0
+	github.com/fivetran/go-fivetran v1.1.1
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/onsi/ginkgo/v2 v2.22.1
 	github.com/onsi/gomega v1.36.2
