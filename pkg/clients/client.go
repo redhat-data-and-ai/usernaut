@@ -60,20 +60,41 @@ type Client interface {
 	RemoveUserFromTeam(ctx context.Context, teamID, userID string) error
 }
 
-type Backends struct {
-	// Snowflake map[string]Snowflake
-	Fivetran map[string]*fivetran.FivetranConfig
+// Backend represents a backend service configuration
+type Backend struct {
+	Name       string                 `yaml:"name"`
+	Type       string                 `yaml:"type"`
+	Enabled    bool                   `yaml:"enabled"`
+	Connection map[string]interface{} `yaml:"connection"`
 }
 
-func (backends *Backends) New(name, backendType string) (Client, error) {
+func (b *Backend) GetStringConnection(name string, defaultValue string) string {
+	if val, ok := b.Connection[name].(string); ok {
+		return val
+	}
+	return defaultValue
+}
+
+func New(backendName, backendType string, backends map[string]map[string]Backend) (Client, error) {
+	backend, ok := backends[backendType][backendName]
+	if !ok {
+		return nil, ErrInvalidBackend
+	}
+	if !backend.Enabled {
+		return nil, errors.New("backend is not enabled")
+	}
 	switch strings.ToLower(backendType) {
 	case "fivetran":
-		fivetranConfig := backends.Fivetran[name]
-		if fivetranConfig == nil {
-			return nil, errors.New("fivetran client isn't configured")
+		apiKey := backend.GetStringConnection("apikey", "")
+		apiSecret := backend.GetStringConnection("apisecret", "")
+		if apiKey == "" || apiSecret == "" {
+			return nil, errors.New("missing required connection parameters for fivetran backend")
 		}
-		return fivetran.NewClient(fivetranConfig.ApiKey, fivetranConfig.ApiSecret), nil
+		// Create and return a new Fivetran client
+		// using the API key and secret from the backend configuration
+		return fivetran.NewClient(apiKey, apiSecret), nil
 	default:
+		// If no valid backend type is matched, return an error
 		return nil, ErrInvalidBackend
 	}
 }

@@ -23,35 +23,41 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 )
 
+// Config represents the top-level configuration structure
 type AppConfig struct {
-	Application AppInfo
-	Cache       cache.Config
-	Backends    clients.Backends
+	App        App                                   `yaml:"app"`
+	Cache      cache.Config                          `yaml:"cache"`
+	Backends   []clients.Backend                     `yaml:"backends"`
+	BackendMap map[string]map[string]clients.Backend `yaml:"-"`
 }
 
-type AppInfo struct {
-	Name        string
-	Environment string
+// App represents the application configuration
+type App struct {
+	Name        string `yaml:"name"`
+	Version     string `yaml:"version"`
+	Environment string `yaml:"environment"`
 }
 
 var config *AppConfig
 
-func loadConfig(env string) (*AppConfig, error) {
+func LoadConfig(env string) (*AppConfig, error) {
 	// Init config
 	config = &AppConfig{}
 	err := NewDefaultConfig().Load(env, config)
 	if err != nil {
 		return nil, err
 	}
-	return config, nil
-}
 
-func GetConfig() (*AppConfig, error) {
-	var err error
-	if config == nil {
-		config, err = loadConfig(getOrDefaultEnv())
+	// convert backends to a map for easier access
+	config.BackendMap = make(map[string]map[string]clients.Backend)
+	for _, backend := range config.Backends {
+		if config.BackendMap[backend.Type] == nil {
+			config.BackendMap[backend.Type] = make(map[string]clients.Backend)
+		}
+		config.BackendMap[backend.Type][backend.Name] = backend
 	}
-	return config, err
+
+	return config, nil
 }
 
 func getOrDefaultEnv() string {
@@ -60,4 +66,13 @@ func getOrDefaultEnv() string {
 		return "default"
 	}
 	return env
+}
+
+func GetConfig() (*AppConfig, error) {
+	var err error
+	if config == nil {
+		config, err = LoadConfig(getOrDefaultEnv())
+	}
+
+	return config, err
 }

@@ -1,6 +1,7 @@
-application:
+app:
   name: "usernaut"
-  environment: default
+  version: "0.0.1"
+  environment: "default"
 
 cache:
   driver: "memory"
@@ -14,7 +15,9 @@ cache:
     password: ""
 
 backends:
-  fivetran:
-    fivetran:
-      apiKey: key
-      apiSecret: secret
+- name: fivetran
+  type: "fivetran"
+  enabled: true
+  connection:
+    apiKey: apikey
+    apiSecret: apisecret
