@@ -17,6 +17,8 @@ var (
 const (
 	DriverMemory = "memory"
 	DriverRedis  = "redis"
+
+	NoExpiration = -1 * time.Second
 )
 
 // Cache implements a generic interface for cache clients

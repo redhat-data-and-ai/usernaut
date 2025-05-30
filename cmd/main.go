@@ -17,7 +17,9 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"os"
 
@@ -38,8 +40,10 @@ import (
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/internal/controller"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
+	"github.com/sirupsen/logrus"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -162,6 +166,11 @@ func main() {
 		setupLog.Error(err, "failed to initialize cache")
 	}
 
+	if err = preloadCache(*appConf, cache); err != nil {
+		setupLog.Error(err, "failed to preload cache")
+		os.Exit(1)
+	}
+
 	if err = (&controller.GroupReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
@@ -187,4 +196,114 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// Preload the cache with all the users and teams from the backends
+// This is done to avoid hitting the backend for every request
+// and to improve the performance of the application
+// This is done only once at the start of the application
+// and the cache is flushed when the application is restarted
+func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
+
+	ctx := context.Background()
+
+	for _, backend := range appConfig.Backends {
+		log := logger.Logger(ctx).
+			WithFields(logrus.Fields{
+				"backend":   backend.Name,
+				"type":      backend.Type,
+				"component": "preloadCache",
+			})
+		log.Info("preloading cache with users and teams from backend")
+
+		backendClient, err := clients.New(backend.Name, backend.Type, appConfig.BackendMap)
+		if err != nil {
+			log.WithError(err).Error("failed to create backend client")
+			return err
+		}
+
+		// Fetch all the users and store them in the cache
+		users, _, err := backendClient.FetchAllUsers(ctx)
+		if err != nil {
+			log.WithError(err).Error("failed to fetch users from backend")
+			return err
+		}
+		for _, user := range users {
+			userMap := make(map[string]string)
+			userInCache, err := store.Get(ctx, user.GetEmail())
+			// if user is already in the cache, we will update the user details
+			// with the new user ID from the backend
+			if err == nil {
+				// process user details
+				err = json.Unmarshal([]byte(userInCache.(string)), &userMap)
+				if err != nil {
+					log.WithError(err).Error("failed to unmarshal user details from cache")
+					return err
+				}
+			}
+			userMap[backend.Name+"_"+backend.Type] = user.ID
+			newUserValue, err := json.Marshal(userMap)
+			if err != nil {
+				log.WithError(err).Error("failed to marshal user details to JSON")
+				return err
+			}
+			// Store the user in the cache with email as key
+			// and user ID as value
+			// This is done to avoid hitting the backend for every request
+			// and to improve the performance of the application
+			// The user ID is stored in the cache as a JSON string
+			// so that it can be easily retrieved later
+			// The user ID is stored in the cache with the backend name and type as key
+			err = store.Set(ctx, user.Email, string(newUserValue), cache.NoExpiration)
+			if err != nil {
+				log.WithError(err).Error("failed to store user in cache")
+				return err
+			}
+		}
+
+		// Fetch all the teams and store them in the cache
+		teams, err := backendClient.FetchAllTeams(ctx)
+		if err != nil {
+			log.WithError(err).Error("failed to fetch teams from backend")
+			return err
+		}
+		for _, team := range teams {
+			teamMap := make(map[string]string)
+			teamInCache, err := store.Get(ctx, team.GetName())
+			// if team is already in the cache, we will update the team details
+			// with the new team ID from the backend
+			if err == nil {
+				// process user details
+				err = json.Unmarshal([]byte(teamInCache.(string)), &teamMap)
+				if err != nil {
+					log.WithError(err).Error("failed to unmarshal team details from cache")
+					return err
+				}
+			}
+			teamMap[backend.Name+"_"+backend.Type] = team.ID
+			newTeamValue, err := json.Marshal(teamMap)
+			if err != nil {
+				log.WithError(err).Error("failed to marshal team details to JSON")
+				return err
+			}
+
+			// Store the team in the cache with name as key
+			// and team ID as value
+			// This is done to avoid hitting the backend for every request
+			// and to improve the performance of the application
+			// The team ID is stored in the cache as a JSON string
+			// so that it can be easily retrieved later
+			// The team ID is stored in the cache with the backend name and type as key
+			err = store.Set(ctx, team.Name, string(newTeamValue), cache.NoExpiration)
+			if err != nil {
+				log.WithError(err).Error("failed to store team in cache")
+				return err
+			}
+		}
+		log.WithFields(logrus.Fields{
+			"users": len(users),
+			"teams": len(teams),
+		}).Debug("fetched users and teams from backend")
+	}
+	return nil
 }

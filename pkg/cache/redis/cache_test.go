@@ -9,8 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewRedisInstanceWithNilConfig(t *testing.T) {
-	redis, err := NewCache(nil)
+func TestNewRedisInstanceWithInvalidConfig(t *testing.T) {
+	redis, err := NewCache(&Config{
+		Host: "fakelocalhost",
+		Port: "6379",
+	})
 
 	// since redis server is not running it will return error
 	assert.NotNil(t, err)
