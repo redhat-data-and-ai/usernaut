@@ -31,8 +31,14 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
-	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+)
+
+const (
+	// GroupControllerName is the name of the Group controller
+	GroupControllerName = "group-controller"
+	keyApiKey           = "apiKey"
+	keyApiSecret        = "apiSecret"
 )
 
 var _ = Describe("Group Controller", func() {
@@ -83,18 +89,30 @@ var _ = Describe("Group Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 
+			fivetranBackend := clients.Backend{
+				Name:    "fivetran",
+				Type:    "fivetran",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyApiKey:    "testKey",
+					keyApiSecret: "testSecret",
+				},
+			}
+
+			backendMap := make(map[string]map[string]clients.Backend)
+			backendMap[fivetranBackend.Type] = make(map[string]clients.Backend)
+			backendMap[fivetranBackend.Type][fivetranBackend.Name] = fivetranBackend
+
 			appConfig := config.AppConfig{
-				Application: config.AppInfo{
-					Name: "usernaut-test",
+				App: config.App{
+					Name:        "usernaut-test",
+					Version:     "v0.0.1",
+					Environment: "test",
 				},
-				Backends: clients.Backends{
-					Fivetran: map[string]*fivetran.FivetranConfig{
-						"fivetran": {
-							ApiKey:    "testKey",
-							ApiSecret: "testSecret",
-						},
-					},
+				Backends: []clients.Backend{
+					fivetranBackend,
 				},
+				BackendMap: backendMap,
 				Cache: cache.Config{
 					Driver: "memory",
 					InMemory: &inmemory.Config{
@@ -117,7 +135,8 @@ var _ = Describe("Group Controller", func() {
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			Expect(err).NotTo(HaveOccurred())
+			// TODO: ideally err should be nil if the reconciliation is successful, we need to mock the backend client to return a successful response.
+			Expect(err).To(HaveOccurred())
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
 			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})

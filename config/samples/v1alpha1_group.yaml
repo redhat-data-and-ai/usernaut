@@ -4,11 +4,12 @@ metadata:
   labels:
     app.kubernetes.io/name: usernaut
     app.kubernetes.io/managed-by: kustomize
-  name: group-sample
+  name: platformadmin-group
 spec:
   group_name: platformadmin_group
   members:
-  - vinjain
+  - user1
+  - user2
   backends:
   - name: fivetran
     type: fivetran
