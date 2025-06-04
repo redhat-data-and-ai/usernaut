@@ -3,7 +3,7 @@ module github.com/redhat-data-and-ai/usernaut
 go 1.24.2
 
 require (
-	github.com/alicebob/miniredis/v2 v2.34.0
+	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/fivetran/go-fivetran v1.1.0
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/onsi/ginkgo/v2 v2.22.1
@@ -20,7 +20,6 @@ require (
 
 require (
 	cel.dev/expr v0.18.0 // indirect
-	github.com/alicebob/gopher-json v0.0.0-20230218143504-906a9b012302 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20190424111038-f61b66f89f4a // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
