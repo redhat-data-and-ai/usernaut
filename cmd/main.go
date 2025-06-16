@@ -41,6 +41,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/internal/controller"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
@@ -161,6 +162,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	ldapConn, err := ldap.InitLdap(appConf.LDAP)
+	if err != nil {
+		setupLog.Error(err, "failed to initialize LDAP connection")
+		os.Exit(1)
+	}
+
 	cache, err := cache.New(&appConf.Cache)
 	if err != nil {
 		setupLog.Error(err, "failed to initialize cache")
@@ -176,6 +183,7 @@ func main() {
 		Scheme:    mgr.GetScheme(),
 		AppConfig: appConf,
 		Cache:     cache,
+		LdapConn:  ldapConn,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Group")
 		os.Exit(1)

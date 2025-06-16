@@ -27,3 +27,5 @@ go.work
 *~
 
 appconfig/local.yaml
+
+**/mocks/*

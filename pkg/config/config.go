@@ -21,11 +21,13 @@ import (
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 )
 
 // Config represents the top-level configuration structure
 type AppConfig struct {
 	App        App                                   `yaml:"app"`
+	LDAP       ldap.LDAP                             `yaml:"ldap"`
 	Cache      cache.Config                          `yaml:"cache"`
 	Backends   []clients.Backend                     `yaml:"backends"`
 	BackendMap map[string]map[string]clients.Backend `yaml:"-"`

@@ -33,20 +33,24 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
+	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	AppConfig     *config.AppConfig
-	Cache         cache.Cache
-	log           *logrus.Entry
-	backendLogger *logrus.Entry
+	Scheme          *runtime.Scheme
+	AppConfig       *config.AppConfig
+	Cache           cache.Cache
+	log             *logrus.Entry
+	backendLogger   *logrus.Entry
+	LdapConn        ldap.LDAPClient
+	allLdapUserData map[string]*structs.LDAPUser
 }
 
 // +kubebuilder:rbac:groups=usernaut.dev,resources=groups,verbs=get;list;watch;create;update;patch;delete
@@ -72,6 +76,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	})
 
 	r.log.Info("reconciling the group against the backends")
+
+	// fetch all the data from LDAP for the users in the group
+	r.allLdapUserData = make(map[string]*structs.LDAPUser, 0)
+	for _, user := range groupCR.Spec.Members {
+		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
+		if err != nil {
+			r.log.WithError(err).Error("error fetching user data from LDAP")
+			continue
+		}
+
+		ldapUser := &structs.LDAPUser{}
+		err = utils.MapToStruct(ldapUserData, ldapUser)
+		if err != nil {
+			r.log.WithError(err).Error("error converting LDAP user data to struct")
+			continue
+		}
+
+		r.allLdapUserData[ldapUser.UID] = ldapUser
+	}
 
 	for _, backend := range groupCR.Spec.Backends {
 
@@ -151,8 +174,20 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	usersToRemove := make([]string, 0)
 
 	for _, user := range groupUsers {
+		userDetails := r.allLdapUserData[user]
+		if userDetails == nil {
+			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping processing for this user")
+
+			// we need to check if the user is already in the existing team members
+			if _, exists := existingTeamMembers[user]; exists {
+				r.backendLogger.WithField("user", user).Info("user is already in existing team members, skipping user creation")
+				usersToRemove = append(usersToRemove, user)
+			}
+			continue
+		}
+
 		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, user+"@redhat.com")
+		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
 		if err != nil && err != redis.Nil || userDetailsInCache == "" {
 			r.backendLogger.WithError(err).Error("error fetching user details from cache")
 			return nil, nil, err
@@ -200,11 +235,14 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	backendClient clients.Client) error {
 
 	for _, user := range users {
-		// TODO: this email should be coming from LDAP, should be removed once we have LDAP integration
-		email := user + "@redhat.com"
+		userDetails := r.allLdapUserData[user]
+		if userDetails == nil {
+			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping user creation")
+			continue
+		}
 
 		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, email)
+		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
 		if err == nil && userDetailsInCache != "" {
 			// handle error for below statement
 			if jErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &userDetailsMap); jErr != nil {
@@ -220,11 +258,11 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 
 		// if user details are not found in cache, create a new user in backend
 		newUser, err := backendClient.CreateUser(ctx, &structs.User{
-			Email:     email,
+			Email:     userDetails.GetEmail(),
 			UserName:  user,
 			Role:      fivetran.AccountReviewerRole,
-			FirstName: "Vinamra",
-			LastName:  "Jain",
+			FirstName: userDetails.GetDisplayName(),
+			LastName:  userDetails.GetSN(),
 		})
 		if err != nil {
 			// TODO: handle the error in case user already exists in backend, we need to again populate the cache
@@ -235,7 +273,7 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 
 		userDetailsMap[backendName+"_"+backendType] = newUser.ID
 		toBeUpdated, _ := json.Marshal(userDetailsMap)
-		if err := r.Cache.Set(ctx, email, string(toBeUpdated), cache.NoExpiration); err != nil {
+		if err := r.Cache.Set(ctx, userDetails.GetEmail(), string(toBeUpdated), cache.NoExpiration); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")
 			return err
 		}

@@ -3,6 +3,13 @@ app:
   version: "0.0.1"
   environment: "default"
 
+ldap:
+  server: "ldap://ldap.test.com:389"
+  baseDN: "ou=adhoc,ou=managedGroups,dc=org,dc=com"
+  userDN: "uid=%s,ou=users,dc=org,dc=com"
+  userSearchFilter: "(objectClass=filterClass)"
+  attributes: ["mail", "uid", "cn", "sn", "displayName"]
+
 cache:
   driver: "memory"
   inmemory:
@@ -15,9 +22,9 @@ cache:
     password: ""
 
 backends:
-- name: fivetran
-  type: "fivetran"
-  enabled: true
-  connection:
-    apiKey: apikey
-    apiSecret: apisecret
+  - name: fivetran
+    type: "fivetran"
+    enabled: true
+    connection:
+      apiKey: apikey
+      apiSecret: apisecret

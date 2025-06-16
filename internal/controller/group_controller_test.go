@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	"github.com/golang/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -28,9 +29,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	"github.com/redhat-data-and-ai/usernaut/internal/controller/mocks"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
@@ -109,6 +112,13 @@ var _ = Describe("Group Controller", func() {
 					Version:     "v0.0.1",
 					Environment: "test",
 				},
+				LDAP: ldap.LDAP{
+					Server:           "ldap://ldap.test.com:389",
+					BaseDN:           "ou=adhoc,ou=managedGroups,dc=org,dc=com",
+					UserDN:           "uid=%s,ou=users,dc=org,dc=com",
+					UserSearchFilter: "(objectClass=filteClass)",
+					Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
+				},
 				Backends: []clients.Backend{
 					fivetranBackend,
 				},
@@ -125,11 +135,23 @@ var _ = Describe("Group Controller", func() {
 			cache, err := cache.New(&appConfig.Cache)
 			Expect(err).NotTo(HaveOccurred())
 
+			ctrl := gomock.NewController(GinkgoT())
+			ldapClient := mocks.NewMockLDAPClient(ctrl)
+
+			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
+				"cn":          "Test",
+				"sn":          "User",
+				"displayName": "Test User",
+				"mail":        "testuser@gmail.com",
+				"uid":         "testuser",
+			}, nil).Times(2)
+
 			controllerReconciler := &GroupReconciler{
 				Client:    k8sClient,
 				Scheme:    k8sClient.Scheme(),
 				AppConfig: &appConfig,
 				Cache:     cache,
+				LdapConn:  ldapClient,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{

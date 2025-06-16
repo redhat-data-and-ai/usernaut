@@ -37,3 +37,31 @@ func (u *User) GetDisplayName() string {
 func (u *User) GetRole() string {
 	return u.Role
 }
+
+type LDAPUser struct {
+	CN          string `json:"cn,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	Email       string `json:"mail,omitempty"`
+	SN          string `json:"sn,omitempty"`
+	UID         string `json:"uid,omitempty"`
+}
+
+func (u *LDAPUser) GetCN() string {
+	return u.CN
+}
+
+func (u *LDAPUser) GetDisplayName() string {
+	return u.DisplayName
+}
+
+func (u *LDAPUser) GetEmail() string {
+	return u.Email
+}
+
+func (u *LDAPUser) GetSN() string {
+	return u.SN
+}
+
+func (u *LDAPUser) GetUID() string {
+	return u.UID
+}
