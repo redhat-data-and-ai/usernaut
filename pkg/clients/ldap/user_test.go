@@ -3,6 +3,7 @@ package ldap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/go-ldap/ldap/v3"
@@ -153,4 +154,42 @@ func (suite *LDAPTestSuite) TestGetUserLDAPData_NilConnection() {
 
 	assertions.Error(err)
 	assertions.Nil(resp)
+}
+
+func (suite *LDAPTestSuite) TestGetLdapConnection_Success() {
+
+	addr, stop := startMockLDAPServer(suite.T())
+	defer stop()
+
+	assertions := assert.New(suite.T())
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		userDN:           "uid=%s,ou=users,dc=example,dc=com",
+		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
+		server:           fmt.Sprintf("ldap://%s", addr),
+		userSearchFilter: "(objectClass=uid)",
+		attributes:       []string{"mail"},
+	}
+
+	suite.ldapClient.EXPECT().IsClosing().Return(true).Times(1)
+
+	conn := ldapConn.getConn()
+	assertions.NotNil(conn, "Expected a new LDAP connection to be returned when the existing one is closing")
+}
+
+func (suite *LDAPTestSuite) TestGetLdapConnection_Failure() {
+	assertions := assert.New(suite.T())
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		userDN:           "uid=%s,ou=users,dc=example,dc=com",
+		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=uid)",
+		attributes:       []string{"mail"},
+	}
+
+	suite.ldapClient.EXPECT().IsClosing().Return(true).Times(1)
+
+	conn := ldapConn.getConn()
+	assertions.Nil(conn, "Failure to be returned when the existing one is closing and reconnecting")
 }
