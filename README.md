@@ -1,10 +1,12 @@
 # Usernaut
 
-Usernaut is a service which can be used to manage teams and user accounts across the SaaS universe.
+Usernaut is an Operator that manages user accounts and teams across
+various SaaS platforms, leveraging Kubernetes for orchestration and management.
 
 ## Description
 
-// TODO(user): An in-depth paragraph about your project and overview of use
+Usernaut is designed to simplify the management of user accounts and teams across multiple SaaS platforms by leveraging Kubernetes as the underlying orchestration engine. It provides a unified interface for creating, updating, and deleting user accounts and teams, ensuring consistency and compliance across different services.
+Usernaut uses Custom Resource Definitions (CRDs) to define user accounts and teams, allowing users to manage these resources declaratively. The operator watches for changes in the CRDs and applies the necessary actions to the underlying SaaS platforms.
 
 ## Getting Started
 
