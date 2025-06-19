@@ -2,6 +2,7 @@ package ldap
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -16,8 +17,13 @@ type LDAP struct {
 	Attributes       []string `yaml:"attributes"`
 }
 
+type LDAPConnClient interface {
+	IsClosing() bool
+	Search(*ldap.SearchRequest) (*ldap.SearchResult, error)
+}
+
 type LDAPConn struct {
-	conn             *ldap.Conn
+	conn             LDAPConnClient
 	userDN           string
 	baseDN           string
 	server           string
@@ -46,10 +52,16 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 	}, nil
 }
 
-// GetConn returns the underlying LDAP connection.
-func (l *LDAPConn) getConn() *ldap.Conn {
-	if l.conn.IsClosing() {
-		l.conn, _ = ldap.DialURL(l.server, ldap.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
+// getConn returns the underlying LDAP connection.
+func (l *LDAPConn) getConn() LDAPConnClient {
+	if l.conn != nil && l.conn.IsClosing() {
+		newConn, err := ldap.DialURL(l.server, ldap.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
+		if err != nil {
+			// Log the error and return the existing connection (or nil if no valid connection exists)
+			fmt.Printf("Failed to re-establish LDAP connection: %v\n", err)
+			return nil
+		}
+		l.conn = newConn
 	}
 
 	return l.conn

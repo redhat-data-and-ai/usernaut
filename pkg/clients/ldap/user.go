@@ -25,7 +25,13 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 		nil,
 	)
 
-	resp, err := l.getConn().Search(searchRequest)
+	conn := l.getConn()
+	if conn == nil {
+		log.Error("LDAP connection is nil, cannot perform search")
+		return nil, errors.New("LDAP connection is nil")
+	}
+
+	resp, err := conn.Search(searchRequest)
 	if err != nil {
 		log.WithError(err).Error("failed to search LDAP for user data")
 		return nil, err
