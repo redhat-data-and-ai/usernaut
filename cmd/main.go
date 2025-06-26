@@ -222,6 +222,13 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 				"type":      backend.Type,
 				"component": "preloadCache",
 			})
+
+		// don't preload the cache in case of a disabled backend
+		if !backend.Enabled {
+			log.Warn("Backend is disabled, skipping preload")
+			continue
+		}
+
 		log.Info("preloading cache with users and teams from backend")
 
 		backendClient, err := clients.New(backend.Name, backend.Type, appConfig.BackendMap)

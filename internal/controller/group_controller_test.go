@@ -32,7 +32,6 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/internal/controller/mocks"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
-	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
@@ -92,7 +91,7 @@ var _ = Describe("Group Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 
-			fivetranBackend := clients.Backend{
+			fivetranBackend := config.Backend{
 				Name:    "fivetran",
 				Type:    "fivetran",
 				Enabled: true,
@@ -102,8 +101,8 @@ var _ = Describe("Group Controller", func() {
 				},
 			}
 
-			backendMap := make(map[string]map[string]clients.Backend)
-			backendMap[fivetranBackend.Type] = make(map[string]clients.Backend)
+			backendMap := make(map[string]map[string]config.Backend)
+			backendMap[fivetranBackend.Type] = make(map[string]config.Backend)
 			backendMap[fivetranBackend.Type][fivetranBackend.Name] = fivetranBackend
 
 			appConfig := config.AppConfig{
@@ -119,7 +118,7 @@ var _ = Describe("Group Controller", func() {
 					UserSearchFilter: "(objectClass=filteClass)",
 					Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
 				},
-				Backends: []clients.Backend{
+				Backends: []config.Backend{
 					fivetranBackend,
 				},
 				BackendMap: backendMap,

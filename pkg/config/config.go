@@ -20,17 +20,21 @@ import (
 	"os"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
-	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
 )
 
 // Config represents the top-level configuration structure
 type AppConfig struct {
-	App        App                                   `yaml:"app"`
-	LDAP       ldap.LDAP                             `yaml:"ldap"`
-	Cache      cache.Config                          `yaml:"cache"`
-	Backends   []clients.Backend                     `yaml:"backends"`
-	BackendMap map[string]map[string]clients.Backend `yaml:"-"`
+	App        App          `yaml:"app"`
+	LDAP       ldap.LDAP    `yaml:"ldap"`
+	Cache      cache.Config `yaml:"cache"`
+	Backends   []Backend    `yaml:"backends"`
+	HttpClient struct {
+		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
+		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
+	} `yaml:"httpClient"`
+	BackendMap map[string]map[string]Backend `yaml:"-"`
 }
 
 // App represents the application configuration
@@ -38,6 +42,21 @@ type App struct {
 	Name        string `yaml:"name"`
 	Version     string `yaml:"version"`
 	Environment string `yaml:"environment"`
+}
+
+// Backend represents a backend service configuration
+type Backend struct {
+	Name       string                 `yaml:"name"`
+	Type       string                 `yaml:"type"`
+	Enabled    bool                   `yaml:"enabled"`
+	Connection map[string]interface{} `yaml:"connection"`
+}
+
+func (b *Backend) GetStringConnection(name string, defaultValue string) string {
+	if val, ok := b.Connection[name].(string); ok {
+		return val
+	}
+	return defaultValue
 }
 
 var config *AppConfig
@@ -51,10 +70,10 @@ func LoadConfig(env string) (*AppConfig, error) {
 	}
 
 	// convert backends to a map for easier access
-	config.BackendMap = make(map[string]map[string]clients.Backend)
+	config.BackendMap = make(map[string]map[string]Backend)
 	for _, backend := range config.Backends {
 		if config.BackendMap[backend.Type] == nil {
-			config.BackendMap[backend.Type] = make(map[string]clients.Backend)
+			config.BackendMap[backend.Type] = make(map[string]Backend)
 		}
 		config.BackendMap[backend.Type][backend.Name] = backend
 	}

@@ -1,3 +1,17 @@
+# Copyright 2025.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 app:
   name: "usernaut"
   version: "0.0.1"
@@ -21,6 +35,18 @@ cache:
     database: 0
     password: ""
 
+httpClient:
+  connectionPoolConfig:
+    timeout: 10000
+    keepAliveTimeout: 600000
+    maxIdleConnections: 10
+  hystrixResiliencyConfig:
+    maxConcurrentRequests: 100
+    requestVolumeThreshold: 20
+    circuitBreakerSleepWindow: 5000
+    errorPercentThreshold: 50
+    circuitBreakerTimeout: 10000
+
 backends:
   - name: fivetran
     type: "fivetran"
@@ -28,3 +54,11 @@ backends:
     connection:
       apiKey: apikey
       apiSecret: apisecret
+  - name: rover
+    type: "rover"
+    enabled: true
+    connection:
+      url: "https://rover.test.com"
+      cert_path: "/path/to/usernaut.crt"
+      private_key_path: "/path/to/usernaut.pem"
+      service_account_name: test-service-account
