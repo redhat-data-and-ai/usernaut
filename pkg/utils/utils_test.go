@@ -208,7 +208,7 @@ func TestMapToStruct_InvalidConversions(t *testing.T) {
 func TestMapToStruct_JSONTagWithOptions(t *testing.T) {
 	type TagStruct struct {
 		Name string `json:"name,omitempty"`
-		Age  int    `json:"age,required"`
+		Age  int    `json:"age"`
 	}
 
 	data := map[string]interface{}{

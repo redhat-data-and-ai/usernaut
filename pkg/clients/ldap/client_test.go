@@ -60,7 +60,9 @@ func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 				}
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() {
+					_ = c.Close()
+				}()
 				// Minimal LDAP handshake: just close after a short delay
 				time.Sleep(100 * time.Millisecond)
 			}(conn)
@@ -68,6 +70,6 @@ func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 	}()
 	return ln.Addr().String(), func() {
 		close(done)
-		ln.Close()
+		_ = ln.Close()
 	}
 }

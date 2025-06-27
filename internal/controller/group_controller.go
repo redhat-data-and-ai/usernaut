@@ -212,7 +212,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	}
 
 	// process existing team members to find users to remove
-	for userID, _ := range existingTeamMembers {
+	for userID := range existingTeamMembers {
 		if !slices.Contains(userIDsToSync, userID) {
 			usersToRemove = append(usersToRemove, userID)
 		}

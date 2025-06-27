@@ -62,7 +62,8 @@ func (suite *LDAPTestSuite) TestGetUserLDAPData() {
 	}
 
 	assertions.Equal("uid=%s,ou=users,dc=example,dc=com", ldapConn.GetUserDN(), "Expected userDN to match the format")
-	assertions.Equal("ou=adhoc,ou=managedGroups,dc=example,dc=com", ldapConn.GetBaseDN(), "Expected baseDN to match the format")
+	assertions.Equal("ou=adhoc,ou=managedGroups,dc=example,dc=com",
+		ldapConn.GetBaseDN(), "Expected baseDN to match the format")
 
 	resp, err := ldapConn.GetUserLDAPData(suite.ctx, "testuser")
 
@@ -130,7 +131,8 @@ func (suite *LDAPTestSuite) TestSearchError() {
 	}
 
 	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(1)
-	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(nil, ldap.NewError(ldap.LDAPResultOperationsError, errors.New("search error"))).Times(1)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).
+		Return(nil, ldap.NewError(ldap.LDAPResultOperationsError, errors.New("search error"))).Times(1)
 
 	resp, err := ldapConn.GetUserLDAPData(suite.ctx, "testuser")
 

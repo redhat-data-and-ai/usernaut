@@ -64,14 +64,14 @@ func TestLoadConfigFromYAML(t *testing.T) {
 
 	key := "CACHE_REDIS_PASSWORD"
 
-	os.Setenv(key, "redispassword")
+	_ = os.Setenv(key, "redispassword")
 
 	err := NewConfig(NewOptions("yaml", "./testdata", "default")).Load("dev", &c)
 	assert.Nil(t, err)
 
 	assertConfigs(t, &c)
 
-	os.Unsetenv(key)
+	_ = os.Unsetenv(key)
 }
 
 func TestLoadConfigFromTOML(t *testing.T) {
@@ -79,18 +79,18 @@ func TestLoadConfigFromTOML(t *testing.T) {
 
 	key := "CACHE_REDIS_PASSWORD"
 
-	os.Setenv(key, "redispassword")
+	_ = os.Setenv(key, "redispassword")
 
 	err := NewConfig(NewOptions("toml", "./testdata", "defaulttoml")).Load("devtoml", &c)
 	assert.Nil(t, err)
 
 	assertConfigs(t, &c)
 
-	os.Unsetenv(key)
+	_ = os.Unsetenv(key)
 }
 
 func assertConfigs(t *testing.T, c *TestConfig) {
-	// assert that app environment got overriden with dev.toml
+	// assert that app environment got overridden with dev.toml
 	assert.Equal(t, "dev", c.AppEnv)
 
 	// asserts that cache driver is redis

@@ -13,6 +13,7 @@ defaults:
 permissions:
   contents: read
   checks: write # Used to annotate code in the PR
+  pull-requests: read
 
 jobs:
   build:
@@ -42,6 +43,15 @@ jobs:
               failed=1
           fi
           echo "$gofmt_out"
+      - name: mockgen
+        run: |
+          make mockgen
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6.0.1
+        with:
+          install-mode: "goinstall"
+          version: v1.64.8
+          
   unit-tests:
     name: unit-tests
     runs-on: ubuntu-latest

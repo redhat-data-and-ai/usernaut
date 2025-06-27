@@ -14,7 +14,8 @@ import (
 // returns 2 maps where:
 // 1st map will have ID as key in order to map with team membership response
 // and 2nd will have email as key
-func (fc *FivetranClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
+func (fc *FivetranClient) FetchAllUsers(ctx context.Context) (
+	map[string]*structs.User, map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithField("service", "fivetran")
 
 	usersEmailMap := make(map[string]*structs.User, 0)
