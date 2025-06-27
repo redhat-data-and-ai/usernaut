@@ -22,7 +22,9 @@ import (
 	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
+	redhatrover "github.com/redhat-data-and-ai/usernaut/pkg/clients/redhat_rover"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
 var (
@@ -60,22 +62,7 @@ type Client interface {
 	RemoveUserFromTeam(ctx context.Context, teamID, userID string) error
 }
 
-// Backend represents a backend service configuration
-type Backend struct {
-	Name       string                 `yaml:"name"`
-	Type       string                 `yaml:"type"`
-	Enabled    bool                   `yaml:"enabled"`
-	Connection map[string]interface{} `yaml:"connection"`
-}
-
-func (b *Backend) GetStringConnection(name string, defaultValue string) string {
-	if val, ok := b.Connection[name].(string); ok {
-		return val
-	}
-	return defaultValue
-}
-
-func New(backendName, backendType string, backends map[string]map[string]Backend) (Client, error) {
+func New(backendName, backendType string, backends map[string]map[string]config.Backend) (Client, error) {
 	backend, ok := backends[backendType][backendName]
 	if !ok {
 		return nil, ErrInvalidBackend
@@ -93,6 +80,14 @@ func New(backendName, backendType string, backends map[string]map[string]Backend
 		// Create and return a new Fivetran client
 		// using the API key and secret from the backend configuration
 		return fivetran.NewClient(apiKey, apiSecret), nil
+	case "rover":
+		appConfig, err := config.GetConfig()
+		if err != nil {
+			return nil, err
+		}
+
+		return redhatrover.NewClient(backend.Connection,
+			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
 	default:
 		// If no valid backend type is matched, return an error
 		return nil, ErrInvalidBackend
