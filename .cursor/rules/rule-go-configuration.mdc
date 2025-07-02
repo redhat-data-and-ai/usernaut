@@ -1,0 +1,97 @@
+---
+description: Configuration management best practices in Go applications
+globs: 
+alwaysApply: false
+---
+# Cursor Rule: Go Configuration Management
+
+## Rule ID: GO-CONF-001
+
+### Description: Viper for Configuration Loading and Precedence
+
+- Use `github.com/spf13/viper` for robust configuration management.
+- Configure Viper to read from multiple sources with this precedence:
+  1. Command-line flags (`github.com/spf13/pflag`).
+  2. Environment variables (`viper.AutomaticEnv()`, `viper.SetEnvKeyReplacer`, `viper.SetEnvPrefix`).
+  3. Configuration files (YAML, JSON, TOML, etc.) in `/etc/<appname>/`, `$HOME/.<appname>`, or the working directory.
+  4. Default values set in code.
+- Use `viper.BindPFlags(pflag.CommandLine)` to unify flag and config management.
+
+## Rule ID: GO-CONF-002
+
+### Description: Configuration Structs and Field Tags
+
+- Define Go structs that mirror the configuration schema (e.g., `type Config struct { ... }`).
+- Use `viper.Unmarshal(&configStruct)` to load configuration values into the struct.
+- Use struct field tags (e.g., `mapstructure:"db_host"` or `yaml:"db_host"`) if configuration keys differ from struct field names.
+
+## Rule ID: GO-CONF-003
+
+### Description: Value Substitution for env| and file| Patterns
+
+- After unmarshalling, recursively walk the config struct/map and perform substitutions for all string fields matching these patterns:
+  - `env|VARNAME`: Substitute with the value of the environment variable `VARNAME`.
+  - `file|/path/to/secret`: Substitute with the contents of the file at `/path/to/secret` (trimmed of whitespace).
+- If the environment variable or file does not exist, handle gracefully (empty string or error message).
+- Substitution is recursive and applies to all nested structs, maps, and slices.
+
+## Rule ID: GO-CONF-004
+
+### Description: Command-line Flags with Pflag
+
+- Use `github.com/spf13/pflag` for parsing command-line flags.
+- Bind flags to Viper for unified precedence and override capability.
+- Define flags for essential parameters like configuration file paths, environment, etc.
+
+## Rule ID: GO-CONF-005
+
+### Description: Externalize Configuration and Secret Handling
+
+- Avoid hardcoding configuration values. Provide default configurations in source control (e.g., `config.yaml.example`), but load actual runtime configuration from external sources (files, environment variables, config maps) appropriate for the deployment environment.
+- Any field marked as sensitive (e.g., passwords, API keys) should fetch the value from a file mounted via Kubernetes secrets using the `file|` pattern, not from environment variables or config files directly.
+- Document which fields are sensitive and require externalization.
+
+## Rule ID: GO-CONF-006
+
+### Description: Edge Cases and Best Practices
+
+- If a substitution pattern is used for a non-string field, log a warning and skip substitution.
+- If a file referenced by `file|` is missing or unreadable, log an error and substitute with an empty string or error message.
+- If an environment variable referenced by `env|` is missing, log a warning and substitute with an empty string or error message.
+- Always trim whitespace from file contents when substituting.
+- Support for both YAML and TOML (and other formats supported by Viper).
+- Provide clear error messages for misconfigurations.
+
+## Rule ID: GO-CONF-007
+
+### Description: Security and Documentation
+
+- Never commit real secrets to source control. Use `file|` for secrets in production.
+- Document all required environment variables and secret file paths in your README or deployment docs.
+
+## Example Usage
+
+**YAML config:**
+
+```yaml
+cache:
+  redis:
+    host: file|/etc/secrets/redis_host
+    password: env|CACHE_REDIS_PASSWORD
+```
+
+**Go struct:**
+
+```go
+type RedisConfig struct {
+    Host     string `yaml:"host"`
+    Password string `yaml:"password"`
+}
+```
+
+**Command-line flag binding:**
+
+```go
+pflag.String("config", "", "Path to config file")
+viper.BindPFlags(pflag.CommandLine)
+```

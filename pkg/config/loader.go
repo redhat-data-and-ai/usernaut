@@ -17,8 +17,10 @@ limitations under the License.
 package config
 
 import (
+	"fmt"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
 	"strings"
 
@@ -31,6 +33,8 @@ const (
 	DefaultConfigDir      = "./appconfig"
 	DefaultConfigFileName = "default"
 	WorkDirEnv            = "WORKDIR"
+	EnvPrefix             = "env|"
+	FilePrefix            = "file|"
 )
 
 // Options is config options.
@@ -82,6 +86,81 @@ func (c *Config) Load(env string, config interface{}) error {
 	return c.loadByConfigName(env, config)
 }
 
+// SubstituteConfigValues recursively walks through the config struct and replaces
+// string values of the form 'env|VAR' or 'file|/path' with the corresponding value.
+func SubstituteConfigValues(v reflect.Value) {
+	if !v.IsValid() {
+		return
+	}
+	// If it's a pointer, resolve it
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return
+		}
+		SubstituteConfigValues(v.Elem())
+		return
+	}
+	// If it's a struct, process its fields
+	if v.Kind() == reflect.Struct {
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Field(i)
+			if field.CanSet() || field.Kind() == reflect.Ptr ||
+				field.Kind() == reflect.Struct || field.Kind() == reflect.Map ||
+				field.Kind() == reflect.Slice {
+				SubstituteConfigValues(field)
+			}
+		}
+		return
+	}
+	// If it's a map, process its values
+	if v.Kind() == reflect.Map {
+		for _, key := range v.MapKeys() {
+			val := v.MapIndex(key)
+			if val.Kind() == reflect.Interface && !val.IsNil() {
+				val = val.Elem()
+			}
+			// Only settable if map value is addressable, so we replace by setting
+			if val.Kind() == reflect.String {
+				newVal := reflect.ValueOf(substituteString(val.String()))
+				v.SetMapIndex(key, newVal)
+			} else {
+				// Recursively process nested maps/structs
+				copyVal := reflect.New(val.Type()).Elem()
+				copyVal.Set(val)
+				SubstituteConfigValues(copyVal)
+				v.SetMapIndex(key, copyVal)
+			}
+		}
+		return
+	}
+	// If it's a slice or array, process its elements
+	if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
+		for i := 0; i < v.Len(); i++ {
+			SubstituteConfigValues(v.Index(i))
+		}
+		return
+	}
+	// If it's a string, substitute if needed
+	if v.Kind() == reflect.String && v.CanSet() {
+		v.SetString(substituteString(v.String()))
+	}
+}
+
+// substituteString replaces 'env|VAR' and 'file|/path' patterns with their values
+func substituteString(s string) string {
+	if len(s) > len(EnvPrefix) && s[:len(EnvPrefix)] == EnvPrefix {
+		return os.Getenv(s[len(EnvPrefix):])
+	}
+	if len(s) > len(FilePrefix) && s[:len(FilePrefix)] == FilePrefix {
+		b, err := os.ReadFile(s[len(FilePrefix):])
+		if err != nil {
+			panic(fmt.Sprintf("ERROR: %v", err))
+		}
+		return strings.TrimSpace(string(b))
+	}
+	return s
+}
+
 // loadByConfigName reads configuration from file and unmarshalls into config.
 func (c *Config) loadByConfigName(configName string, config interface{}) error {
 	c.viper.SetConfigName(configName)
@@ -92,5 +171,10 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 	if err := c.viper.ReadInConfig(); err != nil {
 		return err
 	}
-	return c.viper.Unmarshal(config)
+	if err := c.viper.Unmarshal(config); err != nil {
+		return err
+	}
+	// Substitute env| and file| values after unmarshalling
+	SubstituteConfigValues(reflect.ValueOf(config))
+	return nil
 }

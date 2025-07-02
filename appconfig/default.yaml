@@ -52,8 +52,8 @@ backends:
     type: "fivetran"
     enabled: true
     connection:
-      apiKey: apikey
-      apiSecret: apisecret
+      apiKey: file|/path/to/fivetran_key
+      apiSecret: file|/path/to/fivetran_secret
   - name: rover
     type: "rover"
     enabled: true

@@ -18,6 +18,7 @@ package config
 
 import (
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,6 +88,32 @@ func TestLoadConfigFromTOML(t *testing.T) {
 	assertConfigs(t, &c)
 
 	_ = os.Unsetenv(key)
+}
+
+func TestFileSubstitution(t *testing.T) {
+	// Create a temp file with a secret value
+	secretValue := "supersecretfilevalue"
+	tmpfile, err := os.CreateTemp("", "secretfile-*.txt")
+	assert.Nil(t, err)
+	defer func() {
+		_ = os.Remove(tmpfile.Name())
+	}()
+	_, err = tmpfile.Write([]byte(secretValue))
+	assert.Nil(t, err)
+	_ = tmpfile.Close()
+
+	type FileConfig struct {
+		Secret string
+	}
+
+	fileConfig := FileConfig{}
+	// Simulate what would be loaded from YAML
+	fileConfig.Secret = "file|" + tmpfile.Name()
+
+	// Substitute
+	SubstituteConfigValues(reflect.ValueOf(&fileConfig))
+
+	assert.Equal(t, secretValue, fileConfig.Secret)
 }
 
 func assertConfigs(t *testing.T, c *TestConfig) {
