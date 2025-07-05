@@ -83,7 +83,11 @@ func (c *Config) Load(env string, config interface{}) error {
 	if err := c.loadByConfigName(c.opts.defaultConfigFileName, config); err != nil {
 		return err
 	}
-	return c.loadByConfigName(env, config)
+	if err := c.loadByConfigName(env, config); err != nil {
+		return err
+	}
+	SubstituteConfigValues(reflect.ValueOf(config))
+	return nil
 }
 
 // SubstituteConfigValues recursively walks through the config struct and replaces
@@ -174,7 +178,5 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 	if err := c.viper.Unmarshal(config); err != nil {
 		return err
 	}
-	// Substitute env| and file| values after unmarshalling
-	SubstituteConfigValues(reflect.ValueOf(config))
 	return nil
 }

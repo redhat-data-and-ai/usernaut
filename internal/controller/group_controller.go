@@ -53,9 +53,10 @@ type GroupReconciler struct {
 	allLdapUserData map[string]*structs.LDAPUser
 }
 
-// +kubebuilder:rbac:groups=usernaut.dev,resources=groups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=usernaut.dev,resources=groups/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=usernaut.dev,resources=groups/finalizers,verbs=update
+//nolint:lll
+// +kubebuilder:rbac:groups=usernaut.dev,namespace=usernaut,resources=groups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=usernaut.dev,namespace=usernaut,resources=groups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=usernaut.dev,namespace=usernaut,resources=groups/finalizers,verbs=update
 
 func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	ctx = logger.WithRequestId(ctx, controller.ReconcileIDFromContext(ctx))
