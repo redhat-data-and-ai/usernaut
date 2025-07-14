@@ -55,7 +55,7 @@ func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 				members[strings.ToLower(granteeName)] = &structs.User{
 					ID:       strings.ToLower(granteeName),
 					UserName: strings.ToLower(granteeName),
-					Email:    strings.ToLower(granteeName), // Snowflake typically uses usernames
+					Email:    "", // Email not available from grants API
 				}
 			}
 		}
