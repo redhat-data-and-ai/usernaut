@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -93,7 +94,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 
-		r.allLdapUserData[ldapUser.UID] = ldapUser
+		r.allLdapUserData[strings.ToLower(ldapUser.UID)] = ldapUser
 	}
 
 	for _, backend := range groupCR.Spec.Backends {
@@ -174,54 +175,65 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	usersToRemove := make([]string, 0)
 
 	for _, user := range groupUsers {
-		userDetails := r.allLdapUserData[user]
+		userDetails := r.allLdapUserData[strings.ToLower(user)]
 		if userDetails == nil {
 			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping processing for this user")
 
 			// we need to check if the user is already in the existing team members
-			if _, exists := existingTeamMembers[user]; exists {
+			if _, exists := existingTeamMembers[strings.ToLower(user)]; exists {
 				r.backendLogger.WithField("user", user).Info("user is already in existing team members, skipping user creation")
-				usersToRemove = append(usersToRemove, user)
+				usersToRemove = append(usersToRemove, strings.ToLower(user))
 			}
 			continue
 		}
 
 		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
-		if err != nil && err != redis.Nil || userDetailsInCache == "" {
+		userDetailsInCache, err := r.Cache.Get(ctx, strings.ToLower(userDetails.GetEmail()))
+		if err != nil && err != redis.Nil {
 			r.backendLogger.WithError(err).Error("error fetching user details from cache")
 			return nil, nil, err
 		}
 
-		userDetailsStr, ok := userDetailsInCache.(string)
-		if !ok {
-			r.backendLogger.WithField("user", user).Error("user details in cache are not of type string")
-			return nil, nil, errors.New("user details in cache are not of type string")
+		// If user found in cache, parse and check for backend-specific user ID
+		if err == nil && userDetailsInCache != "" {
+			userDetailsStr, ok := userDetailsInCache.(string)
+			if !ok {
+				r.backendLogger.WithField("user", user).Error("user details in cache are not of type string")
+				return nil, nil, errors.New("user details in cache are not of type string")
+			}
+
+			if jErr := json.Unmarshal([]byte(userDetailsStr), &userDetailsMap); jErr != nil {
+				r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
+				return nil, nil, jErr
+			}
+
+			userID := userDetailsMap[backendName+"_"+backendType]
+			if userID != "" {
+				userIDsToSync = append(userIDsToSync, strings.ToLower(userID))
+				continue
+			}
 		}
 
-		if jErr := json.Unmarshal([]byte(userDetailsStr), &userDetailsMap); jErr != nil {
-			r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
-			return nil, nil, jErr
-		}
-		userID := userDetailsMap[backendName+"_"+backendType]
-		if userID == "" {
-			r.backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
-			return nil, nil, errors.New("user ID not found in cache")
-		}
-		userIDsToSync = append(userIDsToSync, userID)
+		// If we reach here, user not found in cache - this is expected for new users
+		r.backendLogger.WithField("user", user).Debug("user not found in cache, will be created in createUsersInBackendAndCache")
 	}
 
 	// process existing team members to find users to remove
 	for userID := range existingTeamMembers {
-		if !slices.Contains(userIDsToSync, userID) {
-			usersToRemove = append(usersToRemove, userID)
+		if !slices.Contains(userIDsToSync, strings.ToLower(userID)) {
+			usersToRemove = append(usersToRemove, strings.ToLower(userID))
 		}
 	}
 
 	// process group users to find users to add
 	// if user is not present in existing team members, then add the user to the team
+	existingMemberIDs := make([]string, 0, len(existingTeamMembers))
+	for memberID := range existingTeamMembers {
+		existingMemberIDs = append(existingMemberIDs, strings.ToLower(memberID))
+	}
+
 	for _, userID := range userIDsToSync {
-		if _, exists := existingTeamMembers[userID]; !exists {
+		if !slices.Contains(existingMemberIDs, userID) {
 			usersToAdd = append(usersToAdd, userID)
 		}
 	}
@@ -235,16 +247,16 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	backendClient clients.Client) error {
 
 	for _, user := range users {
-		userDetails := r.allLdapUserData[user]
+		userDetails := r.allLdapUserData[strings.ToLower(user)]
 		if userDetails == nil {
 			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping user creation")
 			continue
 		}
 
 		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
+		userDetailsInCache, err := r.Cache.Get(ctx, strings.ToLower(userDetails.GetEmail()))
 		if err == nil && userDetailsInCache != "" {
-			// handle error for below statement
+			// Load existing cache data to merge with new data
 			if jErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &userDetailsMap); jErr != nil {
 				r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
 				return jErr
@@ -265,15 +277,26 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			LastName:  userDetails.GetSN(),
 		})
 		if err != nil {
-			// TODO: handle the error in case user already exists in backend, we need to again populate the cache
-			r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
-			return err
+			// Handle the case where user already exists in backend - fetch the existing user and populate cache
+			if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "Conflict") {
+				r.backendLogger.WithField("user", user).Info("user already exists in backend, fetching existing user details")
+				existingUser, fetchErr := backendClient.FetchUserDetails(ctx, user)
+				if fetchErr != nil {
+					r.backendLogger.WithField("user", user).WithError(fetchErr).Error("error fetching existing user details")
+					return fetchErr
+				}
+				userDetailsMap[backendName+"_"+backendType] = existingUser.ID
+				r.backendLogger.WithField("user", user).Info("fetched existing user details and updated cache")
+			} else {
+				r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
+				return err
+			}
+		} else {
+			r.backendLogger.WithField("user", user).Info("created user in backend successfully")
+			userDetailsMap[backendName+"_"+backendType] = newUser.ID
 		}
-		r.backendLogger.WithField("user", user).Info("created user in backend successfully")
-
-		userDetailsMap[backendName+"_"+backendType] = newUser.ID
 		toBeUpdated, _ := json.Marshal(userDetailsMap)
-		if err := r.Cache.Set(ctx, userDetails.GetEmail(), string(toBeUpdated), cache.NoExpiration); err != nil {
+		if err := r.Cache.Set(ctx, strings.ToLower(userDetails.GetEmail()), string(toBeUpdated), cache.NoExpiration); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")
 			return err
 		}
@@ -289,7 +312,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 
 	teamDetailsMap := make(map[string]string)
 
-	teamDetailsInCache, err := r.Cache.Get(ctx, groupName)
+	teamDetailsInCache, err := r.Cache.Get(ctx, strings.ToLower(groupName))
 	if err == nil && teamDetailsInCache != "" {
 		if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
 			r.backendLogger.WithError(jErr).Error("error unmarshalling team details from cache")
@@ -320,7 +343,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Create the team in cache
 	teamDetailsMap[backendName+"_"+backendType] = newTeam.ID
 	toBeUpdated, _ := json.Marshal(teamDetailsMap)
-	if err := r.Cache.Set(ctx, groupName, string(toBeUpdated), cache.NoExpiration); err != nil {
+	if err := r.Cache.Set(ctx, strings.ToLower(groupName), string(toBeUpdated), cache.NoExpiration); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in cache")
 		return "", err
 	}
