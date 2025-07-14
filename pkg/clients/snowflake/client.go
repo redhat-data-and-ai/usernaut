@@ -74,6 +74,7 @@ func (c *SnowflakeClient) sendRequest(ctx context.Context,
 	int, error) {
 	var requestBody []byte
 	if body != nil && (method != http.MethodGet && method != http.MethodDelete) {
+		var err error
 		requestBody, err = json.Marshal(body)
 		if err != nil {
 			return nil, nil, 0, err
