@@ -1,3 +1,19 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package snowflake
 
 import (
@@ -60,13 +76,8 @@ func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 		return nil, fmt.Errorf("failed to create role, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
 
-	// Parse response to get created role details
-	var response map[string]interface{}
-	if err := json.Unmarshal(resp, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse create role response: %w", err)
-	}
-
-	// Return the created team
+	// Return the created team using the request data since Snowflake API
+	// returns minimal information in create response
 	createdTeam := &structs.Team{
 		ID:   team.Name,
 		Name: team.Name,

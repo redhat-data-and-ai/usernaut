@@ -1,3 +1,19 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package snowflake
 
 import (
@@ -21,7 +37,8 @@ type SnowflakeUser struct {
 // 1. First call /api/v2/users - returns first page + Link header with result ID
 // 2. Subsequent calls /api/v2/results/{result_id}?page=N - returns additional pages
 // Returns 2 maps: 1st map keyed by ID, 2nd map keyed by email
-func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
+func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User,
+	map[string]*structs.User, error) {
 	resultByID := make(map[string]*structs.User)
 	resultByEmail := make(map[string]*structs.User)
 
@@ -73,7 +90,8 @@ func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*struct
 }
 
 // processUsersPage processes a page of users and adds them to both result maps
-func (c *SnowflakeClient) processUsersPage(resp []byte, resultByID map[string]*structs.User, resultByEmail map[string]*structs.User) error {
+func (c *SnowflakeClient) processUsersPage(resp []byte, resultByID map[string]*structs.User,
+	resultByEmail map[string]*structs.User) error {
 	// Parse the response using type-safe struct unmarshaling
 	var users []SnowflakeUser
 	if err := json.Unmarshal(resp, &users); err != nil {
@@ -152,23 +170,17 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 		return nil, fmt.Errorf("failed to fetch user details, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
 
-	// Parse the response
-	var response map[string]interface{}
-	if err := json.Unmarshal(resp, &response); err != nil {
+	// Parse the response using strongly-typed struct
+	var userResponse SnowflakeUser
+	if err := json.Unmarshal(resp, &userResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse user response: %w", err)
 	}
 
 	user := &structs.User{
-		ID:       userID,
-		UserName: userID,
-	}
-
-	// Extract user details from response
-	if email, ok := response["email"].(string); ok {
-		user.Email = email
-	}
-	if displayName, ok := response["displayName"].(string); ok {
-		user.DisplayName = displayName
+		ID:          userID,
+		UserName:    userID,
+		Email:       userResponse.Email,
+		DisplayName: userResponse.DisplayName,
 	}
 
 	return user, nil
