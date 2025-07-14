@@ -72,9 +72,12 @@ func NewClient(config SnowflakeConfig, poolCfg httpclient.ConnectionPoolConfig,
 func (c *SnowflakeClient) sendRequest(ctx context.Context,
 	endpoint, method string, body interface{}) ([]byte, http.Header,
 	int, error) {
-	requestBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, nil, 0, err
+	var requestBody []byte
+	if body != nil && (method != http.MethodGet && method != http.MethodDelete) {
+		requestBody, err = json.Marshal(body)
+		if err != nil {
+			return nil, nil, 0, err
+		}
 	}
 
 	url := c.config.BaseURL + endpoint
