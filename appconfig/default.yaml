@@ -81,3 +81,27 @@ backends:
       cert_path: "/path/to/usernaut.crt"
       private_key_path: "/path/to/usernaut.pem"
       service_account_name: test-service-account
+  - name: test
+    type: "snowflake"
+    enabled: true
+    connection: 
+      pat: pat
+      base_url: base_url
+  - name: dev
+    type: "snowflake"
+    enabled: true
+    connection: 
+      pat: pat
+      base_url: base_url
+  - name: preprod
+    type: "snowflake"
+    enabled: true
+    connection: 
+      pat: pat
+      base_url: base_url
+  - name: prod
+    type: "snowflake"
+    enabled: true
+    connection: 
+      pat: pat
+      base_url: base_url
