@@ -30,6 +30,12 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
 )
 
+// Compiled regex patterns for Link header parsing (performance optimization)
+var (
+	linkPattern    = regexp.MustCompile(`<([^>]+)>\s*;\s*(?:[^,]*;\s*)*rel="([^"]+)"(?:\s*;[^,]*)*`)
+	reversePattern = regexp.MustCompile(`<([^>]+)>\s*;\s*rel="([^"]+)"(?:\s*;[^,]*)*`)
+)
+
 // SnowflakeConfig holds the configuration for Snowflake client
 type SnowflakeConfig struct {
 	PAT     string
@@ -43,7 +49,8 @@ type SnowflakeClient struct {
 }
 
 // NewClient creates a new Snowflake client with the given configuration
-func NewClient(config SnowflakeConfig, poolCfg httpclient.ConnectionPoolConfig, hystrixCfg httpclient.HystrixResiliencyConfig) (*SnowflakeClient, error) {
+func NewClient(config SnowflakeConfig, poolCfg httpclient.ConnectionPoolConfig,
+	hystrixCfg httpclient.HystrixResiliencyConfig) (*SnowflakeClient, error) {
 	client, err := httpclient.InitializeClient(
 		"snowflake",
 		poolCfg,
@@ -62,7 +69,9 @@ func NewClient(config SnowflakeConfig, poolCfg httpclient.ConnectionPoolConfig, 
 }
 
 // sendRequest sends a HTTP request to the Snowflake REST API and returns response body, headers, and status
-func (c *SnowflakeClient) sendRequest(ctx context.Context, endpoint, method string, body interface{}) ([]byte, http.Header, int, error) {
+func (c *SnowflakeClient) sendRequest(ctx context.Context,
+	endpoint, method string, body interface{}) ([]byte, http.Header,
+	int, error) {
 	requestBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, nil, 0, err
@@ -82,7 +91,7 @@ func (c *SnowflakeClient) sendRequest(ctx context.Context, endpoint, method stri
 	if err != nil {
 		return nil, nil, http.StatusBadGateway, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -100,7 +109,6 @@ func (c *SnowflakeClient) sendRequest(ctx context.Context, endpoint, method stri
 func parseLinkHeader(linkHeader, rel string) string {
 	// RFC 5988 compliant regex pattern for Link header parsing
 	// Matches: <url>; rel="value" (with optional whitespace and other parameters)
-	linkPattern := regexp.MustCompile(`<([^>]+)>\s*;\s*(?:[^,]*;\s*)*rel="([^"]+)"(?:\s*;[^,]*)*`)
 	matches := linkPattern.FindAllStringSubmatch(linkHeader, -1)
 
 	for _, match := range matches {
@@ -110,7 +118,6 @@ func parseLinkHeader(linkHeader, rel string) string {
 	}
 
 	// Also try the reverse pattern: rel="value" before other parameters
-	reversePattern := regexp.MustCompile(`<([^>]+)>\s*;\s*rel="([^"]+)"(?:\s*;[^,]*)*`)
 	reverseMatches := reversePattern.FindAllStringSubmatch(linkHeader, -1)
 
 	for _, match := range reverseMatches {

@@ -27,7 +27,8 @@ import (
 )
 
 // FetchTeamMembersByTeamID fetches team members for a given team ID using the correct REST API endpoint
-func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error) {
+func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
+	teamID string) (map[string]*structs.User, error) {
 	// Use the correct endpoint: grants-of (not grants-on)
 	endpoint := fmt.Sprintf("/api/v2/roles/%s/grants-of", teamID)
 
@@ -36,7 +37,8 @@ func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context, teamID s
 		return nil, fmt.Errorf("error making request to fetch team members: %w", err)
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch team members, status: %s, body: %s", http.StatusText(status), string(response))
+		return nil,
+			fmt.Errorf("failed to fetch team members, status: %s, body: %s", http.StatusText(status), string(response))
 	}
 
 	var grants []map[string]interface{}
