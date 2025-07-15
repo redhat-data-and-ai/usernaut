@@ -276,6 +276,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 
 		// If we reach here, user not found in cache - this is expected for new users
 		r.backendLogger.WithField("user", user).Debug("user not found in cache, will be created in createUsersInBackendAndCache")
+		userIDsToSync = append(userIDsToSync, strings.ToLower(user))
 	}
 
 	// process existing team members to find users to remove
