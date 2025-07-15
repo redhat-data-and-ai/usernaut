@@ -68,7 +68,8 @@ func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*struct
 				return nil, nil, err
 			}
 			if status != http.StatusOK {
-				return nil, nil, fmt.Errorf("unexpected status during pagination: %s, body: %s", http.StatusText(status), string(resp))
+				return nil, nil,
+					fmt.Errorf("unexpected status during pagination: %s, body: %s", http.StatusText(status), string(resp))
 			}
 
 			// Process this page
