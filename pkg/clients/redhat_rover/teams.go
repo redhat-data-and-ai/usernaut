@@ -63,7 +63,9 @@ func (rC *RoverClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 		http.MethodPost, roverGroup,
 		headers, "backend.redhatrover.CreateTeam")
 	if err != nil {
-		return nil, err
+		if respCode != http.StatusForbidden {
+			return nil, err
+		}
 	}
 
 	// API return 403 Forbidden if the group already exists.
