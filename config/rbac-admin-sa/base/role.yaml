@@ -1,0 +1,27 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: role
+    app.kubernetes.io/instance: usernaut-admin-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/part-of: usernaut
+  name: usernaut-admin-role
+rules:
+# access to all verbs on the usernaut-* namespace
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - "*"
+  resourceNames:
+  - replace
+# access to all verbs on all custom resources belonging to the usernaut
+- apiGroups:
+  - operator.dataverse.redhat.com
+  resources:
+  - "*"
+  verbs:
+  - "*"

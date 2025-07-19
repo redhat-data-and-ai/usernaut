@@ -1,0 +1,12 @@
+resources:
+  - ../../base
+
+namespace: usernaut-platformtest
+
+patchesJson6902:
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: Role
+      name: usernaut-admin-role
+    path: patches/usernaut-role-patch.yaml
