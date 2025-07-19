@@ -2,7 +2,6 @@
 # used to generate the 'manifests/' directory in a bundle.
 resources:
 - bases/usernaut.clusterserviceversion.yaml
-- ../default
 - ../samples
 - ../scorecard
 
