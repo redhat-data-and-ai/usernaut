@@ -1,0 +1,9 @@
+nameSuffix: -platformtest
+
+namespace: platformtest
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/manager-deployment-env.yaml
