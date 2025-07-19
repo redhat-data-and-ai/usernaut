@@ -1,0 +1,9 @@
+nameSuffix: -prod
+
+namespace: usernaut
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/manager-deployment-env.yaml
