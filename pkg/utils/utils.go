@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
 // MapToStruct populates a struct with values from a map using json tags
@@ -250,4 +253,45 @@ func setMap(field reflect.Value, value interface{}) error {
 
 	field.Set(resultMap)
 	return nil
+}
+
+// Process output string by substituting capture groups and handling special cases like replace(-,_)
+func processGroupName(outputTemplate string, matches []string) (string, error) {
+	result := outputTemplate
+
+	// Replace $1, $2 etc. with actual groups
+	for i := 1; i < len(matches); i++ {
+		placeholder := fmt.Sprintf("$%d", i)
+
+		// Check for special case: $1|replace(-,_)
+		if strings.Contains(result, placeholder+"|replace(-,_)") {
+			replaced := strings.ReplaceAll(matches[i], "-", "_")
+			result = strings.ReplaceAll(result, placeholder+"|replace(-,_)", replaced)
+		} else {
+			result = strings.ReplaceAll(result, placeholder, matches[i])
+		}
+	}
+
+	return result, nil
+}
+
+func GetTransformedGroupName(cfg *config.AppConfig, typeName, inputStr string) (string, error) {
+	patterns, ok := cfg.Pattern[typeName]
+	if !ok {
+		patterns = cfg.Pattern["default"]
+	}
+
+	for _, p := range patterns {
+		re, err := regexp.Compile(p.Input)
+		if err != nil {
+			return "", fmt.Errorf("invalid regex pattern: %s", p.Input)
+		}
+
+		matches := re.FindStringSubmatch(inputStr)
+		if len(matches) > 0 {
+			return processGroupName(p.Output, matches)
+		}
+	}
+
+	return "", fmt.Errorf("no matching pattern found for backend type %s and input string is %s", typeName, inputStr)
 }

@@ -26,15 +26,22 @@ import (
 
 // Config represents the top-level configuration structure
 type AppConfig struct {
-	App        App          `yaml:"app"`
-	LDAP       ldap.LDAP    `yaml:"ldap"`
-	Cache      cache.Config `yaml:"cache"`
-	Backends   []Backend    `yaml:"backends"`
+	App        App                       `yaml:"app"`
+	LDAP       ldap.LDAP                 `yaml:"ldap"`
+	Cache      cache.Config              `yaml:"cache"`
+	Backends   []Backend                 `yaml:"backends"`
+	Pattern    map[string][]PatternEntry `yaml:"pattern"`
 	HttpClient struct {
 		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
 		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
 	} `yaml:"httpClient"`
 	BackendMap map[string]map[string]Backend `yaml:"-"`
+}
+
+// PatternEntry represents the input and output pattern of group names
+type PatternEntry struct {
+	Input  string `yaml:"input"`
+	Output string `yaml:"output"`
 }
 
 // App represents the application configuration

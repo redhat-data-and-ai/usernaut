@@ -12,6 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+pattern:
+  default:
+    - input: "dataverse-platform-([a-z0-9]+)"
+      output: "$1_group"
+
+    - input: "dataverse-source-([a-z0-9]+)"
+      output: "$1_group"
+
+    - input: "dataverse-aggregate-([a-z0-9]+)"
+      output: "$1_group"
+
+    - input: "dataverse-consumer-([a-z0-9]+-[a-z0-9]+)"
+      output: "$1|replace(-,_)_group"
+
+  rover:
+    - input: "^([^\\_]+)$"
+      output: "$1"
+
+
 app:
   name: "usernaut"
   version: "0.0.1"

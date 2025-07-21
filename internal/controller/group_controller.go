@@ -288,9 +288,16 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	backendName, backendType string,
 	backendClient clients.Client) (string, error) {
 
+	// transforming the group name
+	transformed_group_name, err := utils.GetTransformedGroupName(r.AppConfig, backendType, groupName)
+	if err != nil {
+		r.backendLogger.WithError(err).Error("error transforming the group Name")
+		return "", err
+	}
+
 	teamDetailsMap := make(map[string]string)
 
-	teamDetailsInCache, err := r.Cache.Get(ctx, groupName)
+	teamDetailsInCache, err := r.Cache.Get(ctx, transformed_group_name)
 	if err == nil && teamDetailsInCache != "" {
 		if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
 			r.backendLogger.WithError(jErr).Error("error unmarshalling team details from cache")
@@ -305,8 +312,9 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	}
 	// If team details are not found in cache, create a new team
 	r.backendLogger.Info("team details not found in cache, creating a new team")
+
 	newTeam, err := backendClient.CreateTeam(ctx, &structs.Team{
-		Name:        groupName,
+		Name:        transformed_group_name,
 		Description: "team for " + groupName,
 		Role:        fivetran.AccountReviewerRole,
 	})
@@ -321,7 +329,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Create the team in cache
 	teamDetailsMap[backendName+"_"+backendType] = newTeam.ID
 	toBeUpdated, _ := json.Marshal(teamDetailsMap)
-	if err := r.Cache.Set(ctx, groupName, string(toBeUpdated), cache.NoExpiration); err != nil {
+	if err := r.Cache.Set(ctx, transformed_group_name, string(toBeUpdated), cache.NoExpiration); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in cache")
 		return "", err
 	}

@@ -2,6 +2,9 @@ package utils
 
 import (
 	"testing"
+
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+	"github.com/stretchr/testify/assert"
 )
 
 type TestStruct struct {
@@ -244,5 +247,106 @@ func TestMapToStruct_EmptyMap(t *testing.T) {
 	// All fields should have their zero values
 	if result.Name != "" || result.Age != 0 || result.Active != false {
 		t.Errorf("Expected zero values for all fields")
+	}
+}
+
+func TestGetTransformGroupName(t *testing.T) {
+	mockCfg := &config.AppConfig{
+		Pattern: map[string][]config.PatternEntry{
+			"rover": {
+				{
+					Input:  `^([^\\_]+)$`,
+					Output: `$1`,
+				},
+			},
+			"default": {
+				{
+					Input:  `dataverse-platform-([a-z0-9]+)`,
+					Output: "$1_group",
+				},
+				{
+					Input:  `dataverse-source-([a-z0-9]+)`,
+					Output: "$1_group",
+				},
+				{
+					Input:  `dataverse-aggregate-([a-z0-9]+)`,
+					Output: "$1_group",
+				},
+				{
+					Input:  `dataverse-consumer-([a-z0-9]+-[a-z0-9]+)`,
+					Output: "$1|replace(-,_)_group",
+				},
+			},
+		},
+	}
+
+	type Testing struct {
+		name         string
+		input        string
+		output       string
+		backend_Name string
+		wantErr      bool
+	}
+
+	test_data := []Testing{
+		{
+			name:         "assert fivetran transformation for platformadmin",
+			input:        "dataverse-platform-platformadmin",
+			output:       "platformadmin_group",
+			backend_Name: "fivetran",
+			wantErr:      false,
+		},
+		{
+			name:         "assert fivetran transformation for sfsales",
+			input:        "dataverse-source-sfsales",
+			output:       "sfsales_group",
+			backend_Name: "fivetran",
+			wantErr:      false,
+		},
+		{
+			name:         "assert fivetran transformation for bookingmaster",
+			input:        "dataverse-aggregate-bookingsmaster",
+			output:       "bookingsmaster_group",
+			backend_Name: "fivetran",
+			wantErr:      false,
+		},
+		{
+			name:         "assert fivetran transformation for bookingmaster-marts",
+			input:        "dataverse-consumer-bookingsmaster-marts",
+			output:       "bookingsmaster_marts_group",
+			backend_Name: "fivetran",
+			wantErr:      false,
+		},
+		{
+			name:         "assert fivetran transformation for random string",
+			input:        "No_Mapping",
+			output:       "",
+			backend_Name: "fivetran",
+			wantErr:      true,
+		},
+		{
+			name:         "assert rover transformation for platformadmin",
+			input:        "dataverse-platform-platformadmin",
+			output:       "dataverse-platform-platformadmin",
+			backend_Name: "rover",
+			wantErr:      false,
+		},
+		{
+			name:         "assert rover transformation for platformadmin with wrong input",
+			input:        "dataverse_platform_platformadmin",
+			output:       "",
+			backend_Name: "rover",
+			wantErr:      true,
+		},
+	}
+
+	for _, val := range test_data {
+		t.Run(val.name, func(t *testing.T) {
+			returnedString, err := GetTransformedGroupName(mockCfg, val.backend_Name, val.input)
+			if val.wantErr {
+				assert.Error(t, err)
+			}
+			assert.Equal(t, val.output, returnedString)
+		})
 	}
 }
