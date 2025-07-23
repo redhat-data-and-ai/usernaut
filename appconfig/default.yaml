@@ -62,3 +62,10 @@ backends:
       cert_path: "/path/to/usernaut.crt"
       private_key_path: "/path/to/usernaut.pem"
       service_account_name: test-service-account
+  - name: gitlab
+    type: "gitlab"
+    enabled: true
+    connection:
+      url: "https://gitlab.test.com"
+      token: "test-token"
+      ldap_sync: true
