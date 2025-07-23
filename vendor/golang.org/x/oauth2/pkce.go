@@ -1,6 +1,7 @@
 // Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package oauth2
 
 import (
@@ -36,15 +37,15 @@ func GenerateVerifier() string {
 	return base64.RawURLEncoding.EncodeToString(data)
 }
 
-// VerifierOption returns a PKCE code verifier AuthCodeOption. It should be
-// passed to Config.Exchange or Config.DeviceAccessToken only.
+// VerifierOption returns a PKCE code verifier [AuthCodeOption]. It should only be
+// passed to [Config.Exchange] or [Config.DeviceAccessToken].
 func VerifierOption(verifier string) AuthCodeOption {
 	return setParam{k: codeVerifierKey, v: verifier}
 }
 
 // S256ChallengeFromVerifier returns a PKCE code challenge derived from verifier with method S256.
 //
-// Prefer to use S256ChallengeOption where possible.
+// Prefer to use [S256ChallengeOption] where possible.
 func S256ChallengeFromVerifier(verifier string) string {
 	sha := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sha[:])
