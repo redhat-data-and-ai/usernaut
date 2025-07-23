@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 
@@ -41,6 +42,8 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
+
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
@@ -264,6 +267,7 @@ func (r *GroupReconciler) processAllBackends(
 		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers); err != nil {
 			r.backendLogger.WithError(err).Error("error processing backend")
 			backendErrors[backend.Type] = err.Error()
+			continue
 		}
 	}
 
@@ -271,7 +275,11 @@ func (r *GroupReconciler) processAllBackends(
 }
 
 // processSingleBackend handles processing of a single backend
-func (r *GroupReconciler) processSingleBackend(ctx context.Context, groupCR *usernautdevv1alpha1.Group, backend usernautdevv1alpha1.Backend, uniqueMembers []string) error {
+func (r *GroupReconciler) processSingleBackend(ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group,
+	backend usernautdevv1alpha1.Backend,
+	uniqueMembers []string,
+) error {
 	// Create backend client
 	backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 	if err != nil {
@@ -279,6 +287,17 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context, groupCR *use
 		return err
 	}
 	r.backendLogger.Debug("created backend client successfully")
+
+	isLdapSync, err := r.setupLdapSync(
+		ctx, backend.Type, backend.Name, backendClient, groupCR.Spec.GroupName, groupCR.Spec.Backends,
+	)
+	if err != nil {
+		r.backendLogger.Errorf("failed to setup ldap sync for %s: %v", backend.Type, err)
+		return err
+	}
+	if !isLdapSync {
+		r.backendLogger.Infof("ldap sync is not setup for %s backend", backend.Type)
+	}
 
 	// Fetch or create team
 	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
@@ -311,23 +330,25 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context, groupCR *use
 	}
 
 	// Add users to team if needed
-	if len(usersToAdd) > 0 {
-		r.backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
-		if err := backendClient.AddUserToTeam(ctx, teamID, usersToAdd); err != nil {
-			r.backendLogger.WithError(err).Error("error while adding users to the team")
-			return err
+	if !isLdapSync {
+		if len(usersToAdd) > 0 {
+			r.backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
+			if err := backendClient.AddUserToTeam(ctx, teamID, usersToAdd); err != nil {
+				r.backendLogger.WithError(err).Error("error while adding users to the team")
+				return err
+			}
+			r.backendLogger.WithField("users_to_add", usersToAdd).Info("added users to team successfully")
 		}
-		r.backendLogger.WithField("users_to_add", usersToAdd).Info("added users to team successfully")
-	}
 
-	// Remove users from team if needed
-	if len(usersToRemove) > 0 {
-		r.backendLogger.WithField("user_count", len(usersToRemove)).Info("removing users from a team")
-		if err := backendClient.RemoveUserFromTeam(ctx, teamID, usersToRemove); err != nil {
-			r.backendLogger.WithError(err).Error("error while removing users from the team")
-			return err
+		// Remove users from team if needed
+		if len(usersToRemove) > 0 {
+			r.backendLogger.WithField("user_count", len(usersToRemove)).Info("removing users from a team")
+			if err := backendClient.RemoveUserFromTeam(ctx, teamID, usersToRemove); err != nil {
+				r.backendLogger.WithError(err).Error("error while removing users from the team")
+				return err
+			}
+			r.backendLogger.WithField("users_to_remove", usersToRemove).Info("removed users from team successfully")
 		}
-		r.backendLogger.WithField("users_to_remove", usersToRemove).Info("removed users from team successfully")
 	}
 
 	return nil
@@ -786,4 +807,64 @@ func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *userna
 	}
 
 	return nil
+}
+
+func (r *GroupReconciler) setupLdapSync(ctx context.Context, backendType string,
+	backendName string,
+	backendClient clients.Client,
+	groupName string,
+	backends []usernautdevv1alpha1.Backend,
+) (bool, error) {
+	switch backendType {
+	case "gitlab":
+		dependsOn := r.AppConfig.BackendMap["gitlab"][backendName].DependsOn
+		if dependsOn.Type == "" || dependsOn.Name == "" {
+			r.backendLogger.Info("no ldap dependant found for gitlab backend")
+			return false, nil
+		}
+		if !isGroupCRHasDependants(backends, dependsOn) {
+			return false, fmt.Errorf("ldap dependant for %s backend not found in group CR", backendType)
+		}
+		dependantType, ok := r.AppConfig.BackendMap[dependsOn.Type]
+		if !ok {
+			return false, fmt.Errorf("ldap dependant type %q not found in BackendMap", dependsOn.Type)
+		}
+		dependantName, ok := dependantType[dependsOn.Name]
+		if !ok {
+			return false, fmt.Errorf("ldap dependant name %q not found in BackendMap[%s]", dependsOn.Name, dependsOn.Type)
+		}
+		if !dependantName.Enabled {
+			return false, fmt.Errorf("%q is not enabled", dependsOn.Type)
+		}
+
+		// Check if the rover_group exists or not by checking the cache...
+		transformed_group_name, err := utils.GetTransformedGroupName(r.AppConfig, dependsOn.Type, groupName)
+		if err != nil {
+			r.backendLogger.WithError(err).Error("error transforming the group Name")
+			return false, err
+		}
+		teamDetailsInCache, err := r.Cache.Get(ctx, transformed_group_name)
+		if err != nil || teamDetailsInCache == "" {
+			r.backendLogger.WithError(err).Error("rover team details not found in cache, skipping ldap sync")
+			return false, err
+		}
+
+		gitlabClient, ok := backendClient.(*gitlab.GitlabClient)
+		if !ok {
+			return false, errors.New("backend client is not a GitlabClient")
+		}
+		gitlabClient.SetLdapSync(true, groupName)
+		r.backendLogger.Infof("ldap sync setup successfully for %s", backendType)
+		return true, nil
+	}
+	return false, nil
+}
+
+func isGroupCRHasDependants(backends []usernautdevv1alpha1.Backend, dependsOn config.Dependant) bool {
+	for _, backend := range backends {
+		if backend.Type == dependsOn.Type && backend.Name == dependsOn.Name {
+			return true
+		}
+	}
+	return false
 }
