@@ -86,36 +86,17 @@ func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 	return createdTeam, nil
 }
 
-// FetchTeamDetails fetches details for a specific team/role using grants-of endpoint to check existence
+// FetchTeamDetails returns basic team information without making API calls
+// since the detailed information is not consumed by the reconciliation workflow
 func (c *SnowflakeClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
-	// Use grants-of endpoint to check if role exists without fetching all teams
-	// This is much more efficient than FetchAllTeams() especially for large role sets
-	endpoint := fmt.Sprintf("/api/v2/roles/%s/grants-of", teamID)
-
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodGet, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check team existence: %w", err)
+	// Since we're not consuming the detailed information from this function
+	// and it's only required for interface, return basic team info
+	// without making any API calls
+	team := &structs.Team{
+		ID:   teamID,
+		Name: teamID,
 	}
-
-	// If we get a successful response (200), the team exists
-	// The response will be an empty array [] if no grants, but that's still valid
-	if status == http.StatusOK {
-		// Parse the response to ensure it's valid JSON (even if empty array)
-		var grants []map[string]interface{}
-		if err := json.Unmarshal(resp, &grants); err != nil {
-			return nil, fmt.Errorf("failed to parse grants response: %w", err)
-		}
-
-		// Team exists (whether it has grants or not)
-		team := &structs.Team{
-			ID:   teamID,
-			Name: teamID,
-		}
-		return team, nil
-	}
-
-	// If we get a 404 or other error status, the team doesn't exist
-	return nil, fmt.Errorf("team with ID %s not found", teamID)
+	return team, nil
 }
 
 // DeleteTeamByID deletes a role in Snowflake using REST API
