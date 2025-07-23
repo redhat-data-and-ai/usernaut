@@ -34,6 +34,8 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
+
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
@@ -107,6 +109,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		r.allLdapUserData[ldapUser.UID] = ldapUser
 	}
+	r.log.WithField("all_ldap_user_data", r.allLdapUserData).Info("fetched all LDAP user data successfully")
 
 	backendErrors := make(map[string]string, 0)
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
@@ -126,6 +129,33 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			backendErrors[backend.Type] = err.Error()
 			continue
 		}
+
+		// If this is GitLab backend and Rover is enabled, fetch teams from Rover
+		if backend.Type == "gitlab" && r.AppConfig.BackendMap["rover"]["rover"].Enabled {
+			// Create Rover client to fetch teams
+			roverClient, err := clients.New("rover", "rover", r.AppConfig.BackendMap)
+			if err != nil {
+				r.backendLogger.WithError(err).Warn("failed to create rover client for team fetching")
+			} else {
+				// Fetch team details from Rover
+				roverTeam, err := roverClient.FetchTeamDetails(ctx, groupCR.Spec.GroupName)
+				if err != nil {
+					r.backendLogger.WithError(err).Warn("failed to fetch teams from rover")
+				} else {
+					externalTeams := make(map[string]*structs.Team)
+					externalTeams[groupCR.Spec.GroupName] = roverTeam
+
+					gitlabClient, ok := backendClient.(*gitlab.GitlabClient)
+					if !ok {
+						r.backendLogger.Error("backend client is not a GitlabClient")
+						return ctrl.Result{}, errors.New("backend client is not a GitlabClient")
+					}
+					gitlabClient.SetExternalTeams(externalTeams)
+					r.backendLogger.WithField("external_teams_count", len(externalTeams)).Info("set external teams from rover")
+				}
+			}
+		}
+
 		r.backendLogger.Debug("created backend client successfully")
 
 		// fetch the teamID or create a new team if it doesn't exist
