@@ -78,7 +78,13 @@ type Backend struct {
 	Name       string                 `yaml:"name"`
 	Type       string                 `yaml:"type"`
 	Enabled    bool                   `yaml:"enabled"`
+	DependsOn  Dependant              `yaml:"depends_on,omitempty" mapstructure:"depends_on,omitempty"`
 	Connection map[string]interface{} `yaml:"connection"`
+}
+
+type Dependant struct {
+	Name string `yaml:"name"`
+	Type string `yaml:"type"`
 }
 
 func (b *Backend) GetStringConnection(name string, defaultValue string) string {
