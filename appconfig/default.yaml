@@ -85,23 +85,6 @@ backends:
     type: "snowflake"
     enabled: true
     connection: 
-      pat: pat
-      base_url: base_url
-  - name: dev
-    type: "snowflake"
-    enabled: true
-    connection: 
-      pat: pat
-      base_url: base_url
-  - name: preprod
-    type: "snowflake"
-    enabled: true
-    connection: 
-      pat: pat
-      base_url: base_url
-  - name: prod
-    type: "snowflake"
-    enabled: true
-    connection: 
-      pat: pat
-      base_url: base_url
+      pat: ${SNOWFLAKE_PAT}
+      base_url: https://myorganization-myaccount.snowflakecomputing.com
+

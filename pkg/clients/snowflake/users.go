@@ -122,15 +122,16 @@ func (c *SnowflakeClient) processUsersPage(resp []byte, resultByID map[string]*s
 func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*structs.User, error) {
 	endpoint := "/api/v2/users"
 
-	// Create payload for user creation
+	if user.Email == "" || user.UserName == "" {
+		return nil, fmt.Errorf("email and username are required for Snowflake user creation")
+	}
+
 	payload := map[string]interface{}{
-		"name": user.UserName,
+		"name":  user.UserName,
+		"email": user.Email, // Email is now mandatory
 	}
 
 	// Add optional fields if provided
-	if user.Email != "" {
-		payload["email"] = user.Email
-	}
 	if user.DisplayName != "" {
 		payload["displayName"] = user.DisplayName
 	}
