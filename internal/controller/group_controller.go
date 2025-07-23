@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +41,8 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
+
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
@@ -161,7 +164,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
 	for _, backend := range groupCR.Spec.Backends {
-
 		r.backendLogger = r.log.WithFields(logrus.Fields{
 			"backend":      backend.Name,
 			"backend_type": backend.Type,
@@ -175,7 +177,12 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			backendErrors[backend.Type] = err.Error()
 			continue
 		}
-		r.backendLogger.Debug("created backend client successfully")
+
+		err = r.setupLdapSync(backend.Type, backend.Name, backendClient, groupCR.Spec.GroupName, groupCR.Spec.Backends)
+		if err != nil {
+			r.backendLogger.Errorf("failed to setup ldap sync for %s: %v", backend.Type, err)
+			return ctrl.Result{}, err
+		}
 
 		// fetch the teamID or create a new team if it doesn't exist
 		teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
@@ -673,4 +680,51 @@ func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *userna
 	}
 
 	return nil
+}
+
+func (r *GroupReconciler) setupLdapSync(backendType string,
+	backendName string,
+	backendClient clients.Client,
+	groupName string,
+	backends []usernautdevv1alpha1.Backend,
+) error {
+	switch backendType {
+	case "gitlab":
+		dependsOn := r.AppConfig.BackendMap["gitlab"][backendName].DependsOn
+		if dependsOn.Type == "" || dependsOn.Name == "" {
+			r.backendLogger.Info("no ldap dependant found for gitlab backend")
+			return nil
+		}
+		if !isGroupCRHasDependants(backends, dependsOn) {
+			return fmt.Errorf("ldap dependant for %s backend not found in group CR", backendType)
+		}
+		dependantType, ok := r.AppConfig.BackendMap[dependsOn.Type]
+		if !ok {
+			return fmt.Errorf("ldap dependant type %q not found in BackendMap", dependsOn.Type)
+		}
+		dependantName, ok := dependantType[dependsOn.Name]
+		if !ok {
+			return fmt.Errorf("ldap dependant name %q not found in BackendMap[%s]", dependsOn.Name, dependsOn.Type)
+		}
+		if !dependantName.Enabled {
+			return fmt.Errorf("%q is not enabled", dependsOn.Type)
+		}
+
+		gitlabClient, ok := backendClient.(*gitlab.GitlabClient)
+		if !ok {
+			return errors.New("backend client is not a GitlabClient")
+		}
+		gitlabClient.SetLdapSync(true, groupName)
+		r.backendLogger.Infof("ldap sync setup successfully for %s", backendType)
+	}
+	return nil
+}
+
+func isGroupCRHasDependants(backends []usernautdevv1alpha1.Backend, dependsOn config.Dependant) bool {
+	for _, backend := range backends {
+		if backend.Type == dependsOn.Type && backend.Name == dependsOn.Name {
+			return true
+		}
+	}
+	return false
 }
