@@ -115,3 +115,31 @@ func InitializeClient(hystrixCommand string, connectionPoolConfig ConnectionPool
 	// Return a new hystrix-wrapped HTTP client with the command name, along with other required options
 	return hystrix.NewClient(options...), nil
 }
+
+// NewBaseHTTPClient creates a plain *http.Client with connection pool settings but no retries/circuit breaker.
+// func NewBaseHTTPClient(poolCfg ConnectionPoolConfig) *http.Client {
+// 	transport := &http.Transport{
+// 		DialContext: (&net.Dialer{
+// 			KeepAlive: time.Duration(poolCfg.KeepAliveTimeout) * time.Millisecond,
+// 		}).DialContext,
+// 		MaxIdleConnsPerHost:   poolCfg.MaxIdleConnections,
+// 		MaxIdleConns:          poolCfg.MaxIdleConnections,
+// 		IdleConnTimeout:       time.Duration(poolCfg.KeepAliveTimeout) * time.Millisecond,
+// 		TLSHandshakeTimeout:   time.Duration(poolCfg.Timeout) * time.Millisecond,
+// 		ExpectContinueTimeout: time.Duration(poolCfg.Timeout) * time.Millisecond,
+// 	}
+
+// 	if len(poolCfg.PrivateKeyPath) > 0 && len(poolCfg.CertPath) > 0 {
+// 		cert, err := tls.LoadX509KeyPair(poolCfg.CertPath, poolCfg.PrivateKeyPath)
+// 		if err == nil {
+// 			certPool, err := x509.SystemCertPool()
+// 			if err == nil {
+// 				transport.TLSClientConfig = &tls.Config{
+// 					RootCAs:      certPool,
+// 					Certificates: []tls.Certificate{cert},
+// 				}
+// 			}
+// 		}
+// 	}
+// 	return &http.Client{Transport: transport}
+// }
