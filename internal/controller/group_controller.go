@@ -158,7 +158,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		r.allLdapUserData[user] = ldapUser
 	}
-	r.log.WithField("all_ldap_user_data", r.allLdapUserData).Info("fetched all LDAP user data successfully")
 
 	backendErrors := make(map[string]string, 0)
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
