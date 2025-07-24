@@ -137,7 +137,7 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 		payload["displayName"] = user.DisplayName
 	}
 
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodPost, payload)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 // FetchUserDetails fetches details for a specific user using REST API
 func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (*structs.User, error) {
 	endpoint := fmt.Sprintf("/api/v2/users/%s", userID)
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodGet, nil)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 	endpoint := fmt.Sprintf("/api/v2/users/%s", userID)
 
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodDelete, nil)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodDelete, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}

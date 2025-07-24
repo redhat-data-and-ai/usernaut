@@ -192,20 +192,20 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	usersToRemove := make([]string, 0)
 
 	for _, user := range groupUsers {
-		userDetails := r.allLdapUserData[user] // No need for strings.ToLower since user is already normalized
+		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {
 			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping processing for this user")
 
 			// we need to check if the user is already in the existing team members
-			if _, exists := existingTeamMembers[user]; exists { // No need for strings.ToLower since user is already normalized
+			if _, exists := existingTeamMembers[user]; exists {
 				r.backendLogger.WithField("user", user).Info("user is already in existing team members, skipping user creation")
-				usersToRemove = append(usersToRemove, user) // No need for strings.ToLower since user is already normalized
+				usersToRemove = append(usersToRemove, user)
 			}
 			continue
 		}
 
 		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail()) // No need for strings.ToLower since email is already normalized in LDAP data processing
+		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
 		if err != nil && err != redis.Nil {
 			r.backendLogger.WithError(err).Error("error fetching user details from cache")
 			return nil, nil, err
@@ -226,20 +226,20 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 
 			userID := userDetailsMap[backendName+"_"+backendType]
 			if userID != "" {
-				userIDsToSync = append(userIDsToSync, userID) // No need for strings.ToLower since userID is already normalized from backend
+				userIDsToSync = append(userIDsToSync, userID)
 				continue
 			}
 		}
 
 		// If we reach here, user not found in cache - this is expected for new users
 		r.backendLogger.WithField("user", user).Debug("user not found in cache, will be created in createUsersInBackendAndCache")
-		userIDsToSync = append(userIDsToSync, user) // No need for strings.ToLower since user is already normalized
+		userIDsToSync = append(userIDsToSync, user)
 	}
 
 	// process existing team members to find users to remove
 	for userID := range existingTeamMembers {
-		if !slices.Contains(userIDsToSync, userID) { // No need for strings.ToLower since userID is already normalized from backend
-			usersToRemove = append(usersToRemove, userID) // No need for strings.ToLower since userID is already normalized
+		if !slices.Contains(userIDsToSync, userID) {
+			usersToRemove = append(usersToRemove, userID)
 		}
 	}
 
@@ -247,7 +247,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	// if user is not present in existing team members, then add the user to the team
 	existingMemberIDs := make([]string, 0, len(existingTeamMembers))
 	for memberID := range existingTeamMembers {
-		existingMemberIDs = append(existingMemberIDs, memberID) // No need for strings.ToLower since memberID is already normalized
+		existingMemberIDs = append(existingMemberIDs, memberID)
 	}
 
 	for _, userID := range userIDsToSync {
@@ -265,14 +265,14 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	backendClient clients.Client) error {
 
 	for _, user := range users {
-		userDetails := r.allLdapUserData[user] // No need for strings.ToLower since user is already normalized
+		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {
 			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping user creation")
 			continue
 		}
 
 		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail()) // No need for strings.ToLower since email is already normalized
+		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
 		if err == nil && userDetailsInCache != "" {
 			// Load existing cache data to merge with new data
 			if jErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &userDetailsMap); jErr != nil {
@@ -314,7 +314,7 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			userDetailsMap[backendName+"_"+backendType] = newUser.ID
 		}
 		toBeUpdated, _ := json.Marshal(userDetailsMap)
-		if err := r.Cache.Set(ctx, userDetails.GetEmail(), string(toBeUpdated), cache.NoExpiration); err != nil { // No need for strings.ToLower since email is already normalized
+		if err := r.Cache.Set(ctx, userDetails.GetEmail(), string(toBeUpdated), cache.NoExpiration); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")
 			return err
 		}
@@ -337,7 +337,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 
 	teamDetailsMap := make(map[string]string)
 
-	teamDetailsInCache, err := r.Cache.Get(ctx, groupName) // No need for strings.ToLower since groupName is already normalized
+	teamDetailsInCache, err := r.Cache.Get(ctx, groupName)
 	if err == nil && teamDetailsInCache != "" {
 		if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
 			r.backendLogger.WithError(jErr).Error("error unmarshalling team details from cache")
@@ -369,7 +369,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Create the team in cache
 	teamDetailsMap[backendName+"_"+backendType] = newTeam.ID
 	toBeUpdated, _ := json.Marshal(teamDetailsMap)
-	if err := r.Cache.Set(ctx, groupName, string(toBeUpdated), cache.NoExpiration); err != nil { // No need for strings.ToLower since groupName is already normalized
+	if err := r.Cache.Set(ctx, groupName, string(toBeUpdated), cache.NoExpiration); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in cache")
 		return "", err
 	}
