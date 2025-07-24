@@ -97,7 +97,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		r.allLdapUserData[ldapUser.UID] = ldapUser
 	}
-	r.log.WithField("all_ldap_user_data", r.allLdapUserData).Info("fetched all LDAP user data successfully")
 
 	for _, backend := range groupCR.Spec.Backends {
 

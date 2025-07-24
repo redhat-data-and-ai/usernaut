@@ -18,8 +18,8 @@ func (g *GitlabClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 	if err != nil {
 		return nil, nil, err
 	}
-	userEmailMap := make(map[string]*structs.User, 0)
-	userIDMap := make(map[string]*structs.User, 0)
+	userEmailMap := make(map[string]*structs.User)
+	userIDMap := make(map[string]*structs.User)
 	for _, user := range users {
 		userEmailMap[user.Email] = userDetails(user)
 		userIDMap[fmt.Sprintf("%d", user.ID)] = userDetails(user)
