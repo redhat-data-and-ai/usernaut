@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 )
@@ -48,10 +49,10 @@ func (c *SnowflakeClient) FetchAllTeams(ctx context.Context) (map[string]structs
 	teams := make(map[string]structs.Team)
 	for _, role := range roles {
 		team := structs.Team{
-			ID:   role.Name,
-			Name: role.Name,
+			ID:   strings.ToLower(role.Name),
+			Name: strings.ToLower(role.Name),
 		}
-		teams[role.Name] = team
+		teams[strings.ToLower(role.Name)] = team
 	}
 
 	return teams, nil
@@ -79,8 +80,8 @@ func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 	// Return the created team using the request data since Snowflake API
 	// returns minimal information in create response
 	createdTeam := &structs.Team{
-		ID:   team.Name,
-		Name: team.Name,
+		ID:   strings.ToLower(team.Name),
+		Name: strings.ToLower(team.Name),
 	}
 
 	return createdTeam, nil
@@ -93,8 +94,8 @@ func (c *SnowflakeClient) FetchTeamDetails(ctx context.Context, teamID string) (
 	// and it's only required for interface, return basic team info
 	// without making any API calls
 	team := &structs.Team{
-		ID:   teamID,
-		Name: teamID,
+		ID:   strings.ToLower(teamID),
+		Name: strings.ToLower(teamID),
 	}
 	return team, nil
 }

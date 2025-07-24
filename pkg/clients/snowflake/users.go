@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 )
@@ -102,16 +103,16 @@ func (c *SnowflakeClient) processUsersPage(resp []byte, resultByID map[string]*s
 	// Extract users from the response
 	for _, user := range users {
 		structUser := &structs.User{
-			ID:          user.Name,
-			UserName:    user.Name,
-			Email:       user.Email,
+			ID:          strings.ToLower(user.Name),
+			UserName:    strings.ToLower(user.Name),
+			Email:       strings.ToLower(user.Email),
 			DisplayName: user.DisplayName,
 		}
 
 		// Add to both maps
-		resultByID[user.Name] = structUser
+		resultByID[strings.ToLower(user.Name)] = structUser
 		if user.Email != "" {
-			resultByEmail[user.Email] = structUser
+			resultByEmail[strings.ToLower(user.Email)] = structUser
 		}
 	}
 
@@ -154,9 +155,9 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 
 	// Return the created user using actual API response data
 	return &structs.User{
-		ID:          createdUserResponse.Name,
-		UserName:    createdUserResponse.Name,
-		Email:       createdUserResponse.Email,
+		ID:          strings.ToLower(createdUserResponse.Name),
+		UserName:    strings.ToLower(createdUserResponse.Name),
+		Email:       strings.ToLower(createdUserResponse.Email),
 		DisplayName: createdUserResponse.DisplayName,
 	}, nil
 }
@@ -179,9 +180,9 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 	}
 
 	user := &structs.User{
-		ID:          userID,
-		UserName:    userID,
-		Email:       userResponse.Email,
+		ID:          strings.ToLower(userID),
+		UserName:    strings.ToLower(userID),
+		Email:       strings.ToLower(userResponse.Email),
 		DisplayName: userResponse.DisplayName,
 	}
 
