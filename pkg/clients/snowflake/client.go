@@ -70,7 +70,8 @@ func NewClient(config SnowflakeConfig, poolCfg httpclient.ConnectionPoolConfig,
 }
 
 // makeRequest uses the common request package for standard HTTP requests (with logging, tracing, etc.)
-func (c *SnowflakeClient) makeRequest(ctx context.Context, endpoint, method string, body interface{}) ([]byte, int, error) {
+func (c *SnowflakeClient) makeRequest(ctx context.Context, endpoint,
+	method string, body interface{}) ([]byte, int, error) {
 	var requestBody []byte
 	if body != nil && (method != http.MethodGet && method != http.MethodDelete) {
 		var err error
