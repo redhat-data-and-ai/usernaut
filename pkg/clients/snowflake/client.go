@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gojek/heimdall/v7"
+	"github.com/redhat-data-and-ai/usernaut/pkg/request"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
 )
 
@@ -66,6 +67,34 @@ func NewClient(config SnowflakeConfig, poolCfg httpclient.ConnectionPoolConfig,
 		config: &config,
 		client: client,
 	}, nil
+}
+
+// makeRequest uses the common request package for standard HTTP requests (with logging, tracing, etc.)
+func (c *SnowflakeClient) makeRequest(ctx context.Context, endpoint, method string, body interface{}) ([]byte, int, error) {
+	var requestBody []byte
+	if body != nil && (method != http.MethodGet && method != http.MethodDelete) {
+		var err error
+		requestBody, err = json.Marshal(body)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	url := c.config.BaseURL + endpoint
+	req, err := request.NewRequest(ctx, method, url, requestBody)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Set Snowflake-specific headers
+	headers := map[string]string{
+		"Authorization": "Bearer " + c.config.PAT,
+		"Content-Type":  "application/json",
+		"Accept":        "application/json",
+	}
+	req.SetHeaders(headers)
+
+	return req.MakeRequest(c.client, method, "snowflake")
 }
 
 // sendRequest sends a HTTP request to the Snowflake REST API and returns response body, headers, and status

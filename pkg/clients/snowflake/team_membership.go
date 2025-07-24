@@ -32,7 +32,7 @@ func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 	// Use the correct endpoint: grants-of (not grants-on)
 	endpoint := fmt.Sprintf("/api/v2/roles/%s/grants-of", teamID)
 
-	response, _, status, err := c.sendRequest(ctx, endpoint, http.MethodGet, nil)
+	response, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error making request to fetch team members: %w", err)
 	}
@@ -80,7 +80,7 @@ func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID, userID stri
 		"privileges":     []string{},
 	}
 
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodPost, payload)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID, userID
 		"privileges":     []string{},
 	}
 
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodPost, payload)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
 	if err != nil {
 		return err
 	}

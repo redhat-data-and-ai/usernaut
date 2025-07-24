@@ -29,7 +29,7 @@ import (
 // FetchAllTeams fetches all roles from Snowflake using REST API
 func (c *SnowflakeClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
 	endpoint := "/api/v2/roles"
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodGet, nil)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 		"name": team.Name,
 	}
 
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodPost, payload)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (c *SnowflakeClient) FetchTeamDetails(ctx context.Context, teamID string) (
 func (c *SnowflakeClient) DeleteTeamByID(ctx context.Context, teamID string) error {
 	endpoint := fmt.Sprintf("/api/v2/roles/%s", teamID)
 
-	resp, _, status, err := c.sendRequest(ctx, endpoint, http.MethodDelete, nil)
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodDelete, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete role: %w", err)
 	}
