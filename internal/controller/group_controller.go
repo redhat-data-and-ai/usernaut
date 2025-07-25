@@ -32,6 +32,7 @@ import (
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
+
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -139,26 +140,35 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
 		usersToAdd, usersToRemove, err := r.processUsers(ctx, groupCR.Spec.Members, members, backend.Name, backend.Type)
+
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error processing users")
 			return ctrl.Result{}, err
 		}
 
-		r.backendLogger.Info("reconciling users for the team")
-		for _, userID := range usersToAdd {
-			if err := backendClient.AddUserToTeam(ctx, teamID, userID); err != nil {
-				r.backendLogger.WithField("user_id", userID).WithError(err).Error("error adding user to team")
+		if len(usersToAdd) > 0 {
+			r.backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
+
+			err := backendClient.AddUserToTeam(ctx, teamID, usersToAdd)
+			if err != nil {
+				r.backendLogger.WithError(err).Error("error while adding users to the team")
 				return ctrl.Result{}, err
 			}
 		}
+
 		r.backendLogger.WithField("users_to_add", usersToAdd).Info("added users to team successfully")
 
-		for _, userID := range usersToRemove {
-			if err := backendClient.RemoveUserFromTeam(ctx, teamID, userID); err != nil {
-				r.backendLogger.WithField("user_id", userID).WithError(err).Error("error removing user from team")
+		if len(usersToRemove) > 0 {
+			r.backendLogger.WithField("user_count", len(usersToRemove)).Info("removing users from a team")
+
+			err := backendClient.RemoveUserFromTeam(ctx, teamID, usersToRemove)
+			if err != nil {
+				r.backendLogger.WithError(err).Error("error while removing users from the team")
 				return ctrl.Result{}, err
 			}
+
 		}
+
 		r.backendLogger.WithField("users_to_remove", usersToRemove).Info("removed users from team successfully")
 	}
 
