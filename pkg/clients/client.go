@@ -57,9 +57,9 @@ type Client interface {
 	// Returns the list of users present under a team
 	FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error)
 	// Adds a member to the team
-	AddUserToTeam(ctx context.Context, teamID, userID string) error
+	AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error
 	// Removes a member from the team
-	RemoveUserFromTeam(ctx context.Context, teamID, userID string) error
+	RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error
 }
 
 func New(backendName, backendType string, backends map[string]map[string]config.Backend) (Client, error) {
