@@ -24,6 +24,13 @@ const (
 	GroupReadyCondition = "GroupReadyCondition"
 )
 
+type BackendStatus struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Status  bool   `json:"status"`
+	Message string `json:"message"`
+}
+
 type Backend struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
@@ -40,7 +47,7 @@ type GroupSpec struct {
 type GroupStatus struct {
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
-	Backends              []Backend          `json:"backends,omitempty"`
+	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -68,4 +75,46 @@ type GroupList struct {
 
 func init() {
 	SchemeBuilder.Register(&Group{}, &GroupList{})
+}
+
+func (c *Group) SetWaiting() {
+	condition := metav1.Condition{
+		Type:               GroupReadyCondition,
+		LastTransitionTime: metav1.Now(),
+		Status:             metav1.ConditionUnknown,
+		Message:            "Group is getting reconciled",
+		Reason:             "Waiting",
+	}
+	for i, currentCondition := range c.Status.Conditions {
+		if currentCondition.Type == condition.Type {
+			c.Status.Conditions[i] = condition
+			return
+		}
+	}
+	c.Status.Conditions = append(c.Status.Conditions, condition)
+}
+
+func (c *Group) UpdateStatus(isError bool) {
+	condition := metav1.Condition{
+		Type:               GroupReadyCondition,
+		LastTransitionTime: metav1.Now(),
+	}
+	if !isError {
+		condition.Status = metav1.ConditionTrue
+		condition.Message = "Group reconciled successfully"
+		condition.Reason = SuccessfullyReconciled
+
+		c.Status.LastAppliedGeneration = c.Generation
+	} else {
+		condition.Status = metav1.ConditionFalse
+		condition.Message = "Group reconcile failed"
+		condition.Reason = ReconcileFailed
+	}
+	for i, currentCondition := range c.Status.Conditions {
+		if currentCondition.Type == condition.Type {
+			c.Status.Conditions[i] = condition
+			return
+		}
+	}
+	c.Status.Conditions = append(c.Status.Conditions, condition)
 }

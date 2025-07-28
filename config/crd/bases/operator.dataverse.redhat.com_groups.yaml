@@ -75,12 +75,18 @@ spec:
               backends:
                 items:
                   properties:
+                    message:
+                      type: string
                     name:
                       type: string
+                    status:
+                      type: boolean
                     type:
                       type: string
                   required:
+                  - message
                   - name
+                  - status
                   - type
                   type: object
                 type: array
