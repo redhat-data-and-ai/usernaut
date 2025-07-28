@@ -64,9 +64,19 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"request": req.NamespacedName.String(),
 	})
 
+	var err error
+
 	groupCR := &usernautdevv1alpha1.Group{}
+
 	if err := r.Client.Get(ctx, req.NamespacedName, groupCR); err != nil {
 		r.log.WithError(err).Error("error fetching the group CR")
+		return ctrl.Result{}, err
+	}
+
+	// set the group status as waiting
+	groupCR.SetWaiting()
+	if err := r.Status().Update(ctx, groupCR); err != nil {
+		r.log.WithError(err).Error("error updating the status")
 		return ctrl.Result{}, err
 	}
 
@@ -160,6 +170,13 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 		}
 		r.backendLogger.WithField("users_to_remove", usersToRemove).Info("removed users from team successfully")
+	}
+
+	// Update the status after configuration is ready
+	groupCR.UpdateStatus(err)
+	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
+		r.log.WithError(updateStatusErr).Error("error updating the status")
+		return ctrl.Result{}, updateStatusErr
 	}
 
 	return ctrl.Result{}, nil

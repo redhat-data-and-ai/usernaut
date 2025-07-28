@@ -69,3 +69,46 @@ type GroupList struct {
 func init() {
 	SchemeBuilder.Register(&Group{}, &GroupList{})
 }
+
+func (c *Group) SetWaiting() {
+	condition := metav1.Condition{
+		Type:               GroupReadyCondition,
+		LastTransitionTime: metav1.Now(),
+		Status:             metav1.ConditionUnknown,
+		Message:            "Group is getting reconciled",
+		Reason:             "Waiting",
+	}
+	for i, currentCondition := range c.Status.Conditions {
+		if currentCondition.Type == condition.Type {
+			c.Status.Conditions[i] = condition
+			return
+		}
+	}
+	c.Status.Conditions = append(c.Status.Conditions, condition)
+}
+
+func (c *Group) UpdateStatus(err error) {
+	condition := metav1.Condition{
+		Type:               GroupReadyCondition,
+		LastTransitionTime: metav1.Now(),
+	}
+	if err == nil {
+		condition.Status = metav1.ConditionTrue
+		condition.Message = "Group applied"
+		condition.Reason = SuccessfullyReconciled
+
+		c.Status.LastAppliedGeneration = c.Generation
+		c.Status.Backends = c.Spec.Backends
+	} else {
+		condition.Status = metav1.ConditionFalse
+		condition.Message = err.Error()
+		condition.Reason = ReconcileFailed
+	}
+	for i, currentCondition := range c.Status.Conditions {
+		if currentCondition.Type == condition.Type {
+			c.Status.Conditions[i] = condition
+			return
+		}
+	}
+	c.Status.Conditions = append(c.Status.Conditions, condition)
+}
