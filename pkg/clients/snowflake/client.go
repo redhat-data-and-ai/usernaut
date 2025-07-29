@@ -39,8 +39,9 @@ var (
 
 // SnowflakeConfig holds the configuration for Snowflake client
 type SnowflakeConfig struct {
-	PAT     string
-	BaseURL string
+	PAT      string
+	BaseURL  string
+	Database string
 }
 
 // SnowflakeClient is the client for interacting with Snowflake REST API

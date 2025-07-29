@@ -74,7 +74,7 @@ func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID, userID stri
 			"name": teamID,
 		},
 		"containing_scope": map[string]string{
-			"database": "DEFAULT",
+			"database": c.config.Database,
 		},
 		"securable_type": "ROLE",
 		"privileges":     []string{},
@@ -103,7 +103,7 @@ func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID, userID
 			"name": teamID,
 		},
 		"containing_scope": map[string]string{
-			"database": "DEFAULT",
+			"database": c.config.Database,
 		},
 		"securable_type": "ROLE",
 		"privileges":     []string{},

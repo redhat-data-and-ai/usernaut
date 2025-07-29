@@ -85,6 +85,7 @@ backends:
     type: "snowflake"
     enabled: true
     connection: 
-      pat: ${SNOWFLAKE_PAT}
+      pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
+      database: "DEFAULT"
 
