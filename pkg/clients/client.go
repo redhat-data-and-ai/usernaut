@@ -21,6 +21,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/atlan"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	redhatrover "github.com/redhat-data-and-ai/usernaut/pkg/clients/redhat_rover"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -88,8 +89,15 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 
 		return redhatrover.NewClient(backend.Connection,
 			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
+	case "atlan":
+		appConfig, err := config.GetConfig()
+		if err != nil {
+			return nil, err
+		}
+
+		return atlan.NewClient(backend.Connection,
+			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
 	default:
-		// If no valid backend type is matched, return an error
 		return nil, ErrInvalidBackend
 	}
 }

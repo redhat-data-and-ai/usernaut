@@ -30,7 +30,6 @@ pattern:
     - input: "^([^\\_]+)$"
       output: "$1"
 
-
 app:
   name: "usernaut"
   version: "0.0.1"
@@ -81,3 +80,9 @@ backends:
       cert_path: "/path/to/usernaut.crt"
       private_key_path: "/path/to/usernaut.pem"
       service_account_name: test-service-account
+  - name: atlan
+    type: "atlan"
+    enabled: true
+    connection:
+      url: "https://yourcompany.atlan.com"
+      api_token: file|path/to/api_token

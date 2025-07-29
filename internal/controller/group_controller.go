@@ -310,6 +310,35 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 			return teamID, nil
 		}
 	}
+
+	// ATLAN VALIDATION: Check if Rover group exists in CRs before creating Atlan team
+	if backendType == "atlan" {
+		groupList := &usernautdevv1alpha1.GroupList{}
+		if err := r.Client.List(ctx, groupList); err != nil {
+			r.backendLogger.WithError(err).Error("error listing Group CRs for Rover validation")
+			return "", err
+		}
+
+		roverExists := false
+		for _, group := range groupList.Items {
+			if group.Spec.GroupName == groupName {
+				for _, backend := range group.Spec.Backends {
+					if backend.Type == "rover" {
+						roverExists = true
+						break
+					}
+				}
+				if roverExists {
+					break
+				}
+			}
+		}
+
+		if !roverExists {
+			return "", errors.New("cannot create Atlan team: Rover group must exist first")
+		}
+	}
+
 	// If team details are not found in cache, create a new team
 	r.backendLogger.Info("team details not found in cache, creating a new team")
 
