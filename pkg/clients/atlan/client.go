@@ -107,7 +107,7 @@ func (aC *AtlanClient) sendRequest(ctx context.Context, url string, method strin
 		return nil, statusCode, fmt.Errorf("request failed: %w", err)
 	}
 
-	if !slices.Contains([]int{http.StatusOK, http.StatusCreated}, statusCode) {
+	if !slices.Contains([]int{http.StatusOK, http.StatusCreated, http.StatusNoContent}, statusCode) {
 		return nil, statusCode, fmt.Errorf("unexpected status code: %d", statusCode)
 	}
 

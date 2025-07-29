@@ -104,6 +104,22 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			"backend_type": backend.Type,
 		})
 
+		// ATLAN VALIDATION: Check if Rover backend exists in current CR before creating Atlan team
+		if backend.Type == "atlan" {
+			roverExists := false
+			for _, b := range groupCR.Spec.Backends {
+				if b.Type == "rover" {
+					roverExists = true
+					break
+				}
+			}
+
+			if !roverExists {
+				r.backendLogger.Error("cannot process Atlan backend: Rover backend must exist in the same Group CR")
+				return ctrl.Result{}, errors.New("cannot process Atlan backend: Rover backend must exist in the same Group CR")
+			}
+		}
+
 		// process each backend in the group CR
 		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 		if err != nil {
@@ -308,34 +324,6 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		if teamID, exists := teamDetailsMap[backendName+"_"+backendType]; exists && teamID != "" {
 			r.backendLogger.WithField("teamID", teamID).Info("team details found in cache")
 			return teamID, nil
-		}
-	}
-
-	// ATLAN VALIDATION: Check if Rover group exists in CRs before creating Atlan team
-	if backendType == "atlan" {
-		groupList := &usernautdevv1alpha1.GroupList{}
-		if err := r.Client.List(ctx, groupList); err != nil {
-			r.backendLogger.WithError(err).Error("error listing Group CRs for Rover validation")
-			return "", err
-		}
-
-		roverExists := false
-		for _, group := range groupList.Items {
-			if group.Spec.GroupName == groupName {
-				for _, backend := range group.Spec.Backends {
-					if backend.Type == "rover" {
-						roverExists = true
-						break
-					}
-				}
-				if roverExists {
-					break
-				}
-			}
-		}
-
-		if !roverExists {
-			return "", fmt.Errorf("cannot create Atlan team for group '%s': Rover group must exist first", groupName)
 		}
 	}
 
