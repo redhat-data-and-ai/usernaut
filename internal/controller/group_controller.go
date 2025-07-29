@@ -335,7 +335,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		}
 
 		if !roverExists {
-			return "", errors.New("cannot create Atlan team: Rover group must exist first")
+			return "", fmt.Errorf("cannot create Atlan team for group '%s': Rover group must exist first", groupName)
 		}
 	}
 
