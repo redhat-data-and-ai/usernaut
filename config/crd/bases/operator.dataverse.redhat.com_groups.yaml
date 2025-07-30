@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.1
-  name: groups.usernaut.dev
+  name: groups.operator.dataverse.redhat.com
 spec:
-  group: usernaut.dev
+  group: operator.dataverse.redhat.com
   names:
     kind: Group
     listKind: GroupList

@@ -6,7 +6,7 @@ metadata:
   namespace: usernaut
 rules:
 - apiGroups:
-  - usernaut.dev
+  - operator.dataverse.redhat.com
   resources:
   - groups
   verbs:
@@ -18,13 +18,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - usernaut.dev
+  - operator.dataverse.redhat.com
   resources:
   - groups/finalizers
   verbs:
   - update
 - apiGroups:
-  - usernaut.dev
+  - operator.dataverse.redhat.com
   resources:
   - groups/status
   verbs:

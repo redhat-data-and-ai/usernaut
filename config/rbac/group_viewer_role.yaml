@@ -8,7 +8,7 @@ metadata:
   name: group-viewer-role
 rules:
 - apiGroups:
-  - usernaut.dev
+  - operator.dataverse.redhat.com
   resources:
   - groups
   verbs:
@@ -16,7 +16,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - usernaut.dev
+  - operator.dataverse.redhat.com
   resources:
   - groups/status
   verbs:

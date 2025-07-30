@@ -144,7 +144,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "dd1e5158.usernaut.dev",
+		LeaderElectionID:       "dd1e5158.operator.dataverse.redhat.com",
 		Cache: k8sCache.Options{
 			DefaultNamespaces: map[string]k8sCache.Config{
 				watchedNs: {},
