@@ -72,24 +72,17 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
-	// Create normalized copies for processing (DO NOT modify original CR)
-	normalizedGroupName := strings.ToLower(groupCR.Spec.GroupName)
-	normalizedMembers := make([]string, len(groupCR.Spec.Members))
-	for i, member := range groupCR.Spec.Members {
-		normalizedMembers[i] = strings.ToLower(member)
-	}
-
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
 		"request": req.NamespacedName.String(),
-		"group":   normalizedGroupName,
-		"members": len(normalizedMembers),
+		"group":   groupCR.Spec.GroupName,
+		"members": len(groupCR.Spec.Members),
 	})
 
 	r.log.Info("reconciling the group against the backends")
 
 	// fetch all the data from LDAP for the users in the group
 	r.allLdapUserData = make(map[string]*structs.LDAPUser, 0)
-	for _, user := range normalizedMembers {
+	for _, user := range groupCR.Spec.Members {
 		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching user data from LDAP")
@@ -103,7 +96,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 
-		r.allLdapUserData[user] = ldapUser // Use normalized user directly since it's already normalized
+		r.allLdapUserData[user] = ldapUser
 	}
 
 	for _, backend := range groupCR.Spec.Backends {
@@ -122,7 +115,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.backendLogger.Debug("created backend client successfully")
 
 		// fetch the teamID or create a new team if it doesn't exist
-		teamID, err := r.fetchOrCreateTeam(ctx, normalizedGroupName, backend.Name, backend.Type, backendClient)
+		teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error fetching or creating team")
 			return ctrl.Result{}, err
@@ -130,7 +123,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
 
 		// create the users in backend and cache if they don't exist
-		err = r.createUsersInBackendAndCache(ctx, normalizedMembers, backend.Name, backend.Type, backendClient)
+		err = r.createUsersInBackendAndCache(ctx, groupCR.Spec.Members, backend.Name, backend.Type, backendClient)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error creating users in backend and cache")
 			return ctrl.Result{}, err
@@ -147,7 +140,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// members field doesn't contains an email mapped to the user, we need to map it before finding the diff
 		r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
-		usersToAdd, usersToRemove, err := r.processUsers(ctx, normalizedMembers, members, backend.Name, backend.Type)
+		usersToAdd, usersToRemove, err := r.processUsers(ctx, groupCR.Spec.Members, members, backend.Name, backend.Type)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error processing users")
 			return ctrl.Result{}, err

@@ -26,27 +26,33 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 )
 
-// FetchAllTeams fetches all roles from Snowflake using REST API
+// FetchAllTeams fetches all roles from Snowflake using REST API with proper pagination
 func (c *SnowflakeClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
-	endpoint := "/api/v2/roles"
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
+	teams := make(map[string]structs.Team)
+
+	// Use the generic pagination helper with a closure that processes team pages
+	err := c.fetchAllWithPagination(ctx, "/api/v2/roles", func(resp []byte) error {
+		return c.processTeamsPage(resp, teams)
+	})
 	if err != nil {
 		return nil, err
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch roles, status: %s, body: %s", http.StatusText(status), string(resp))
-	}
 
+	return teams, nil
+}
+
+// processTeamsPage processes a page of teams and adds them to the result map
+func (c *SnowflakeClient) processTeamsPage(resp []byte, teams map[string]structs.Team) error {
 	// Define a struct to represent the role
 	type SnowflakeRole struct {
 		Name string `json:"name"`
 	}
 	var roles []SnowflakeRole
 	if err := json.Unmarshal(resp, &roles); err != nil {
-		return nil, fmt.Errorf("failed to parse roles response: %w", err)
+		return fmt.Errorf("failed to parse roles response: %w", err)
 	}
+
 	// Extract roles from the response
-	teams := make(map[string]structs.Team)
 	for _, role := range roles {
 		team := structs.Team{
 			ID:   strings.ToLower(role.Name),
@@ -55,7 +61,7 @@ func (c *SnowflakeClient) FetchAllTeams(ctx context.Context) (map[string]structs
 		teams[strings.ToLower(role.Name)] = team
 	}
 
-	return teams, nil
+	return nil
 }
 
 // CreateTeam creates a new role in Snowflake using REST API

@@ -17,11 +17,9 @@ limitations under the License.
 package snowflake
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"time"
@@ -99,10 +97,9 @@ func (c *SnowflakeClient) makeRequest(ctx context.Context, endpoint,
 	return req.MakeRequest(c.client, method, "snowflake")
 }
 
-// sendRequest sends a HTTP request to the Snowflake REST API and returns response body, headers, and status
-func (c *SnowflakeClient) sendRequest(ctx context.Context,
-	endpoint, method string, body interface{}) ([]byte, http.Header,
-	int, error) {
+// makeRequestWithHeader uses the common request package for HTTP requests and returns headers (with logging, tracing, etc.)
+func (c *SnowflakeClient) makeRequestWithHeader(ctx context.Context, endpoint,
+	method string, body interface{}) ([]byte, http.Header, int, error) {
 	var requestBody []byte
 	if body != nil && (method != http.MethodGet && method != http.MethodDelete) {
 		var err error
@@ -113,37 +110,71 @@ func (c *SnowflakeClient) sendRequest(ctx context.Context,
 	}
 
 	url := c.config.BaseURL + endpoint
-	httpReq, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(requestBody))
+	req, err := request.NewRequest(ctx, method, url, requestBody)
 	if err != nil {
 		return nil, nil, 0, err
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.config.PAT)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
-
-	response, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, nil, http.StatusBadGateway, err
+	// Set Snowflake-specific headers
+	headers := map[string]string{
+		"Authorization": "Bearer " + c.config.PAT,
+		"Content-Type":  "application/json",
+		"Accept":        "application/json",
 	}
-	defer func() { _ = response.Body.Close() }()
+	req.SetHeaders(headers)
 
-	responseBody, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, nil, http.StatusBadGateway, err
-	}
-
-	return responseBody, response.Header, response.StatusCode, nil
+	return req.MakeRequestWithHeader(c.client, method, "snowflake")
 }
 
-// parseLinkHeader parses the Link header and returns the URL for the specified rel
-// Uses regex to handle diverse Link header formats robustly, including:
-// - Multiple parameters (e.g., rel="next"; title="Next Page")
-// - Varying whitespace
-// - Different parameter orders
+func (c *SnowflakeClient) fetchAllWithPagination(ctx context.Context, endpoint string, processPage func([]byte) error) error {
+	// First request to get initial page and Link header
+	resp, headers, status, err := c.makeRequestWithHeader(ctx, endpoint, http.MethodGet, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("failed to fetch data from %s, status: %s, body: %s", endpoint, http.StatusText(status), string(resp))
+	}
+
+	// Process first page
+	if err := processPage(resp); err != nil {
+		return err
+	}
+
+	// Check for additional pages in Link header
+	linkHeader := headers.Get("Link")
+	if linkHeader != "" {
+		nextURL := parseLinkHeader(linkHeader, "next")
+
+		// Follow pagination using Link header URLs
+		for nextURL != "" {
+			resp, headers, status, err := c.makeRequestWithHeader(ctx, nextURL, http.MethodGet, nil)
+			if err != nil {
+				return err
+			}
+			if status != http.StatusOK {
+				return fmt.Errorf("unexpected status during pagination: %s, body: %s", http.StatusText(status), string(resp))
+			}
+
+			// Process this page
+			if err := processPage(resp); err != nil {
+				return err
+			}
+
+			// Get next page URL
+			linkHeader = headers.Get("Link")
+			if linkHeader != "" {
+				nextURL = parseLinkHeader(linkHeader, "next")
+			} else {
+				nextURL = ""
+			}
+		}
+	}
+
+	return nil
+}
+
 func parseLinkHeader(linkHeader, rel string) string {
-	// RFC 5988 compliant regex pattern for Link header parsing
-	// Matches: <url>; rel="value" (with optional whitespace and other parameters)
 	matches := linkPattern.FindAllStringSubmatch(linkHeader, -1)
 
 	for _, match := range matches {

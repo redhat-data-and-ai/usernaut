@@ -43,49 +43,12 @@ func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*struct
 	resultByID := make(map[string]*structs.User)
 	resultByEmail := make(map[string]*structs.User)
 
-	// First request to get initial page and Link header
-	resp, headers, status, err := c.sendRequest(ctx, "/api/v2/users", http.MethodGet, nil)
+	// Use the generic pagination helper with a closure that processes user pages
+	err := c.fetchAllWithPagination(ctx, "/api/v2/users", func(resp []byte) error {
+		return c.processUsersPage(resp, resultByID, resultByEmail)
+	})
 	if err != nil {
 		return nil, nil, err
-	}
-	if status != http.StatusOK {
-		return nil, nil, fmt.Errorf("failed to fetch users, status: %s, body: %s", http.StatusText(status), string(resp))
-	}
-
-	// Process first page
-	if err := c.processUsersPage(resp, resultByID, resultByEmail); err != nil {
-		return nil, nil, err
-	}
-
-	// Check for additional pages in Link header
-	linkHeader := headers.Get("Link")
-	if linkHeader != "" {
-		nextURL := parseLinkHeader(linkHeader, "next")
-
-		// Follow pagination using Link header URLs
-		for nextURL != "" {
-			resp, headers, status, err := c.sendRequest(ctx, nextURL, http.MethodGet, nil)
-			if err != nil {
-				return nil, nil, err
-			}
-			if status != http.StatusOK {
-				return nil, nil,
-					fmt.Errorf("unexpected status during pagination: %s, body: %s", http.StatusText(status), string(resp))
-			}
-
-			// Process this page
-			if err := c.processUsersPage(resp, resultByID, resultByEmail); err != nil {
-				return nil, nil, err
-			}
-
-			// Get next page URL
-			linkHeader = headers.Get("Link")
-			if linkHeader != "" {
-				nextURL = parseLinkHeader(linkHeader, "next")
-			} else {
-				nextURL = ""
-			}
-		}
 	}
 
 	return resultByID, resultByEmail, nil
