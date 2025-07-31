@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
-	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -257,7 +256,7 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 		}
 		for _, user := range users {
 			userMap := make(map[string]string)
-			userInCache, err := store.Get(ctx, strings.ToLower(user.GetEmail()))
+			userInCache, err := store.Get(ctx, user.GetEmail())
 			// if user is already in the cache, we will update the user details
 			// with the new user ID from the backend
 			if err == nil {
@@ -281,7 +280,7 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 			// The user ID is stored in the cache as a JSON string
 			// so that it can be easily retrieved later
 			// The user ID is stored in the cache with the backend name and type as key
-			err = store.Set(ctx, strings.ToLower(user.GetEmail()), string(newUserValue), cache.NoExpiration)
+			err = store.Set(ctx, user.GetEmail(), string(newUserValue), cache.NoExpiration)
 			if err != nil {
 				log.WithError(err).Error("failed to store user in cache")
 				return err
@@ -296,7 +295,7 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 		}
 		for _, team := range teams {
 			teamMap := make(map[string]string)
-			teamInCache, err := store.Get(ctx, strings.ToLower(team.GetName()))
+			teamInCache, err := store.Get(ctx, team.GetName())
 			// if team is already in the cache, we will update the team details
 			// with the new team ID from the backend
 			if err == nil {
@@ -321,7 +320,7 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 			// The team ID is stored in the cache as a JSON string
 			// so that it can be easily retrieved later
 			// The team ID is stored in the cache with the backend name and type as key
-			err = store.Set(ctx, strings.ToLower(team.GetName()), string(newTeamValue), cache.NoExpiration)
+			err = store.Set(ctx, team.GetName(), string(newTeamValue), cache.NoExpiration)
 			if err != nil {
 				log.WithError(err).Error("failed to store team in cache")
 				return err
