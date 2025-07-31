@@ -144,7 +144,7 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
+run: setup-pre-commit manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
@@ -187,8 +187,17 @@ ifndef ignore-not-found
   ignore-not-found = false
 endif
 
+.PHONY: setup-pre-commit
+setup-pre-commit:
+	@if [ ! -f .git/hooks/pre-commit ]; then \
+		echo "Installing pre-commit hook to run 'make lint test'..."; \
+		echo '#!/bin/sh' > .git/hooks/pre-commit; \
+		echo "make lint test" >> .git/hooks/pre-commit; \
+		chmod +x .git/hooks/pre-commit; \
+	fi
+
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: setup-pre-commit manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
 
 .PHONY: uninstall
@@ -222,7 +231,7 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 KUSTOMIZE_VERSION ?= v5.4.3
 CONTROLLER_TOOLS_VERSION ?= v0.16.1
 ENVTEST_VERSION ?= release-0.19
-GOLANGCI_LINT_VERSION ?= v1.59.1
+GOLANGCI_LINT_VERSION ?= v1.64.8
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
