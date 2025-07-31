@@ -1,0 +1,13 @@
+#!/bin/bash
+# Check for sensitive information before commit
+
+echo "🔍 Basic checks..."
+
+# Run the secrets check script
+if bash scripts/check-secrets.sh; then
+    echo "✅ Security check passed, proceeding with lint and tests..."
+    make lint test
+else
+    echo "❌ Security check failed - commit blocked!"
+    exit 1
+fi

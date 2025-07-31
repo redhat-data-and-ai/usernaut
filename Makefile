@@ -191,9 +191,8 @@ endif
 setup-pre-commit:
 	@if [ ! -f .git/hooks/pre-commit ]; then \
 		echo "Installing pre-commit hook to run 'make lint test'..."; \
-		echo '#!/bin/sh' > .git/hooks/pre-commit; \
-		echo "make lint test" >> .git/hooks/pre-commit; \
-		chmod +x .git/hooks/pre-commit; \
+		cp ./scripts/pre-commit .git/hooks/pre-commit; \
+		chmod +x .git/hooks/pre-commit;	\
 	fi
 
 .PHONY: install
