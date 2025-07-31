@@ -64,59 +64,65 @@ func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 	return members, nil
 }
 
-// AddUserToTeam adds a user to a team (grants role to user)
-func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID, userID string) error {
-	endpoint := fmt.Sprintf("/api/v2/users/%s/grants", userID)
+// AddUserToTeam adds users to a team (grants role to users)
+func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
+	for _, userID := range userIDs {
+		endpoint := fmt.Sprintf("/api/v2/users/%s/grants", userID)
 
-	// Create payload for granting role to user
-	payload := map[string]interface{}{
-		"securable": map[string]string{
-			"name": teamID,
-		},
-		"containing_scope": map[string]string{
-			"database": c.config.Database,
-		},
-		"securable_type": "ROLE",
-		"privileges":     []string{},
-	}
+		// Create payload for granting role to user
+		payload := map[string]interface{}{
+			"securable": map[string]string{
+				"name": teamID,
+			},
+			"containing_scope": map[string]string{
+				"database": c.config.Database,
+			},
+			"securable_type": "ROLE",
+			"privileges":     []string{},
+		}
 
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
-	if err != nil {
-		return err
-	}
+		resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
+		if err != nil {
+			return fmt.Errorf("failed to add user %s to team %s: %w", userID, teamID, err)
+		}
 
-	// Check for successful grant
-	if status != http.StatusOK && status != http.StatusCreated {
-		return fmt.Errorf("failed to add user to team, status: %s, body: %s", http.StatusText(status), string(resp))
+		// Check for successful grant
+		if status != http.StatusOK && status != http.StatusCreated {
+			return fmt.Errorf("failed to add user %s to team %s, status: %s, body: %s",
+				userID, teamID, http.StatusText(status), string(resp))
+		}
 	}
 
 	return nil
 }
 
-// RemoveUserFromTeam removes a user from a team (revokes role from user)
-func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID, userID string) error {
-	endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", userID)
+// RemoveUserFromTeam removes users from a team (revokes role from users)
+func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
+	for _, userID := range userIDs {
+		endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", userID)
 
-	// Create payload for revoking role from user
-	payload := map[string]interface{}{
-		"securable": map[string]string{
-			"name": teamID,
-		},
-		"containing_scope": map[string]string{
-			"database": c.config.Database,
-		},
-		"securable_type": "ROLE",
-		"privileges":     []string{},
-	}
+		// Create payload for revoking role from user
+		payload := map[string]interface{}{
+			"securable": map[string]string{
+				"name": teamID,
+			},
+			"containing_scope": map[string]string{
+				"database": c.config.Database,
+			},
+			"securable_type": "ROLE",
+			"privileges":     []string{},
+		}
 
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
-	if err != nil {
-		return err
-	}
+		resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
+		if err != nil {
+			return fmt.Errorf("failed to remove user %s from team %s: %w", userID, teamID, err)
+		}
 
-	// Check for successful revocation
-	if status != http.StatusOK && status != http.StatusNoContent {
-		return fmt.Errorf("failed to remove user from team, status: %s, body: %s", http.StatusText(status), string(resp))
+		// Check for successful revocation
+		if status != http.StatusOK && status != http.StatusNoContent {
+			return fmt.Errorf("failed to remove user %s from team %s, status: %s, body: %s",
+				userID, teamID, http.StatusText(status), string(resp))
+		}
 	}
 
 	return nil
