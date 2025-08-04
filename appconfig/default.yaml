@@ -86,3 +86,4 @@ backends:
     connection:
       url: "https://yourcompany.atlan.com"
       api_token: file|path/to/api_token
+      identity_provider_alias: {saml|azure}  # REQUIRED for SSO-Group mapping functions

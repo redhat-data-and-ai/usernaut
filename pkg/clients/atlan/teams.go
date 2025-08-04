@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -21,6 +22,23 @@ type AtlanGroupsResponse struct {
 	TotalRecord  int          `json:"totalRecord"`
 	FilterRecord int          `json:"filterRecord"`
 	Records      []AtlanGroup `json:"records"`
+}
+
+type SSOGroupMappingConfig struct {
+	SyncMode                string `json:"syncMode"`
+	Attributes              string `json:"attributes"`
+	AreAttributeValuesRegex string `json:"are.attribute.values.regex"`
+	AttributeName           string `json:"attribute.name"`
+	Group                   string `json:"group"`
+	AttributeValue          string `json:"attribute.value"`
+}
+
+type SSOGroupMapping struct {
+	ID                     string                `json:"id"`
+	IdentityProviderAlias  string                `json:"identityProviderAlias"`
+	IdentityProviderMapper string                `json:"identityProviderMapper"`
+	Name                   string                `json:"name"`
+	Config                 SSOGroupMappingConfig `json:"config"`
 }
 
 func (ac *AtlanClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
@@ -64,7 +82,6 @@ func (ac *AtlanClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 
 	url := fmt.Sprintf("%s/api/service/groups", ac.url)
 
-	// Convert team name to valid internal name as per Atlan guidelines (lowercase, alphanumeric + underscore only)
 	internalName := strings.ToLower(strings.ReplaceAll(team.Name, " ", "_"))
 	internalName = strings.ReplaceAll(internalName, "-", "_")
 
@@ -74,7 +91,7 @@ func (ac *AtlanClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 				"alias":     []string{team.Name},
 				"isDefault": []string{"false"},
 			},
-			"name": internalName, // Sanitized internal name
+			"name": internalName,
 		},
 	}
 
@@ -93,10 +110,86 @@ func (ac *AtlanClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 	}
 
 	log.WithField("team_id", createdGroup.ID).Info("successfully created team in Atlan")
+
 	return &structs.Team{
 		ID:   createdGroup.ID,
 		Name: createdGroup.Name,
 	}, nil
+}
+
+func (ac *AtlanClient) CreateTeamWithSSO(ctx context.Context, team *structs.Team, ssoGroupName string) (*structs.Team, error) {
+	createdTeam, err := ac.CreateTeam(ctx, team)
+	if err != nil {
+		return nil, err
+	}
+
+	if ssoGroupName == "" {
+		ssoGroupName = createdTeam.Name
+	}
+
+	if err := ac.CreateSSOMapping(ctx, createdTeam.ID, createdTeam.Name, ssoGroupName); err != nil {
+		log := logger.Logger(ctx)
+		log.WithError(err).Error("failed to create SSO group mapping")
+	}
+
+	return createdTeam, nil
+}
+
+func (ac *AtlanClient) CreateSSOMapping(ctx context.Context, teamID, teamName, ssoGroupName string) error {
+	provider := ac.identityProviderAlias
+	if provider == "" {
+		return fmt.Errorf("identity provider alias not configured - please set identity_provider_alias in backend connection config")
+	}
+
+	groupMapping := SSOGroupMapping{
+		IdentityProviderAlias:  provider,
+		IdentityProviderMapper: "saml-group-idp-mapper",
+		Name:                   fmt.Sprintf("%s--%d", teamID, time.Now().UnixMilli()),
+		Config: SSOGroupMappingConfig{
+			SyncMode:                "FORCE",
+			Attributes:              "[]",
+			AreAttributeValuesRegex: "",
+			AttributeName:           "memberOf",
+			Group:                   teamName,
+			AttributeValue:          ssoGroupName,
+		},
+	}
+
+	url := fmt.Sprintf("%s/api/service/idp/%s/mappers", ac.url, provider)
+	_, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, groupMapping, nil, "CreateSSOMapping")
+	if err != nil {
+		return fmt.Errorf("failed to create SSO group mapping: %w", err)
+	}
+
+	if statusCode != http.StatusCreated && statusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code %d when creating SSO group mapping", statusCode)
+	}
+
+	return nil
+}
+
+func (ac *AtlanClient) DeleteSSOMapping(ctx context.Context, teamName string) error {
+	mappingID, err := ac.FindSSOMapping(ctx, teamName)
+	if err != nil {
+		return err
+	}
+
+	provider := ac.identityProviderAlias
+	if provider == "" {
+		return fmt.Errorf("identity provider alias not configured - please set identity_provider_alias in backend connection config")
+	}
+
+	url := fmt.Sprintf("%s/api/service/idp/%s/mappers/%s/delete", ac.url, provider, mappingID)
+	_, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, nil, nil, "DeleteSSOMapping")
+	if err != nil {
+		return fmt.Errorf("failed to delete SSO group mapping: %w", err)
+	}
+
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status code %d when deleting SSO group mapping", statusCode)
+	}
+
+	return nil
 }
 
 func (ac *AtlanClient) DeleteTeamByID(ctx context.Context, teamID string) error {
@@ -117,6 +210,76 @@ func (ac *AtlanClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 	}
 
 	log.Info("successfully deleted team from Atlan")
+	return nil
+}
+
+// This function pulls all SSO mappings and returns the ID of the mapping for the given team name. This needs to be added to the Cache later on as an enhancement
+func (ac *AtlanClient) FindSSOMapping(ctx context.Context, teamName string) (string, error) {
+	provider := ac.identityProviderAlias
+	if provider == "" {
+		return "", fmt.Errorf("identity provider alias not configured - please set identity_provider_alias in backend connection config")
+	}
+
+	url := fmt.Sprintf("%s/api/service/idp/%s/mappers", ac.url, provider)
+	response, statusCode, err := ac.sendRequest(ctx, url, http.MethodGet, nil, nil, "FindSSOMapping")
+	if err != nil {
+		return "", fmt.Errorf("failed to get SSO mappings: %w", err)
+	}
+
+	if statusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status code %d when getting SSO mappings", statusCode)
+	}
+
+	var mappings []SSOGroupMapping
+	if err := json.Unmarshal(response, &mappings); err != nil {
+		return "", fmt.Errorf("failed to parse SSO mappings response: %w", err)
+	}
+
+	for _, mapping := range mappings {
+		if mapping.Config.Group == teamName {
+			return mapping.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("SSO mapping not found for team: %s", teamName)
+}
+
+func (ac *AtlanClient) UpdateSSOMapping(ctx context.Context, teamName, newSSOGroupName string) error {
+	mappingID, err := ac.FindSSOMapping(ctx, teamName)
+	if err != nil {
+		return err
+	}
+
+	provider := ac.identityProviderAlias
+	if provider == "" {
+		return fmt.Errorf("identity provider alias not configured - please set identity_provider_alias in backend connection config")
+	}
+
+	groupMapping := SSOGroupMapping{
+		ID:                     mappingID,
+		IdentityProviderAlias:  provider,
+		IdentityProviderMapper: "saml-group-idp-mapper",
+		Name:                   fmt.Sprintf("%s--%d", mappingID, time.Now().UnixMilli()),
+		Config: SSOGroupMappingConfig{
+			SyncMode:                "FORCE",
+			Attributes:              "[]",
+			AreAttributeValuesRegex: "",
+			AttributeName:           "memberOf",
+			Group:                   teamName,
+			AttributeValue:          newSSOGroupName,
+		},
+	}
+
+	url := fmt.Sprintf("%s/api/service/idp/%s/mappers/%s", ac.url, provider, mappingID)
+	_, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, groupMapping, nil, "UpdateSSOMapping")
+	if err != nil {
+		return fmt.Errorf("failed to update SSO group mapping: %w", err)
+	}
+
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code %d when updating SSO group mapping", statusCode)
+	}
+
 	return nil
 }
 

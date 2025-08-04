@@ -32,15 +32,17 @@ import (
 
 // AtlanClient is a simple HTTP client for Atlan API
 type AtlanClient struct {
-	client   heimdall.Doer
-	url      string
-	apiToken string
+	client                heimdall.Doer
+	url                   string
+	apiToken              string
+	identityProviderAlias string
 }
 
 // AtlanConfig holds the configuration needed to connect to Atlan
 type AtlanConfig struct {
-	URL      string `json:"url"`
-	APIToken string `json:"api_token"`
+	URL                   string `json:"url"`
+	APIToken              string `json:"api_token"`
+	IdentityProviderAlias string `json:"identity_provider_alias"`
 }
 
 // NewClient creates a new Atlan client with simple API token authentication
@@ -74,9 +76,10 @@ func NewClient(atlanAppConfig map[string]interface{},
 	}
 
 	return &AtlanClient{
-		client:   client,
-		url:      atlanConfig.URL,
-		apiToken: atlanConfig.APIToken,
+		client:                client,
+		url:                   atlanConfig.URL,
+		apiToken:              atlanConfig.APIToken,
+		identityProviderAlias: atlanConfig.IdentityProviderAlias,
 	}, nil
 }
 
