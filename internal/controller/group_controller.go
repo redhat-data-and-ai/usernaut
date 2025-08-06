@@ -118,6 +118,22 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			"backend_type": backend.Type,
 		})
 
+		// ATLAN VALIDATION: Check if Rover backend exists in current CR before creating Atlan team
+		if backend.Type == "atlan" {
+			roverExists := false
+			for _, b := range groupCR.Spec.Backends {
+				if b.Type == "rover" {
+					roverExists = true
+					break
+				}
+			}
+
+			if !roverExists {
+				r.backendLogger.Error("cannot process Atlan backend: Rover backend must exist in the same Group CR")
+				return ctrl.Result{}, errors.New("cannot process Atlan backend: Rover backend must exist in the same Group CR")
+			}
+		}
+
 		// process each backend in the group CR
 		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 		if err != nil {
@@ -369,6 +385,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 			return teamID, nil
 		}
 	}
+
 	// If team details are not found in cache, create a new team
 	r.backendLogger.Info("team details not found in cache, creating a new team")
 

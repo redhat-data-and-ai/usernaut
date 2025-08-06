@@ -21,6 +21,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/atlan"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	redhatrover "github.com/redhat-data-and-ai/usernaut/pkg/clients/redhat_rover"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -70,6 +71,12 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 	if !backend.Enabled {
 		return nil, errors.New("backend is not enabled")
 	}
+
+	appConfig, err := config.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	switch strings.ToLower(backendType) {
 	case "fivetran":
 		apiKey := backend.GetStringConnection("apikey", "")
@@ -81,15 +88,12 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 		// using the API key and secret from the backend configuration
 		return fivetran.NewClient(apiKey, apiSecret), nil
 	case "rover":
-		appConfig, err := config.GetConfig()
-		if err != nil {
-			return nil, err
-		}
-
 		return redhatrover.NewClient(backend.Connection,
 			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
+	case "atlan":
+		return atlan.NewClient(backend.Connection,
+			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
 	default:
-		// If no valid backend type is matched, return an error
 		return nil, ErrInvalidBackend
 	}
 }
