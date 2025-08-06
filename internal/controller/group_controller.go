@@ -26,6 +26,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/go-redis/redis"
@@ -41,6 +42,8 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
+
+const groupFinalizer = "operator.dataverse.redhat.com/finalizer"
 
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
@@ -69,9 +72,31 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	groupCR := &usernautdevv1alpha1.Group{}
 
-	if err := r.Client.Get(ctx, req.NamespacedName, groupCR); err != nil {
-		r.log.WithError(err).Error("error fetching the group CR")
-		return ctrl.Result{}, err
+	if err := r.Get(ctx, req.NamespacedName, groupCR); err != nil {
+		r.log.WithError(err).Error("Unable to fetch Group CR")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// adding or deleting finalizer based on CR status
+	if groupCR.ObjectMeta.DeletionTimestamp.IsZero() {
+		if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+			controllerutil.AddFinalizer(groupCR, groupFinalizer)
+			if err := r.Update(ctx, groupCR); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+			if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
+			if err := r.Update(ctx, groupCR); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// set the group status as waiting
@@ -222,6 +247,45 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+
+	r.log.Info("Finalizer: starting Backends team deletion cleanup")
+
+	for _, backend := range groupCR.Spec.Backends {
+
+		transformed_group_name, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupCR.Spec.GroupName)
+		if err != nil {
+			r.log.WithError(err).Error("Error in transforming group name")
+			return err
+		}
+
+		// since we have fivetran as of now
+		if backend.Type != "fivetran" {
+			continue
+		}
+
+		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
+		if err != nil {
+			r.log.WithError(err).Errorf("Finalizer: error creating client for backend %s", backend.Name)
+			return err
+		}
+
+		team, err := backendClient.FetchTeamByName(ctx, transformed_group_name)
+		if err != nil {
+			r.log.WithError(err).Error("Finalizer: error fetching team from Backend by name")
+			return err
+		}
+
+		r.log.Infof("Finalizer: Deleting team '%s' (ID: %s) from Backend %s", team.Name, team.ID, backend.Type)
+		if err := backendClient.DeleteTeamByID(ctx, team.ID); err != nil {
+			r.log.WithError(err).Error("Finalizer: failed to delete team from the backend")
+			return err
+		}
+		r.log.Infof("Finalizer: Successfully deleted team '%s' from Backend %s", team.Name, backend.Type)
+	}
+	return nil
 }
 
 func (r *GroupReconciler) processUsers(ctx context.Context,

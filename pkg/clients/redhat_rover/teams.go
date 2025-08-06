@@ -94,3 +94,7 @@ func (rC *RoverClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 	// This will be implemented in the future when Usernaut supports deleting teams.
 	return nil
 }
+
+func (rc *RoverClient) FetchTeamByName(ctx context.Context, teamName string) (*structs.Team, error) {
+	return nil, fmt.Errorf("fetching team details by name is not supported")
+}
