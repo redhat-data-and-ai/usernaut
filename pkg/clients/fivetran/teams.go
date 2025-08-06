@@ -2,6 +2,7 @@ package fivetran
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -136,4 +137,26 @@ func (fc *FivetranClient) DeleteTeamByID(ctx context.Context, teamID string) err
 	log.WithField("response", resp).Info("team deleted successfully")
 	return nil
 
+}
+
+func (fc *FivetranClient) FetchTeamByName(ctx context.Context, teamName string) (*structs.Team, error) {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"backend":   "fivetran",
+		"team_name": teamName,
+	})
+
+	log.Info("Trying to fetch team details")
+	allTeams, err := fc.FetchAllTeams(ctx)
+	if err != nil {
+		log.WithError(err).Error("Failed to fetch the list of all teams")
+		return nil, err
+	}
+
+	if team, found := allTeams[teamName]; found {
+		log.Info("Successfully found team by name")
+		return &team, nil
+	}
+
+	log.Warn("Team was not found by name")
+	return nil, fmt.Errorf("team with name '%s' not found", teamName)
 }

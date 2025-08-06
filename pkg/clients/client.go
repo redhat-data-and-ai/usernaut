@@ -54,6 +54,9 @@ type Client interface {
 	// Drop the team from respective backend
 	DeleteTeamByID(ctx context.Context, teamID string) error
 
+	// Fetch the team details out of all the teams available in backend
+	FetchTeamByName(ctx context.Context, teamName string) (*structs.Team, error)
+
 	// Returns the list of users present under a team
 	FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error)
 	// Adds a member to the team
