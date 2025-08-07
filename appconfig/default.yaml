@@ -81,3 +81,12 @@ backends:
       cert_path: "/path/to/usernaut.crt"
       private_key_path: "/path/to/usernaut.pem"
       service_account_name: test-service-account
+
+apiServer:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  auth:
+    enabled: true
+    api_keys:
+      - "testkey1"
