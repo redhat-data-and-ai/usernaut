@@ -26,6 +26,12 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 )
 
+// SnowflakeGrant represents a grant object from Snowflake grants API response
+type SnowflakeGrant struct {
+	GrantedTo   string `json:"granted_to"`
+	GranteeName string `json:"grantee_name"`
+}
+
 // FetchTeamMembersByTeamID fetches team members for a given team ID using the correct REST API endpoint
 func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 	teamID string) (map[string]*structs.User, error) {
@@ -41,7 +47,7 @@ func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 			fmt.Errorf("failed to fetch team members, status: %s, body: %s", http.StatusText(status), string(response))
 	}
 
-	var grants []map[string]interface{}
+	var grants []SnowflakeGrant
 	if err := json.Unmarshal(response, &grants); err != nil {
 		return nil, fmt.Errorf("error unmarshaling response: %w", err)
 	}
@@ -50,13 +56,11 @@ func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 
 	for _, grant := range grants {
 		// Check if this grant is for a USER (not ROLE)
-		if grantedTo, ok := grant["granted_to"].(string); ok && grantedTo == "USER" {
-			if granteeName, ok := grant["grantee_name"].(string); ok {
-				members[strings.ToLower(granteeName)] = &structs.User{
-					ID:       strings.ToLower(granteeName),
-					UserName: strings.ToLower(granteeName),
-					Email:    "", // Email not available from grants API
-				}
+		if grant.GrantedTo == "USER" && grant.GranteeName != "" {
+			members[strings.ToLower(grant.GranteeName)] = &structs.User{
+				ID:       strings.ToLower(grant.GranteeName),
+				UserName: strings.ToLower(grant.GranteeName),
+				Email:    "", // Email not available from grants API
 			}
 		}
 	}
@@ -73,9 +77,6 @@ func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID string, user
 		payload := map[string]interface{}{
 			"securable": map[string]string{
 				"name": teamID,
-			},
-			"containing_scope": map[string]string{
-				"database": c.config.Database,
 			},
 			"securable_type": "ROLE",
 			"privileges":     []string{},
@@ -105,9 +106,6 @@ func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID string,
 		payload := map[string]interface{}{
 			"securable": map[string]string{
 				"name": teamID,
-			},
-			"containing_scope": map[string]string{
-				"database": c.config.Database,
 			},
 			"securable_type": "ROLE",
 			"privileges":     []string{},

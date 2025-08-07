@@ -87,5 +87,4 @@ backends:
     connection: 
       pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
-      database: "DEFAULT"
 

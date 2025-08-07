@@ -246,29 +246,22 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			return nil, nil, err
 		}
 
-		// If user found in cache, parse and check for backend-specific user ID
-		if err == nil && userDetailsInCache != "" {
-			userDetailsStr, ok := userDetailsInCache.(string)
-			if !ok {
-				r.backendLogger.WithField("user", user).Error("user details in cache are not of type string")
-				return nil, nil, errors.New("user details in cache are not of type string")
-			}
-
-			if jErr := json.Unmarshal([]byte(userDetailsStr), &userDetailsMap); jErr != nil {
-				r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
-				return nil, nil, jErr
-			}
-
-			userID := userDetailsMap[backendName+"_"+backendType]
-			if userID != "" {
-				userIDsToSync = append(userIDsToSync, userID)
-				continue
-			}
+		userDetailsStr, ok := userDetailsInCache.(string)
+		if !ok {
+			r.backendLogger.WithField("user", user).Error("user details in cache are not of type string")
+			return nil, nil, errors.New("user details in cache are not of type string")
 		}
 
-		// If we reach here, user not found in cache - this is expected for new users
-		r.backendLogger.WithField("user", user).Debug("user not found in cache, will be created in createUsersInBackendAndCache")
-		userIDsToSync = append(userIDsToSync, user)
+		if jErr := json.Unmarshal([]byte(userDetailsStr), &userDetailsMap); jErr != nil {
+			r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
+			return nil, nil, jErr
+		}
+		userID := userDetailsMap[backendName+"_"+backendType]
+		if userID == "" {
+			r.backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
+			return nil, nil, errors.New("user ID not found in cache")
+		}
+		userIDsToSync = append(userIDsToSync, userID)
 	}
 
 	// process existing team members to find users to remove
