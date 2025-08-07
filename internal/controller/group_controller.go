@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,8 +35,8 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
-
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
+
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
@@ -114,7 +115,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
 	for _, backend := range groupCR.Spec.Backends {
-
 		r.backendLogger = r.log.WithFields(logrus.Fields{
 			"backend":      backend.Name,
 			"backend_type": backend.Type,
@@ -129,33 +129,13 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 
-		// If this is GitLab backend and Rover is enabled, fetch teams from Rover
-		if backend.Type == "gitlab" && r.AppConfig.BackendMap["rover"]["rover"].Enabled {
-			// Create Rover client to fetch teams
-			roverClient, err := clients.New("rover", "rover", r.AppConfig.BackendMap)
-			if err != nil {
-				r.backendLogger.WithError(err).Warn("failed to create rover client for team fetching")
-			} else {
-				// Fetch team details from Rover
-				roverTeam, err := roverClient.FetchTeamDetails(ctx, groupCR.Spec.GroupName)
-				if err != nil {
-					r.backendLogger.WithError(err).Warn("failed to fetch teams from rover")
-				} else {
-					externalTeams := make(map[string]*structs.Team)
-					externalTeams[groupCR.Spec.GroupName] = roverTeam
-
-					gitlabClient, ok := backendClient.(*gitlab.GitlabClient)
-					if !ok {
-						r.backendLogger.Error("backend client is not a GitlabClient")
-						return ctrl.Result{}, errors.New("backend client is not a GitlabClient")
-					}
-					gitlabClient.SetExternalTeams(externalTeams)
-					r.backendLogger.WithField("external_teams_count", len(externalTeams)).Info("set external teams from rover")
-				}
-			}
-		}
-
 		r.backendLogger.Debug("created backend client successfully")
+
+		err = r.setupLdapSync(backend.Type, backend.Name, backendClient)
+		if err != nil {
+			r.backendLogger.WithError(err).Error("error setting up ldap sync")
+			return ctrl.Result{}, err
+		}
 
 		// fetch the teamID or create a new team if it doesn't exist
 		teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
@@ -433,4 +413,26 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&usernautdevv1alpha1.Group{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
+}
+
+func (r *GroupReconciler) setupLdapSync(backendType string, backendName string, backendClient clients.Client) error {
+	switch backendType {
+	case "gitlab":
+		dependsOn := r.AppConfig.BackendMap["gitlab"][backendName].DependsOn
+		if dependsOn.Type == "" && dependsOn.Name == "" {
+			r.backendLogger.Info("no depends_on found for gitlab backend")
+			return nil
+		} else {
+			if r.AppConfig.BackendMap[dependsOn.Type][dependsOn.Name].Enabled {
+				gitlabClient, ok := backendClient.(*gitlab.GitlabClient)
+				if !ok {
+					r.backendLogger.Error("backend client is not a GitlabClient")
+					return errors.New("backend client is not a GitlabClient")
+				}
+				gitlabClient.SetLdapSync(true)
+			}
+		}
+		r.backendLogger.Info(fmt.Sprintf("setup ldap sync successfully for %s", backendType))
+	}
+	return nil
 }
