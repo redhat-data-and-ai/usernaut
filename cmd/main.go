@@ -280,7 +280,7 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 			// The user ID is stored in the cache as a JSON string
 			// so that it can be easily retrieved later
 			// The user ID is stored in the cache with the backend name and type as key
-			err = store.Set(ctx, user.Email, string(newUserValue), cache.NoExpiration)
+			err = store.Set(ctx, user.GetEmail(), string(newUserValue), cache.NoExpiration)
 			if err != nil {
 				log.WithError(err).Error("failed to store user in cache")
 				return err
@@ -320,7 +320,7 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 			// The team ID is stored in the cache as a JSON string
 			// so that it can be easily retrieved later
 			// The team ID is stored in the cache with the backend name and type as key
-			err = store.Set(ctx, team.Name, string(newTeamValue), cache.NoExpiration)
+			err = store.Set(ctx, team.GetName(), string(newTeamValue), cache.NoExpiration)
 			if err != nil {
 				log.WithError(err).Error("failed to store team in cache")
 				return err
