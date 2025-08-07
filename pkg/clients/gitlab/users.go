@@ -1,9 +1,24 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package gitlab
 
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strconv"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -12,8 +27,6 @@ import (
 )
 
 func (g *GitlabClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
-	// TODO: Implement pagination i.e. ListUserOptions
-
 	users, _, err := g.gitlabClient.Users.ListUsers(nil)
 	if err != nil {
 		return nil, nil, err
@@ -62,20 +75,8 @@ func (g *GitlabClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 		Name:          &u.FirstName,
 		ResetPassword: &resetPassword, // Required by API, but unused with LDAP
 	}
-	user, resp, err := g.gitlabClient.Users.CreateUser(createUserOptions)
+	user, _, err := g.gitlabClient.Users.CreateUser(createUserOptions)
 	if err != nil {
-		if resp != nil && resp.StatusCode == http.StatusForbidden {
-			log.WithField("error", err).Warn("GitLab user already exists, trying to fetch existing user")
-			// Fetch existing user by username
-			users, _, fetchErr := g.gitlabClient.Users.ListUsers(&gitlab.ListUsersOptions{
-				Username: &u.UserName,
-			})
-			if fetchErr == nil && len(users) > 0 {
-				return userDetails(users[0]), nil
-			}
-			// If can't fetch, return error
-			log.WithField("fetch_error", fetchErr).Error("Failed to fetch existing user")
-		}
 		return nil, err
 	}
 

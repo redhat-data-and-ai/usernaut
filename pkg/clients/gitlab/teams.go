@@ -1,8 +1,25 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package gitlab
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -11,7 +28,6 @@ import (
 )
 
 func (g *GitlabClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
-	// TODO: Implement using g.client.Groups.ListGroups
 	return map[string]structs.Team{}, nil
 }
 
@@ -31,44 +47,35 @@ func (g *GitlabClient) FetchTeamDetails(ctx context.Context, teamID string) (*st
 }
 
 func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
-	log := logger.Logger(ctx)
-	log.Info("Create GitLab team")
+	logger.Logger(ctx).Info("Create GitLab team")
 
-	if g.ldapSync {
-		// Check if team exists in external teams (e.g., from Rover)
-		if g.externalTeams != nil {
-			if externalTeam, exists := g.externalTeams[team.Name]; exists {
-				log.Info("Found team in external teams")
-				return externalTeam, nil
-			}
-		}
-	}
-
-	// Create regular GitLab group (non-LDAP mode)
-
+	groupName := team.Name
+	visibility := gitlab.PublicVisibility
 	createGroupOptions := &gitlab.CreateGroupOptions{
-		Name: &team.Name,
-		Path: &team.Name,
+		ParentID:   &g.gitlabConfig.GroupId,
+		Name:       &groupName,
+		Path:       &groupName,
+		Visibility: &visibility,
 	}
-
 	group, _, err := g.gitlabClient.Groups.CreateGroup(createGroupOptions)
 	if err != nil {
-		// Try to find existing group if creation failed
-		log.WithField("error", err).Warn("Group creation failed, trying to fetch existing group")
-		groups, _, fetchErr := g.gitlabClient.Groups.ListGroups(&gitlab.ListGroupsOptions{
-			Search: &team.Name,
-		})
-		if fetchErr == nil && len(groups) > 0 {
-			for _, existingGroup := range groups {
-				if existingGroup.Name == team.Name {
-					return &structs.Team{
-						ID:   fmt.Sprintf("%d", existingGroup.ID),
-						Name: existingGroup.Name,
-					}, nil
-				}
-			}
-		}
 		return nil, err
+	}
+
+	if g.ldapSync {
+		// Add group to LDAP
+		ldapLink, err := g.addToLdapGroup(groupName, group.ID)
+		if err != nil {
+			return nil, err
+		}
+		logger.Logger(ctx).Info("LDAP link added successfully", ldapLink)
+
+		// Initiate LDAP sync
+		resp, err := g.initiateSync(ctx, g.gitlabConfig)
+		if err != nil {
+			return nil, err
+		}
+		logger.Logger(ctx).Infof("LDAP sync initiated successfully with status: %s", resp.Status)
 	}
 
 	return &structs.Team{
@@ -78,6 +85,43 @@ func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 }
 
 func (g *GitlabClient) DeleteTeamByID(ctx context.Context, teamID string) error {
-	// TODO: Implement using g.client.Groups.DeleteGroup
 	return nil
+}
+
+func (g *GitlabClient) addToLdapGroup(groupName string, groupID int) (*gitlab.LDAPGroupLink, error) {
+	ldapProvider := "ldapmain"
+	accessLevel := gitlab.DeveloperPermissions
+	ldapLink, _, err := g.gitlabClient.Groups.AddGroupLDAPLink(groupID, &gitlab.AddGroupLDAPLinkOptions{
+		GroupAccess: &accessLevel,
+		CN:          &groupName,
+		Provider:    &ldapProvider,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ldapLink, nil
+}
+
+func (g *GitlabClient) initiateSync(ctx context.Context, cfg *GitlabConfig) (*http.Response, error) {
+	httpClient := &http.Client{}
+	url := fmt.Sprintf("%s/groups/%d/ldap_sync", cfg.URL, cfg.GroupId)
+	req, err := http.NewRequest(http.MethodPost, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Logger(ctx).Error("error closing response body", err)
+		}
+	}()
+	if resp.StatusCode != http.StatusAccepted {
+		return nil, fmt.Errorf("LDAP synchronization request failed with status: %s", resp.Status)
+	}
+	return resp, nil
 }
