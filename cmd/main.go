@@ -227,16 +227,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if appConf.APIServer.Enabled {
-		apiServer := server.NewAPIServer(appConf)
-		go func() {
-			if err := apiServer.Start(); err != nil {
-				setupLog.Error(err, "failed to start http API server")
-			}
-		}()
-
-	}
-
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
