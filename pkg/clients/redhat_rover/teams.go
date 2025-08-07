@@ -35,10 +35,7 @@ func (rC *RoverClient) FetchAllTeams(ctx context.Context) (map[string]structs.Te
 
 func (rC *RoverClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
 	// Fetching team details is not supported as the teamID is the same as the teamName.
-	return &structs.Team{
-		ID:   teamID,
-		Name: teamID,
-	}, nil
+	return nil, fmt.Errorf("fetching team details is not supported")
 }
 
 // CreateTeam creates a new team in Rover. If the team already exists, it returns the existing team details.

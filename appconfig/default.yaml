@@ -91,6 +91,9 @@ backends:
   - name: gitlab
     type: "gitlab"
     enabled: true
+    depends_on: 
+      name: "rover"
+      type: "rover"
     connection:
       url: "https://gitlab.test.com"
       token: "test-token"
