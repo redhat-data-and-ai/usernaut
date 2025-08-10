@@ -30,7 +30,7 @@ func NewAPIServer(cfg *config.AppConfig) *APIServer {
 	router := gin.New()
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
-	router.Use(middleware.CORS())
+	router.Use(middleware.CORS(&s.config.APIServer))
 
 	s := &APIServer{
 		config: cfg,

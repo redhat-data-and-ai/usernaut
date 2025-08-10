@@ -4,17 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func CORS() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, X-API-Key")
 
-	"strings"
-
-	"github.com/gin-gonic/gin"
-	"github.com/redhat-data-and-ai/usernaut/pkg/config"
-)
 
 func CORS(cfg *config.APIServerConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
