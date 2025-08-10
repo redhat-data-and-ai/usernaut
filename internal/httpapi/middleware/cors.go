@@ -1,7 +1,6 @@
 package middleware
 
 import (
-<<<<<<< HEAD
 	"github.com/gin-gonic/gin"
 )
 
@@ -11,7 +10,6 @@ func CORS() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, X-API-Key")
 
-=======
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -33,15 +31,11 @@ func CORS(cfg *config.APIServerConfig) gin.HandlerFunc {
 		}
 		c.Header("Access-Control-Allow-Methods", strings.Join(cfg.CORS.AllowedMethods, ", "))
 		c.Header("Access-Control-Allow-Headers", strings.Join(cfg.CORS.AllowedHeaders, ", "))
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
 		}
-<<<<<<< HEAD
 
-=======
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
 		c.Next()
 	}
 }

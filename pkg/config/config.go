@@ -44,8 +44,6 @@ type APIServerConfig struct {
 	Host    string     `yaml:"host"`
 	Port    int        `yaml:"port"`
 	Auth    AuthConfig `yaml:"auth"`
-<<<<<<< HEAD
-=======
 	CORS    CORSConfig `yaml:"cors"`
 }
 
@@ -53,7 +51,6 @@ type CORSConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins"`
 	AllowedMethods []string `yaml:"allowed_methods"`
 	AllowedHeaders []string `yaml:"allowed_headers"`
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
 }
 
 type AuthConfig struct {

@@ -30,21 +30,15 @@ func NewAPIServer(cfg *config.AppConfig) *APIServer {
 	router := gin.New()
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
-<<<<<<< HEAD
 	router.Use(middleware.CORS())
-=======
 
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
 	s := &APIServer{
 		config: cfg,
 		router: router,
 	}
 
-<<<<<<< HEAD
-=======
 	router.Use(middleware.CORS(&s.config.APIServer))
 
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
 	s.setupRoutes()
 	return s
 }
@@ -69,18 +63,15 @@ func (s *APIServer) Start() error {
 		Handler: s.router,
 	}
 
-<<<<<<< HEAD
 	go s.StopServer()
 	logrus.WithField("address", s.server.Addr).Info("starting http API server")
 	if err := s.server.ListenAndServe(); err != nil {
-=======
 	logrus.WithField("address", s.server.Addr).Info("starting http API server")
 	if err := s.server.ListenAndServe(); err != nil {
 		if err == http.ErrServerClosed {
 			logrus.Info("http API server stopped")
 			return nil
 		}
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
 		return fmt.Errorf("failed to start http API server : %w", err)
 	}
 	return nil

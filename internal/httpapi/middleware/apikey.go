@@ -40,11 +40,8 @@ func APIKeyAuth(cfg *config.AppConfig) gin.HandlerFunc {
 			return
 		}
 
-<<<<<<< HEAD
 		logrus.Info("API request authenticated")
-=======
 		logrus.Debug("API request authenticated")
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
 		c.Next()
 	}
 }

@@ -89,9 +89,6 @@ apiServer:
   auth:
     enabled: true
     api_keys:
-<<<<<<< HEAD
       - "testkey1"
-=======
       - "testkey1"
     
->>>>>>> f6e3bef (API skeleton code to add endpoints as required)
