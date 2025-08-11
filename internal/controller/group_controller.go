@@ -430,6 +430,8 @@ func (r *GroupReconciler) setupLdapSync(backendType string, backendName string, 
 					return errors.New("backend client is not a GitlabClient")
 				}
 				gitlabClient.SetLdapSync(true)
+			} else {
+				return errors.New("depends_on backend is not enabled")
 			}
 		}
 		r.backendLogger.Info(fmt.Sprintf("setup ldap sync successfully for %s", backendType))
