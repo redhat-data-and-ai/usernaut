@@ -75,6 +75,13 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	// set the group status as waiting
+	groupCR.SetWaiting()
+	if err := r.Status().Update(ctx, groupCR); err != nil {
+		r.log.WithError(err).Error("error updating the status")
+		return ctrl.Result{}, err
+	}
+
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
 		"request": req.NamespacedName.String(),
 		"group":   groupCR.Spec.GroupName,
@@ -155,6 +162,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
 		usersToAdd, usersToRemove, err := r.processUsers(ctx, groupCR.Spec.Members, members, backend.Name, backend.Type)
+
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error processing users")
 			backendErrors[backend.Type] = err.Error()
@@ -273,13 +281,8 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 
 	// process group users to find users to add
 	// if user is not present in existing team members, then add the user to the team
-	existingMemberIDs := make([]string, 0, len(existingTeamMembers))
-	for memberID := range existingTeamMembers {
-		existingMemberIDs = append(existingMemberIDs, memberID)
-	}
-
 	for _, userID := range userIDsToSync {
-		if !slices.Contains(existingMemberIDs, userID) {
+		if _, exists := existingTeamMembers[userID]; !exists {
 			usersToAdd = append(usersToAdd, userID)
 		}
 	}
@@ -302,7 +305,7 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 		userDetailsMap := make(map[string]string)
 		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
 		if err == nil && userDetailsInCache != "" {
-			// Load existing cache data to merge with new data
+			// handle error for below statement
 			if jErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &userDetailsMap); jErr != nil {
 				r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
 				return jErr
@@ -365,7 +368,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 
 	teamDetailsMap := make(map[string]string)
 
-	teamDetailsInCache, err := r.Cache.Get(ctx, groupName)
+	teamDetailsInCache, err := r.Cache.Get(ctx, transformed_group_name)
 	if err == nil && teamDetailsInCache != "" {
 		if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
 			r.backendLogger.WithError(jErr).Error("error unmarshalling team details from cache")
@@ -397,7 +400,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Create the team in cache
 	teamDetailsMap[backendName+"_"+backendType] = newTeam.ID
 	toBeUpdated, _ := json.Marshal(teamDetailsMap)
-	if err := r.Cache.Set(ctx, groupName, string(toBeUpdated), cache.NoExpiration); err != nil {
+	if err := r.Cache.Set(ctx, transformed_group_name, string(toBeUpdated), cache.NoExpiration); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in cache")
 		return "", err
 	}

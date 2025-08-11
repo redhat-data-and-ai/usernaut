@@ -96,7 +96,8 @@ func (c *SnowflakeClient) makeRequest(ctx context.Context, endpoint,
 	return req.MakeRequest(c.client, method, "snowflake")
 }
 
-// makeRequestWithHeader uses the common request package for HTTP requests and returns headers (with logging, tracing, etc.)
+// makeRequestWithHeader uses the common request package for HTTP requests
+// and returns headers (with logging, tracing, etc.)
 func (c *SnowflakeClient) makeRequestWithHeader(ctx context.Context, endpoint,
 	method string, body interface{}) ([]byte, http.Header, int, error) {
 	var requestBody []byte
@@ -125,14 +126,16 @@ func (c *SnowflakeClient) makeRequestWithHeader(ctx context.Context, endpoint,
 	return req.MakeRequestWithHeader(c.client, method, "snowflake")
 }
 
-func (c *SnowflakeClient) fetchAllWithPagination(ctx context.Context, endpoint string, processPage func([]byte) error) error {
+func (c *SnowflakeClient) fetchAllWithPagination(ctx context.Context,
+	endpoint string, processPage func([]byte) error) error {
 	// First request to get initial page and Link header
 	resp, headers, status, err := c.makeRequestWithHeader(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("failed to fetch data from %s, status: %s, body: %s", endpoint, http.StatusText(status), string(resp))
+		return fmt.Errorf("failed to fetch data from %s, status: %s, body: %s",
+			endpoint, http.StatusText(status), string(resp))
 	}
 
 	// Process first page
