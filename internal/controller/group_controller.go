@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -105,7 +106,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 
-		r.allLdapUserData[ldapUser.UID] = ldapUser
+		r.allLdapUserData[user] = ldapUser
 	}
 
 	backendErrors := make(map[string]string, 0)
@@ -325,13 +326,24 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			LastName:  userDetails.GetSN(),
 		})
 		if err != nil {
-			// TODO: handle the error in case user already exists in backend, we need to again populate the cache
-			r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
-			return err
+			// Handle the case where user already exists in backend - fetch the existing user and populate cache
+			if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "Conflict") {
+				r.backendLogger.WithField("user", user).Info("user already exists in backend, fetching existing user details")
+				existingUser, fetchErr := backendClient.FetchUserDetails(ctx, user)
+				if fetchErr != nil {
+					r.backendLogger.WithField("user", user).WithError(fetchErr).Error("error fetching existing user details")
+					return fetchErr
+				}
+				userDetailsMap[backendName+"_"+backendType] = existingUser.ID
+				r.backendLogger.WithField("user", user).Info("fetched existing user details and updated cache")
+			} else {
+				r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
+				return err
+			}
+		} else {
+			r.backendLogger.WithField("user", user).Info("created user in backend successfully")
+			userDetailsMap[backendName+"_"+backendType] = newUser.ID
 		}
-		r.backendLogger.WithField("user", user).Info("created user in backend successfully")
-
-		userDetailsMap[backendName+"_"+backendType] = newUser.ID
 		toBeUpdated, _ := json.Marshal(userDetailsMap)
 		if err := r.Cache.Set(ctx, userDetails.GetEmail(), string(toBeUpdated), cache.NoExpiration); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")

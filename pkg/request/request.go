@@ -37,6 +37,7 @@ type IRequester interface {
 	GetHeaders() http.Header
 	SetHeaders(map[string]string) IRequester
 	MakeRequest(heimdall.Doer, string, string) ([]byte, int, error)
+	MakeRequestWithHeader(heimdall.Doer, string, string) ([]byte, http.Header, int, error)
 }
 
 type Requester struct {
@@ -65,6 +66,27 @@ func (r *Requester) SetHeaders(headers map[string]string) IRequester {
 }
 
 func (r *Requester) MakeRequest(httpClient heimdall.Doer, methodName string, serviceName string) ([]byte, int, error) {
+	response, responseBody, err := r.sendRequest(httpClient, methodName, serviceName)
+	if err != nil {
+		return nil, http.StatusBadGateway, err
+	}
+
+	return responseBody, response.StatusCode, nil
+}
+
+func (r *Requester) MakeRequestWithHeader(httpClient heimdall.Doer, methodName string,
+	serviceName string) ([]byte, http.Header, int, error) {
+	response, responseBody, err := r.sendRequest(httpClient, methodName, serviceName)
+	if err != nil {
+		return nil, nil, http.StatusBadGateway, err
+	}
+
+	return responseBody, response.Header, response.StatusCode, nil
+}
+
+// sendRequest contains the common logic for making HTTP requests with logging and tracing
+func (r *Requester) sendRequest(httpClient heimdall.Doer, methodName string,
+	serviceName string) (*http.Response, []byte, error) {
 	// transmit span's TraceContext as HTTP headers to api
 	if span := ot.SpanFromContext(r.request.Context()); span != nil {
 		_, ok := span.Tracer().(ot.NoopTracer)
@@ -82,6 +104,7 @@ func (r *Requester) MakeRequest(httpClient heimdall.Doer, methodName string, ser
 
 	log.WithFields(logrus.Fields{
 		"service": serviceName,
+		"method":  methodName,
 		"url":     r.request.URL.String(),
 	}).Info("SENDING_HTTP_REQUEST")
 
@@ -89,6 +112,7 @@ func (r *Requester) MakeRequest(httpClient heimdall.Doer, methodName string, ser
 
 	log.WithFields(logrus.Fields{
 		"service": serviceName,
+		"method":  methodName,
 		"url":     r.request.URL.String(),
 	}).Info("RECEIVED_HTTP_RESPONSE")
 
@@ -97,22 +121,23 @@ func (r *Requester) MakeRequest(httpClient heimdall.Doer, methodName string, ser
 
 	log.WithFields(logrus.Fields{
 		"service":    serviceName,
+		"method":     methodName,
 		"url":        r.request.URL.String(),
 		"durationMs": durationMs,
 	}).Info("HTTP_RESPONSE_DURATION")
 
 	if err != nil {
-		return nil, http.StatusBadGateway, err
+		return nil, nil, err
 	}
 
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, http.StatusBadGateway, err
+		return nil, nil, err
 	}
 
 	if err := response.Body.Close(); err != nil {
-		return nil, http.StatusBadGateway, err
+		return nil, nil, err
 	}
 
-	return responseBody, response.StatusCode, nil
+	return response, responseBody, nil
 }
