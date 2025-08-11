@@ -39,8 +39,13 @@ type Backend struct {
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
 	GroupName string    `json:"group_name"`
-	Members   []string  `json:"members"`
+	Members   Members   `json:"members"`
 	Backends  []Backend `json:"backends"`
+}
+
+type Members struct {
+	Groups []string `json:"groups,omitempty"`
+	Users  []string `json:"users"`
 }
 
 // GroupStatus defines the observed state of Group
