@@ -45,7 +45,7 @@ const (
 
 var _ = Describe("Group Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const resourceName = "test-resource-group"
 
 		ctx := context.Background()
 
@@ -66,7 +66,10 @@ var _ = Describe("Group Controller", func() {
 					},
 					Spec: usernautdevv1alpha1.GroupSpec{
 						GroupName: "test-resource-group",
-						Members:   []string{"test-user-1", "test-user-2"},
+						Members: usernautdevv1alpha1.Members{
+							Groups: []string{},
+							Users:  []string{"test-user-1", "test-user-2"},
+						},
 						Backends: []usernautdevv1alpha1.Backend{
 							{
 								Name: "fivetran",
@@ -96,8 +99,7 @@ var _ = Describe("Group Controller", func() {
 				Type:    "fivetran",
 				Enabled: true,
 				Connection: map[string]interface{}{
-					keyApiKey:    "testKey",
-					keyApiSecret: "testSecret",
+					keyApiKey: "testKey",
 				},
 			}
 
