@@ -23,8 +23,11 @@ import (
 	"flag"
 	"os"
 
+	"github.com/spf13/viper"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +43,7 @@ import (
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/internal/controller"
+	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/server"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
@@ -173,6 +177,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	if appConf.APIServer.Enabled && len(appConf.APIServer.Auth.APIKeys) == 0 {
+		v := viper.New()
+		v.SetConfigName("local")
+		v.SetConfigType("yaml")
+		v.AddConfigPath("./appconfig")
+		if err := v.ReadInConfig(); err == nil {
+			if keys := v.GetStringSlice("apiServer.auth.api_keys"); len(keys) > 0 {
+				appConf.APIServer.Auth.APIKeys = keys
+				setupLog.Info("debig: Loaded API keys directly from Viper",
+					"keys", keys)
+			}
+		}
+	}
+
 	ldapConn, err := ldap.InitLdap(appConf.LDAP)
 	if err != nil {
 		setupLog.Error(err, "failed to initialize LDAP connection")
@@ -208,6 +226,16 @@ func main() {
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
+	}
+
+	// Start HTTP API server if enabled
+	if appConf.APIServer.Enabled {
+		apiServer := server.NewAPIServer(appConf)
+		go func() {
+			if err := apiServer.Start(); err != nil {
+				setupLog.Error(err, "failed to start HTTP API server")
+			}
+		}()
 	}
 
 	setupLog.Info("starting manager")

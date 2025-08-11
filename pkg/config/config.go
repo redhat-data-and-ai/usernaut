@@ -35,7 +35,27 @@ type AppConfig struct {
 		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
 		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
 	} `yaml:"httpClient"`
+	APIServer  APIServerConfig               `yaml:"apiServer"`
 	BackendMap map[string]map[string]Backend `yaml:"-"`
+}
+
+type APIServerConfig struct {
+	Enabled bool       `yaml:"enabled"`
+	Host    string     `yaml:"host"`
+	Port    int        `yaml:"port"`
+	Auth    AuthConfig `yaml:"auth"`
+	CORS    CORSConfig `yaml:"cors"`
+}
+
+type CORSConfig struct {
+	AllowedOrigins []string `yaml:"allowed_origins"`
+	AllowedMethods []string `yaml:"allowed_methods"`
+	AllowedHeaders []string `yaml:"allowed_headers"`
+}
+
+type AuthConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	APIKeys []string `yaml:"api_keys"`
 }
 
 // PatternEntry represents the input and output pattern of group names
