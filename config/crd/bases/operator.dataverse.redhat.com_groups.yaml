@@ -61,9 +61,18 @@ spec:
               group_name:
                 type: string
               members:
-                items:
-                  type: string
-                type: array
+                properties:
+                  groups:
+                    items:
+                      type: string
+                    type: array
+                  users:
+                    items:
+                      type: string
+                    type: array
+                required:
+                - users
+                type: object
             required:
             - backends
             - group_name
