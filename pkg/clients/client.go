@@ -97,16 +97,14 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 
 		pat := backend.GetStringConnection("pat", "")
 		baseURL := backend.GetStringConnection("base_url", "")
-		database := backend.GetStringConnection("database", "DEFAULT")
 
 		if pat == "" || baseURL == "" {
 			return nil, errors.New("missing required connection parameters for snowflake backend: pat and base_url are required")
 		}
 
 		snowflakeCfg := snowflake.SnowflakeConfig{
-			PAT:      pat,
-			BaseURL:  baseURL,
-			Database: database,
+			PAT:     pat,
+			BaseURL: baseURL,
 		}
 
 		return snowflake.NewClient(snowflakeCfg,
