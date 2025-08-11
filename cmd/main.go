@@ -43,6 +43,7 @@ import (
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/internal/controller"
+	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/server"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
@@ -225,6 +226,16 @@ func main() {
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
+	}
+
+	// Start HTTP API server if enabled
+	if appConf.APIServer.Enabled {
+		apiServer := server.NewAPIServer(appConf)
+		go func() {
+			if err := apiServer.Start(); err != nil {
+				setupLog.Error(err, "failed to start HTTP API server")
+			}
+		}()
 	}
 
 	setupLog.Info("starting manager")
