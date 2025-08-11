@@ -1,10 +1,11 @@
 package middleware
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
-
-
 
 func CORS(cfg *config.APIServerConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
