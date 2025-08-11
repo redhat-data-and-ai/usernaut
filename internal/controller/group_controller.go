@@ -22,12 +22,17 @@ import (
 	"errors"
 	"slices"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/go-redis/redis"
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
@@ -43,7 +48,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const groupFinalizer = "operator.dataverse.redhat.com/finalizer"
+const (
+	groupFinalizer = "operator.dataverse.redhat.com/finalizer"
+)
 
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
@@ -99,6 +106,12 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// set owner reference to the group CR
+	if err := r.setOwnerReference(ctx, groupCR); err != nil {
+		r.log.WithError(err).Error("error setting owner reference")
+		return ctrl.Result{}, err
+	}
+
 	// set the group status as waiting
 	groupCR.SetWaiting()
 	if err := r.Status().Update(ctx, groupCR); err != nil {
@@ -109,14 +122,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
 		"request": req.NamespacedName.String(),
 		"group":   groupCR.Spec.GroupName,
-		"members": len(groupCR.Spec.Members),
+		"members": len(groupCR.Spec.Members.Users),
+		"groups":  groupCR.Spec.Members.Groups,
 	})
 
-	r.log.Info("reconciling the group against the backends")
+	visitedGroups := make(map[string]struct{})
+	allMembers, err := r.fetchUniqueGroupMembers(ctx, groupCR.Spec.GroupName, groupCR.Namespace, visitedGroups)
+	if err != nil {
+		r.log.WithError(err).Error("error fetching unique group members")
+		return ctrl.Result{}, err
+	}
+
+	uniqueMembers := r.deduplicateMembers(allMembers)
+	groupCR.Status.ReconciledUsers = uniqueMembers
+
+	r.log.Info("fetching LDAP data for the users in the group")
 
 	// fetch all the data from LDAP for the users in the group
 	r.allLdapUserData = make(map[string]*structs.LDAPUser, 0)
-	for _, user := range groupCR.Spec.Members {
+	for _, user := range uniqueMembers {
 		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching user data from LDAP")
@@ -164,7 +188,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
 
 		// create the users in backend and cache if they don't exist
-		err = r.createUsersInBackendAndCache(ctx, groupCR.Spec.Members, backend.Name, backend.Type, backendClient)
+		err = r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error creating users in backend and cache")
 			backendErrors[backend.Type] = err.Error()
@@ -185,7 +209,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// members field doesn't contains an email mapped to the user, we need to map it before finding the diff
 		r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
-		usersToAdd, usersToRemove, err := r.processUsers(ctx, groupCR.Spec.Members, members, backend.Name, backend.Type)
+		usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type)
 
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error processing users")
@@ -308,7 +332,8 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 						backendLoggerInfo.WithError(err).Error("Finalizer: failed to update cache after deleting team")
 						return err
 					}
-					backendLoggerInfo.Infof("Finalizer: Updated cache after removing team ID '%s' for group '%s'", teamID, transformed_group_name)
+					backendLoggerInfo.Infof(
+						"Finalizer: Updated cache after removing team ID '%s' for group '%s'", teamID, transformed_group_name)
 				} else {
 					backendLoggerInfo.Info("Finalizer: No more entries are there in the cache")
 				}
@@ -493,8 +518,159 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Add an index field for referenced groups
+	indexField := "spec.members.groups"
+	groupType := &usernautdevv1alpha1.Group{}
+	indexFunc := func(obj client.Object) []string {
+		group := obj.(*usernautdevv1alpha1.Group)
+		return group.Spec.Members.Groups
+	}
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), groupType, indexField, indexFunc); err != nil {
+		return err
+	}
+
+	// Create a mapping function to find all Group CRs that reference a changed Group CR
+	mapFunc := func(ctx context.Context, obj client.Object) []reconcile.Request {
+		group := obj.(*usernautdevv1alpha1.Group)
+		var referencingGroups usernautdevv1alpha1.GroupList
+
+		// Find all Group CRs that reference this Group in their spec.members.groups
+		if err := r.List(ctx, &referencingGroups, client.MatchingFields{
+			indexField: group.Name,
+		}); err != nil {
+			r.log.WithError(err).Error("error listing referencing groups")
+			return nil
+		}
+
+		// Create reconcile requests for each referencing Group
+		var requests []reconcile.Request
+		for _, referencingGroup := range referencingGroups.Items {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      referencingGroup.Name,
+					Namespace: referencingGroup.Namespace,
+				},
+			})
+		}
+		return requests
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&usernautdevv1alpha1.Group{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		Watches(
+			client.Object(&usernautdevv1alpha1.Group{}),
+			handler.EnqueueRequestsFromMapFunc(mapFunc),
+		).
 		Complete(r)
+}
+
+func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName,
+	namespace string, visitedOnPath map[string]struct{}) ([]string, error) {
+
+	r.log.WithField("group", groupName).Info("fetching group members")
+
+	// Handle cyclic dependencies for the current recursion path.
+	if _, ok := visitedOnPath[groupName]; ok {
+		r.log.WithField("group", groupName).Warn("cyclic group dependency detected; returning empty member list")
+		return []string{}, nil
+	}
+	visitedOnPath[groupName] = struct{}{}
+	defer delete(visitedOnPath, groupName) // Remove from path when returning.
+
+	groupCR := &usernautdevv1alpha1.Group{}
+	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
+		r.log.WithError(err).Error("error fetching the group CR")
+		return nil, err
+	}
+
+	members := make([]string, 0)
+	members = append(members, groupCR.Spec.Members.Users...)
+
+	for _, subGroup := range groupCR.Spec.Members.Groups {
+		subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, namespace, visitedOnPath)
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, subMembers...)
+	}
+
+	return members, nil
+}
+
+func (r *GroupReconciler) deduplicateMembers(members []string) []string {
+	// Deduplicate groupMembers before setting status
+	uniqueMembersMap := make(map[string]struct{})
+	uniqueMembers := make([]string, 0, len(members))
+	for _, member := range members {
+		if _, exists := uniqueMembersMap[member]; !exists {
+			uniqueMembersMap[member] = struct{}{}
+			uniqueMembers = append(uniqueMembers, member)
+		}
+	}
+	return uniqueMembers
+}
+
+func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+	// Determine the desired owner references from parent groups
+	desiredOwnerRefs := make(map[types.UID]metav1.OwnerReference)
+	for _, parentGroupName := range groupCR.Spec.Members.Groups {
+		parentGroupCR := &usernautdevv1alpha1.Group{}
+		if err := r.Client.Get(ctx,
+			client.ObjectKey{Namespace: groupCR.Namespace, Name: parentGroupName}, parentGroupCR); err != nil {
+			r.log.WithError(err).Error("error fetching the parent group CR")
+			return err
+		}
+		blockOwnerDeletion := true
+		desiredOwnerRefs[parentGroupCR.UID] = metav1.OwnerReference{
+			APIVersion:         usernautdevv1alpha1.GroupVersion.String(),
+			Kind:               "Group",
+			Name:               parentGroupCR.Name,
+			UID:                parentGroupCR.UID,
+			BlockOwnerDeletion: &blockOwnerDeletion,
+		}
+	}
+
+	// Separate existing owner references into Group and non-Group kinds
+	var nonGroupOwnerRefs []metav1.OwnerReference
+	existingGroupOwnerRefs := make(map[types.UID]struct{})
+	for _, ref := range groupCR.OwnerReferences {
+		if ref.Kind == "Group" && ref.APIVersion == usernautdevv1alpha1.GroupVersion.String() {
+			existingGroupOwnerRefs[ref.UID] = struct{}{}
+		} else {
+			nonGroupOwnerRefs = append(nonGroupOwnerRefs, ref)
+		}
+	}
+
+	// Check if an update is needed by comparing desired and existing Group owner references
+	needsUpdate := false
+	if len(desiredOwnerRefs) != len(existingGroupOwnerRefs) {
+		needsUpdate = true
+	} else {
+		for uid := range desiredOwnerRefs {
+			if _, ok := existingGroupOwnerRefs[uid]; !ok {
+				needsUpdate = true
+				break
+			}
+		}
+	}
+
+	if !needsUpdate {
+		return nil
+	}
+
+	// Construct the new list of owner references and update the CR
+	newOwnerRefs := make([]metav1.OwnerReference, 0, len(desiredOwnerRefs)+len(nonGroupOwnerRefs))
+	newOwnerRefs = append(newOwnerRefs, nonGroupOwnerRefs...)
+	for _, ref := range desiredOwnerRefs {
+		newOwnerRefs = append(newOwnerRefs, ref)
+	}
+
+	groupCR.OwnerReferences = newOwnerRefs
+	if err := r.Update(ctx, groupCR); err != nil {
+		r.log.WithError(err).Error("error updating the group CR with owner reference")
+		return err
+	}
+
+	return nil
 }
