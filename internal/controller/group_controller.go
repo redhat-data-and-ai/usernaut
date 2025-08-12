@@ -26,6 +26,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/go-redis/redis"
@@ -41,6 +42,8 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
+
+const groupFinalizer = "operator.dataverse.redhat.com/finalizer"
 
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
@@ -69,9 +72,31 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	groupCR := &usernautdevv1alpha1.Group{}
 
-	if err := r.Client.Get(ctx, req.NamespacedName, groupCR); err != nil {
-		r.log.WithError(err).Error("error fetching the group CR")
-		return ctrl.Result{}, err
+	if err := r.Get(ctx, req.NamespacedName, groupCR); err != nil {
+		r.log.WithError(err).Error("Unable to fetch Group CR")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// adding or deleting finalizer based on CR status
+	if groupCR.ObjectMeta.DeletionTimestamp.IsZero() {
+		if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+			controllerutil.AddFinalizer(groupCR, groupFinalizer)
+			if err := r.Update(ctx, groupCR); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+			if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
+			if err := r.Update(ctx, groupCR); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// set the group status as waiting
@@ -224,6 +249,68 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return ctrl.Result{}, nil
 }
 
+func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+	r.log.Info("Finalizer: starting Backends team deletion cleanup")
+
+	for _, backend := range groupCR.Spec.Backends {
+		transformed_group_name, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupCR.Spec.GroupName)
+		if err != nil {
+			r.log.WithError(err).Error("Error in transforming group name")
+			return err
+		}
+
+		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
+		if err != nil {
+			r.log.WithError(err).Errorf("Finalizer: error creating client for backend %s", backend.Name)
+			return err
+		}
+
+		teamDetailsMap := make(map[string]string)
+		teamDetailsInCache, err := r.Cache.Get(ctx, transformed_group_name)
+		if err == nil && teamDetailsInCache != "" {
+			if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
+				r.backendLogger.WithError(jErr).Error("error unmarshalling team details from cache")
+				return jErr
+			}
+
+			cacheKey := backend.Name + "_" + backend.Type
+
+			if teamID, exists := teamDetailsMap[cacheKey]; exists && teamID != "" {
+				r.log.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
+
+				if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
+					r.log.WithError(err).Error("Finalizer: failed to delete team from the backend")
+					return err
+				}
+				r.log.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
+
+				delete(teamDetailsMap, cacheKey)
+
+				if err := r.Cache.Delete(ctx, transformed_group_name); err != nil {
+					r.log.WithError(err).Error("Finalizer: failed to delete cache entry after cleanup")
+					return err
+				}
+
+				if len(teamDetailsMap) > 0 {
+					updatedCacheData, err := json.Marshal(teamDetailsMap)
+					if err != nil {
+						r.log.WithError(err).Error("Finalizer: failed to marshal updated team details for cache")
+						return err
+					}
+					if err := r.Cache.Set(ctx, transformed_group_name, string(updatedCacheData), cache.NoExpiration); err != nil {
+						r.log.WithError(err).Error("Finalizer: failed to update cache after deleting team")
+						return err
+					}
+					r.log.Infof("Finalizer: Updated cache after removing team ID '%s' for group '%s'", teamID, transformed_group_name)
+				} else {
+					r.log.Info("Finalizer: No more entries are there in the cache")
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (r *GroupReconciler) processUsers(ctx context.Context,
 	groupUsers []string,
 	existingTeamMembers map[string]*structs.User,
@@ -362,7 +449,6 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 			r.backendLogger.WithError(jErr).Error("error unmarshalling team details from cache")
 			return "", jErr
 		}
-
 		// Check if the team details for the backend exist in cache
 		if teamID, exists := teamDetailsMap[backendName+"_"+backendType]; exists && teamID != "" {
 			r.backendLogger.WithField("teamID", teamID).Info("team details found in cache")
