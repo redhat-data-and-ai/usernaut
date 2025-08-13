@@ -50,6 +50,7 @@ type Members struct {
 
 // GroupStatus defines the observed state of Group
 type GroupStatus struct {
+	ReconciledUsers       []string           `json:"reconciledUsers,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
