@@ -47,10 +47,14 @@ func (g *GitlabClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 	return teamMembers, nil
 }
 
-func (g *GitlabClient) AddUserToTeam(ctx context.Context, teamID, userID string) error {
-	logger.Logger(ctx).Info("Add user to GitLab team")
+func (g *GitlabClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
+	logger.Logger(ctx).Info("Add users to GitLab team")
 
 	if g.ldapSync {
+		return nil
+	}
+
+	if len(userIDs) == 0 {
 		return nil
 	}
 
@@ -58,23 +62,26 @@ func (g *GitlabClient) AddUserToTeam(ctx context.Context, teamID, userID string)
 	if err != nil {
 		return err
 	}
-	userIDInt, err := strconv.Atoi(userID)
-	if err != nil {
-		return err
-	}
+
 	accessLevel := gitlab.DeveloperPermissions
-	addMemberOpts := &gitlab.AddGroupMemberOptions{
-		UserID:      &userIDInt,
-		AccessLevel: &accessLevel,
-	}
-	_, _, err = g.gitlabClient.GroupMembers.AddGroupMember(groupIDInt, addMemberOpts)
-	if err != nil {
-		return err
+	for _, userID := range userIDs {
+		userIDInt, convErr := strconv.Atoi(userID)
+		if convErr != nil {
+			return convErr
+		}
+		addMemberOpts := &gitlab.AddGroupMemberOptions{
+			UserID:      &userIDInt,
+			AccessLevel: &accessLevel,
+		}
+		_, _, err = g.gitlabClient.GroupMembers.AddGroupMember(groupIDInt, addMemberOpts)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (g *GitlabClient) RemoveUserFromTeam(ctx context.Context, teamID, userID string) error {
+func (g *GitlabClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
 	if g.ldapSync {
 		return nil
 	}
