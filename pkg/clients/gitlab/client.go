@@ -47,6 +47,7 @@ func NewClient(gitlabAppConfig map[string]interface{}) (*GitlabClient, error) {
 	}, nil
 }
 
-func (g *GitlabClient) SetLdapSync(ldapSync bool) {
+func (g *GitlabClient) SetLdapSync(ldapSync bool, cn string) {
 	g.ldapSync = ldapSync
+	g.cn = cn
 }

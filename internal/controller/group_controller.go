@@ -180,9 +180,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		r.backendLogger.Debug("created backend client successfully")
 
-		err = r.setupLdapSync(backend.Type, backend.Name, backendClient)
+		err = r.setupLdapSync(backend.Type, backend.Name, backendClient, groupCR.Spec.GroupName)
 		if err != nil {
-			r.backendLogger.WithError(err).Error("error setting up ldap sync")
+			r.backendLogger.Info(fmt.Sprintf("setup ldap sync successfully for %s", backend.Type))
 			return ctrl.Result{}, err
 		}
 
@@ -684,7 +684,11 @@ func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *userna
 	return nil
 }
 
-func (r *GroupReconciler) setupLdapSync(backendType string, backendName string, backendClient clients.Client) error {
+func (r *GroupReconciler) setupLdapSync(backendType string,
+	backendName string,
+	backendClient clients.Client,
+	groupName string,
+) error {
 	switch backendType {
 	case "gitlab":
 		dependsOn := r.AppConfig.BackendMap["gitlab"][backendName].DependsOn
@@ -695,12 +699,11 @@ func (r *GroupReconciler) setupLdapSync(backendType string, backendName string, 
 			if r.AppConfig.BackendMap[dependsOn.Type][dependsOn.Name].Enabled {
 				gitlabClient, ok := backendClient.(*gitlab.GitlabClient)
 				if !ok {
-					r.backendLogger.Error("backend client is not a GitlabClient")
 					return errors.New("backend client is not a GitlabClient")
 				}
-				gitlabClient.SetLdapSync(true)
+				gitlabClient.SetLdapSync(true, groupName)
 			} else {
-				return errors.New("depends_on backend is not enabled")
+				return fmt.Errorf("depends_on %s is not enabled", dependsOn.Name)
 			}
 		}
 		r.backendLogger.Info(fmt.Sprintf("setup ldap sync successfully for %s", backendType))
