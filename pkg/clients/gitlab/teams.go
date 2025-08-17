@@ -64,7 +64,7 @@ func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 
 	if g.ldapSync {
 		// Add group to LDAP
-		ldapLink, err := g.addToLdapGroup(groupName, group.ID)
+		ldapLink, err := g.addToLdapGroup(g.cn, group.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -88,12 +88,12 @@ func (g *GitlabClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 	return nil
 }
 
-func (g *GitlabClient) addToLdapGroup(groupName string, groupID int) (*gitlab.LDAPGroupLink, error) {
+func (g *GitlabClient) addToLdapGroup(cn string, groupID int) (*gitlab.LDAPGroupLink, error) {
 	ldapProvider := "ldapmain"
 	accessLevel := gitlab.DeveloperPermissions
 	ldapLink, _, err := g.gitlabClient.Groups.AddGroupLDAPLink(groupID, &gitlab.AddGroupLDAPLinkOptions{
 		GroupAccess: &accessLevel,
-		CN:          &groupName,
+		CN:          &cn,
 		Provider:    &ldapProvider,
 	})
 	if err != nil {

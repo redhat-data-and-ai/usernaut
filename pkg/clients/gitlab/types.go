@@ -21,6 +21,7 @@ import gitlab "gitlab.com/gitlab-org/api/client-go"
 type GitlabClient struct {
 	gitlabClient *gitlab.Client
 	ldapSync     bool
+	cn           string
 	gitlabConfig *GitlabConfig
 }
 
