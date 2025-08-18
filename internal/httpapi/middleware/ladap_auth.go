@@ -20,7 +20,7 @@ func LDAPBasicAuth(cfg *config.AppConfig) gin.HandlerFunc {
 		}
 		username, password, ok := c.Request.BasicAuth()
 		if !ok || username == "" || password == "" {
-			c.Header("authenticate", `Basic = "usernaut"`)
+			c.Header("WWW-Authenticate", `Basic realm="Usernaut"`)
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
@@ -33,7 +33,9 @@ func LDAPBasicAuth(cfg *config.AppConfig) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication failed"})
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			_ = conn.Close()
+		}()
 
 		if strings.HasPrefix(strings.ToLower(cfg.LDAP.Server), "ldap://") {
 			_ = conn.StartTLS(nil)
