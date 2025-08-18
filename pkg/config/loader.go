@@ -88,19 +88,7 @@ func (c *Config) Load(env string, config interface{}) error {
 	}
 	SubstituteConfigValues(reflect.ValueOf(config))
 
-	if appConfig, ok := config.(*AppConfig); ok {
-		c.APIKeyloading(appConfig)
-	}
-
 	return nil
-}
-
-func (c *Config) APIKeyloading(appConfig *AppConfig) {
-	if appConfig.APIServer.Enabled && len(appConfig.APIServer.Auth.APIKeys) == 0 {
-		if keys := c.viper.GetStringSlice("apiServer.auth.api_keys"); len(keys) > 0 {
-			appConfig.APIServer.Auth.APIKeys = keys
-		}
-	}
 }
 
 // SubstituteConfigValues recursively walks through the config struct and replaces

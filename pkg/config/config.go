@@ -40,11 +40,10 @@ type AppConfig struct {
 }
 
 type APIServerConfig struct {
-	Enabled bool       `yaml:"enabled"`
-	Host    string     `yaml:"host"`
-	Port    int        `yaml:"port"`
-	Auth    AuthConfig `yaml:"auth"`
-	CORS    CORSConfig `yaml:"cors"`
+	Host string     `yaml:"host"`
+	Port int        `yaml:"port"`
+	Auth AuthConfig `yaml:"auth"`
+	CORS CORSConfig `yaml:"cors"`
 }
 
 type CORSConfig struct {
@@ -54,8 +53,7 @@ type CORSConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled bool     `yaml:"enabled"`
-	APIKeys []string `yaml:"api_keys"`
+	Enabled bool `yaml:"enabled"`
 }
 
 // PatternEntry represents the input and output pattern of group names

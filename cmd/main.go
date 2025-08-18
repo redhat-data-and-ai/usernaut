@@ -23,8 +23,6 @@ import (
 	"flag"
 	"os"
 
-	"github.com/spf13/viper"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 
@@ -177,20 +175,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if appConf.APIServer.Enabled && len(appConf.APIServer.Auth.APIKeys) == 0 {
-		v := viper.New()
-		v.SetConfigName("local")
-		v.SetConfigType("yaml")
-		v.AddConfigPath("./appconfig")
-		if err := v.ReadInConfig(); err == nil {
-			if keys := v.GetStringSlice("apiServer.auth.api_keys"); len(keys) > 0 {
-				appConf.APIServer.Auth.APIKeys = keys
-				setupLog.Info("debig: Loaded API keys directly from Viper",
-					"keys", keys)
-			}
-		}
-	}
-
 	ldapConn, err := ldap.InitLdap(appConf.LDAP)
 	if err != nil {
 		setupLog.Error(err, "failed to initialize LDAP connection")
@@ -228,15 +212,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start HTTP API server if enabled
-	if appConf.APIServer.Enabled {
-		apiServer := server.NewAPIServer(appConf)
-		go func() {
-			if err := apiServer.Start(); err != nil {
-				setupLog.Error(err, "failed to start HTTP API server")
-			}
-		}()
-	}
+	// Start HTTP API server (always enabled)
+	apiServer := server.NewAPIServer(appConf)
+	go func() {
+		if err := apiServer.Start(); err != nil {
+			setupLog.Error(err, "failed to start HTTP API server")
+		}
+	}()
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

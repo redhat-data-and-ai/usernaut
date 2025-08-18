@@ -43,7 +43,7 @@ func NewAPIServer(cfg *config.AppConfig) *APIServer {
 
 func (s *APIServer) setupRoutes() {
 	v1 := s.router.Group("/api/v1")
-	v1.Use(middleware.APIKeyAuth(s.config))
+	v1.Use(middleware.LDAPBasicAuth(s.config))
 
 	v1.GET("/status", func(c *gin.Context) {
 		c.JSON(200, gin.H{
