@@ -105,7 +105,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 
-		r.allLdapUserData[ldapUser.UID] = ldapUser
+		r.allLdapUserData[user] = ldapUser
 	}
 
 	backendErrors := make(map[string]string, 0)
