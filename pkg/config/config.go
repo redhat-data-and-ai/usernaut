@@ -47,8 +47,6 @@ type APIServerConfig struct {
 
 type CORSConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins"`
-	AllowedMethods []string `yaml:"allowed_methods"`
-	AllowedHeaders []string `yaml:"allowed_headers"`
 }
 
 type BasicUser struct {
