@@ -28,6 +28,11 @@ type Cache interface {
 	// returns an error if the key was not found
 	Get(ctx context.Context, key string) (interface{}, error)
 
+	// GetByPattern returns the value for the given key pattern
+	// returns the value if the key matches the pattern
+	// returns an error if the key was not found
+	GetByPattern(ctx context.Context, keyPattern string) (map[string]interface{}, error)
+
 	// Set sets the value for the given key
 	// returns nil if the key was set successfully
 	// returns an error if the key was not set successfully
