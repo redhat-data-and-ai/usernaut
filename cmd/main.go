@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"sync"
 
@@ -192,15 +193,42 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create shared cache mutex to prevent race conditions between GroupReconciler and UserOffboardingJob
+	sharedCacheMutex := &sync.RWMutex{}
+
 	if err = (&controller.GroupReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		AppConfig:  appConf,
 		Cache:      cache,
 		LdapConn:   ldapConn,
-		CacheMutex: &sync.RWMutex{},
+		CacheMutex: sharedCacheMutex,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Group")
+		os.Exit(1)
+	}
+
+	// Initialize backend clients for the periodic tasks
+	backendClients := make(map[string]clients.Client)
+	for _, backend := range appConf.Backends {
+		if backend.Enabled {
+			client, err := clients.New(backend.Name, backend.Type, appConf.BackendMap)
+			if err != nil {
+				setupLog.Error(err, "failed to initialize backend client for periodic tasks",
+					"backend", backend.Name, "type", backend.Type)
+				os.Exit(1)
+			}
+			backendClients[fmt.Sprintf("%s_%s", backend.Name, backend.Type)] = client
+		}
+	}
+
+	ptr, err := controller.NewPeriodicTasksReconciler(mgr.GetClient(), sharedCacheMutex, cache, ldapConn, backendClients)
+	if err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PeriodicTasks")
+		os.Exit(1)
+	}
+	if err = ptr.AddToManager(mgr); err != nil {
+		setupLog.Error(err, "unable to add controller to manager", "controller", "PeriodicTasks")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
