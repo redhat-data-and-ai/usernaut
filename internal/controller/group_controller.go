@@ -186,20 +186,13 @@ func (r *GroupReconciler) processLDAPDataAndCache(ctx context.Context, uniqueMem
 
 		// Only add UID if it's not already in the list
 		if !uniqueUIDs[ldapUser.GetUID()] {
+			userList = append(userList, ldapUser.GetUID())
 			uniqueUIDs[ldapUser.GetUID()] = true
 		}
 	}
 
-	// Building a list of users who are active in LDAP.
-	activeUserList := make([]string, 0, len(uniqueUIDs))
-	for uid, isActive := range uniqueUIDs {
-		if isActive {
-			activeUserList = append(activeUserList, uid)
-		}
-	}
-
 	// Update cache with new user list
-	return r.updateUserListInCache(ctx, activeUserList)
+	return r.updateUserListInCache(ctx, userList)
 }
 
 // getUserListFromCache retrieves and unmarshals the user list from cache
@@ -207,7 +200,7 @@ func (r *GroupReconciler) getUserListFromCache(ctx context.Context) []string {
 	userList := make([]string, 0)
 	userListCache, err := r.Cache.Get(ctx, "user_list")
 	if err != nil {
-		r.log.WithError(err).Warn("user list not found in cache, will start with empty list")
+		r.log.WithError(err).Debug("user list not found in cache, will start with empty list")
 		return userList
 	}
 
@@ -228,7 +221,7 @@ func (r *GroupReconciler) getUserListFromCache(ctx context.Context) []string {
 			r.log.WithError(deleteErr).Warn("failed to delete corrupted user_list from cache")
 		}
 	}
-	r.log.WithField("user_list_count", len(userList)).Info("user list retrieved from cache successfully")
+
 	return userList
 }
 
@@ -249,11 +242,8 @@ func (r *GroupReconciler) updateUserListInCache(ctx context.Context, userList []
 }
 
 // processAllBackends handles processing of all backends in the group CR
-func (r *GroupReconciler) processAllBackends(
-	ctx context.Context,
-	groupCR *usernautdevv1alpha1.Group,
-	uniqueMembers []string,
-) map[string]string {
+func (r *GroupReconciler) processAllBackends(ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group, uniqueMembers []string) map[string]string {
 	backendErrors := make(map[string]string, 0)
 	for _, backend := range groupCR.Spec.Backends {
 		r.backendLogger = r.log.WithFields(logrus.Fields{
