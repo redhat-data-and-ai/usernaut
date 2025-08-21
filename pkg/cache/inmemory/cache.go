@@ -3,6 +3,7 @@ package inmemory
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	gocache "github.com/patrickmn/go-cache"
@@ -64,6 +65,24 @@ func (imc *InMemoryCache) Delete(ctx context.Context, key string) error {
 		imc.client.Delete(key)
 	}
 	return nil
+}
+
+// ScanKeys returns all keys matching the given pattern from in-memory cache
+func (imc *InMemoryCache) ScanKeys(ctx context.Context, pattern string) ([]string, error) {
+	items := imc.client.Items()
+	var keys []string
+
+	for key := range items {
+		matched, err := filepath.Match(pattern, key)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %s: %w", pattern, err)
+		}
+		if matched {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys, nil
 }
 
 // Flushes out all the keys from Cache.
