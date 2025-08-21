@@ -201,6 +201,16 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Group")
 		os.Exit(1)
 	}
+
+	ptr, err := controller.NewPeriodicTasksReconciler(mgr.GetClient())
+	if err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PeriodicTasks")
+		os.Exit(1)
+	}
+	if err = ptr.AddToManager(mgr); err != nil {
+		setupLog.Error(err, "unable to add controller to manager", "controller", "PeriodicTasks")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

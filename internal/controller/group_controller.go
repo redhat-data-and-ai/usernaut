@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -62,6 +63,11 @@ type GroupReconciler struct {
 	backendLogger   *logrus.Entry
 	LdapConn        ldap.LDAPClient
 	allLdapUserData map[string]*structs.LDAPUser
+
+	// cacheMutex prevents concurrent access to the cache during group reconciliation.
+	// This ensures that the group controller and user offboarding job don't interfere
+	// with each other when reading or modifying user/team data in Redis.
+	cacheMutex sync.RWMutex
 }
 
 //nolint:lll
@@ -138,8 +144,26 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
+	// Lock cache for read/write operations during reconciliation
+	r.cacheMutex.Lock()
+	defer r.cacheMutex.Unlock()
+
+	r.log.Info("Acquired cache lock for group reconciliation operations")
+
 	// fetch all the data from LDAP for the users in the group
 	r.allLdapUserData = make(map[string]*structs.LDAPUser, 0)
+	userList := make([]string, 0)
+	userListCache, err := r.Cache.Get(ctx, "user_list")
+	if err != nil {
+		r.log.WithError(err).Error("error fetching user list from cache")
+	} else {
+		r.log.WithField("user_list_json", userListCache).Debug("cached user list as JSON string")
+	}
+
+	if err := json.Unmarshal([]byte(userListCache.(string)), &userList); err != nil {
+		r.log.WithError(err).Error("error unmarshalling user list from cache")
+		return ctrl.Result{}, err
+	}
 	for _, user := range uniqueMembers {
 		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
 		if err != nil {
@@ -155,6 +179,16 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		r.allLdapUserData[user] = ldapUser
+		userList = append(userList, ldapUser.UID)
+	}
+
+	userListJSON, err := json.Marshal(userList)
+	if err != nil {
+		r.log.WithError(err).Error("error marshaling user list to JSON")
+	}
+
+	if err := r.Cache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration); err != nil {
+		r.log.WithError(err).Error("error updating user list in cache")
 	}
 
 	backendErrors := make(map[string]string, 0)
