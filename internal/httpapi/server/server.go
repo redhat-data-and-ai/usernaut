@@ -42,10 +42,13 @@ func NewAPIServer(cfg *config.AppConfig) *APIServer {
 }
 
 func (s *APIServer) setupRoutes() {
+	
 	v1 := s.router.Group("/api/v1")
-	v1.Use(middleware.LDAPBasicAuth(s.config))
+	
+	v1.Use(middleware.BasicAuth(s.config))
 
 	v1.GET("/status", func(c *gin.Context) {
+		
 		c.JSON(200, gin.H{
 			"service": "usernaut-api",
 			"status":  "running",
@@ -57,7 +60,7 @@ func (s *APIServer) setupRoutes() {
 
 func (s *APIServer) Start() error {
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", s.config.APIServer.Host, s.config.APIServer.Port),
+		Addr:    s.config.APIServer.Address,
 		Handler: s.router,
 	}
 

@@ -218,7 +218,8 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if len(backendErrors) > 0 {
-		return ctrl.Result{}, errors.New("failed to reconcile all backends")
+
+		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil

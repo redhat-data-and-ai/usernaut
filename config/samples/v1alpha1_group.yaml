@@ -9,11 +9,9 @@ spec:
   group_name: platformadmin-group
   members:
   - pranand
-  - hahs
-  - merajput
-  - atghosh
-  - hahg
   - praanand
+  - hahg
+  - merajput
   backends:
   - name: fivetran
     type: fivetran

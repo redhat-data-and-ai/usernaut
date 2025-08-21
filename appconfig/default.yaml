@@ -83,11 +83,14 @@ backends:
       service_account_name: test-service-account
 
 apiServer:
-  host: "0.0.0.0"
-  port: 8080
+  address: "0.0.0.0:8080"
   auth:
     enabled: true
-    api_keys:
-      - "testkey1"
-      - "testkey1"
+    basic_users:
+      - username: "app1"
+        password: env|APP1_PASSWORD
+    
+  cors:
+    allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
+    
     

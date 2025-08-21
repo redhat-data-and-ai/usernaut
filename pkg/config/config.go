@@ -40,10 +40,9 @@ type AppConfig struct {
 }
 
 type APIServerConfig struct {
-	Host string     `yaml:"host"`
-	Port int        `yaml:"port"`
-	Auth AuthConfig `yaml:"auth"`
-	CORS CORSConfig `yaml:"cors"`
+	Address string     `yaml:"address"`
+	Auth    AuthConfig `yaml:"auth"`
+	CORS    CORSConfig `yaml:"cors"`
 }
 
 type CORSConfig struct {
@@ -52,8 +51,14 @@ type CORSConfig struct {
 	AllowedHeaders []string `yaml:"allowed_headers"`
 }
 
+type BasicUser struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+}
+
 type AuthConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled    bool        `yaml:"enabled"`
+	BasicUsers []BasicUser `yaml:"basic_users" mapstructure:"basic_users"`
 }
 
 // PatternEntry represents the input and output pattern of group names
