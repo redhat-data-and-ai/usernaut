@@ -73,7 +73,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	groupCR := &usernautdevv1alpha1.Group{}
 
 	if err := r.Get(ctx, req.NamespacedName, groupCR); err != nil {
-		r.log.WithError(err).Error("Unable to fetch Group CR")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -110,6 +109,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"request": req.NamespacedName.String(),
 		"group":   groupCR.Spec.GroupName,
 		"members": len(groupCR.Spec.Members.Users),
+		"groups":  groupCR.Spec.Members.Groups,
 	})
 
 	groupMembers := make([]string, 0)
@@ -117,14 +117,16 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// fetch the group members from the nested groups
 	for _, group := range groupCR.Spec.Members.Groups {
-		groupCR := &usernautdevv1alpha1.Group{}
+		subGroupCR := &usernautdevv1alpha1.Group{}
 
-		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: groupCR.Namespace, Name: group}, groupCR); err != nil {
+		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: groupCR.Namespace, Name: group}, subGroupCR); err != nil {
 			r.log.WithError(err).Error("error fetching the group CR")
 			return ctrl.Result{}, err
 		}
-		groupMembers = append(groupMembers, groupCR.Spec.Members.Users...)
+		groupMembers = append(groupMembers, subGroupCR.Status.ReconciledUsers...)
 	}
+
+	groupCR.Status.ReconciledUsers = groupMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
@@ -322,7 +324,8 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 						backendLoggerInfo.WithError(err).Error("Finalizer: failed to update cache after deleting team")
 						return err
 					}
-					backendLoggerInfo.Infof("Finalizer: Updated cache after removing team ID '%s' for group '%s'", teamID, transformed_group_name)
+					backendLoggerInfo.Infof(
+						"Finalizer: Updated cache after removing team ID '%s' for group '%s'", teamID, transformed_group_name)
 				} else {
 					backendLoggerInfo.Info("Finalizer: No more entries are there in the cache")
 				}
