@@ -62,6 +62,9 @@ type GroupReconciler struct {
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/finalizers,verbs=update
 
+// TODO: refactor this function to fix the cyclomatic complexity
+//
+//nolint:gocyclo
 func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	ctx = logger.WithRequestId(ctx, controller.ReconcileIDFromContext(ctx))
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
@@ -112,7 +115,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"groups":  groupCR.Spec.Members.Groups,
 	})
 
-	groupMembers := make([]string, 0)
+	groupMembers := make([]string, 0, len(groupCR.Spec.Members.Users)+len(groupCR.Spec.Members.Groups))
 	groupMembers = append(groupMembers, groupCR.Spec.Members.Users...)
 
 	// fetch the group members from the nested groups
@@ -123,16 +126,32 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			r.log.WithError(err).Error("error fetching the group CR")
 			return ctrl.Result{}, err
 		}
+
+		// ensure that dependent group is reconciled before adding the users to the child group
+		if len(subGroupCR.Status.ReconciledUsers) == 0 {
+			r.log.WithField("group", group).Warn("no reconciled users found in the nested group")
+			return ctrl.Result{}, errors.New("no reconciled users found in the nested group")
+		}
+
 		groupMembers = append(groupMembers, subGroupCR.Status.ReconciledUsers...)
 	}
 
-	groupCR.Status.ReconciledUsers = groupMembers
+	// Deduplicate groupMembers before setting status
+	uniqueMembersMap := make(map[string]struct{})
+	uniqueMembers := make([]string, 0, len(groupMembers))
+	for _, member := range groupMembers {
+		if _, exists := uniqueMembersMap[member]; !exists {
+			uniqueMembersMap[member] = struct{}{}
+			uniqueMembers = append(uniqueMembers, member)
+		}
+	}
+	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
 	// fetch all the data from LDAP for the users in the group
 	r.allLdapUserData = make(map[string]*structs.LDAPUser, 0)
-	for _, user := range groupMembers {
+	for _, user := range uniqueMembers {
 		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching user data from LDAP")
@@ -180,7 +199,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
 
 		// create the users in backend and cache if they don't exist
-		err = r.createUsersInBackendAndCache(ctx, groupMembers, backend.Name, backend.Type, backendClient)
+		err = r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error creating users in backend and cache")
 			backendErrors[backend.Type] = err.Error()
@@ -201,7 +220,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// members field doesn't contains an email mapped to the user, we need to map it before finding the diff
 		r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
-		usersToAdd, usersToRemove, err := r.processUsers(ctx, groupMembers, members, backend.Name, backend.Type)
+		usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type)
 
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error processing users")
