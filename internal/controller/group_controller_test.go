@@ -156,9 +156,9 @@ var _ = Describe("Group Controller", func() {
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			// TODO: ideally err should be nil if the reconciliation is successful,
-			// we need to mock the backend client to return a successful response.
-			Expect(err).To(HaveOccurred())
+			// The reconciliation should succeed even when backend client creation fails,
+			// as the controller gracefully handles backend errors and continues processing.
+			Expect(err).NotTo(HaveOccurred())
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
 			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})

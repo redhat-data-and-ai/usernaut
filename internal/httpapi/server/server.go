@@ -42,13 +42,12 @@ func NewAPIServer(cfg *config.AppConfig) *APIServer {
 }
 
 func (s *APIServer) setupRoutes() {
-	
+
 	v1 := s.router.Group("/api/v1")
-	
 	v1.Use(middleware.BasicAuth(s.config))
 
 	v1.GET("/status", func(c *gin.Context) {
-		
+
 		c.JSON(200, gin.H{
 			"service": "usernaut-api",
 			"status":  "running",
