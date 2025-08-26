@@ -55,9 +55,9 @@ type GroupReconciler struct {
 }
 
 //nolint:lll
-// +kubebuilder:rbac:groups=usernaut.dev,namespace=usernaut,resources=groups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=usernaut.dev,namespace=usernaut,resources=groups/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=usernaut.dev,namespace=usernaut,resources=groups/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/finalizers,verbs=update
 
 func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	ctx = logger.WithRequestId(ctx, controller.ReconcileIDFromContext(ctx))
@@ -65,9 +65,19 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"request": req.NamespacedName.String(),
 	})
 
+	var isError = false
+
 	groupCR := &usernautdevv1alpha1.Group{}
+
 	if err := r.Client.Get(ctx, req.NamespacedName, groupCR); err != nil {
 		r.log.WithError(err).Error("error fetching the group CR")
+		return ctrl.Result{}, err
+	}
+
+	// set the group status as waiting
+	groupCR.SetWaiting()
+	if err := r.Status().Update(ctx, groupCR); err != nil {
+		r.log.WithError(err).Error("error updating the status")
 		return ctrl.Result{}, err
 	}
 
@@ -98,6 +108,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.allLdapUserData[ldapUser.UID] = ldapUser
 	}
 
+	backendErrors := make(map[string]string, 0)
+	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
+
 	for _, backend := range groupCR.Spec.Backends {
 
 		r.backendLogger = r.log.WithFields(logrus.Fields{
@@ -109,7 +122,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error creating backend client")
-			return ctrl.Result{}, err
+			isError = true
+			backendErrors[backend.Type] = err.Error()
+			continue
 		}
 		r.backendLogger.Debug("created backend client successfully")
 
@@ -117,7 +132,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error fetching or creating team")
-			return ctrl.Result{}, err
+			backendErrors[backend.Type] = err.Error()
+			isError = true
+			continue
 		}
 		r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
 
@@ -125,7 +142,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		err = r.createUsersInBackendAndCache(ctx, groupCR.Spec.Members, backend.Name, backend.Type, backendClient)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error creating users in backend and cache")
-			return ctrl.Result{}, err
+			backendErrors[backend.Type] = err.Error()
+			isError = true
+			continue
 		}
 		r.backendLogger.Info("created users in backend and cache successfully")
 
@@ -133,7 +152,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		members, err := backendClient.FetchTeamMembersByTeamID(ctx, teamID)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error fetching team members")
-			return ctrl.Result{}, err
+			backendErrors[backend.Type] = err.Error()
+			isError = true
+			continue
 		}
 
 		// members field doesn't contains an email mapped to the user, we need to map it before finding the diff
@@ -143,7 +164,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error processing users")
-			return ctrl.Result{}, err
+			backendErrors[backend.Type] = err.Error()
+			isError = true
+			continue
 		}
 
 		if len(usersToAdd) > 0 {
@@ -170,6 +193,32 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		r.backendLogger.WithField("users_to_remove", usersToRemove).Info("removed users from team successfully")
+	}
+
+	// Updating status
+	for _, backend := range groupCR.Spec.Backends {
+		status := usernautdevv1alpha1.BackendStatus{
+			Name: backend.Name,
+			Type: backend.Type,
+		}
+		if msg, found := backendErrors[backend.Type]; found {
+
+			status.Status = false
+			status.Message = msg
+		} else {
+			status.Status = true
+			status.Message = "Successful"
+		}
+		backendStatus = append(backendStatus, status)
+	}
+	groupCR.Status.BackendsStatus = backendStatus
+	groupCR.UpdateStatus(isError)
+	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
+		r.log.WithError(updateStatusErr).Error("error while updating final status")
+	}
+
+	if len(backendErrors) > 0 {
+		return ctrl.Result{}, errors.New("failed to reconcile all backends")
 	}
 
 	return ctrl.Result{}, nil

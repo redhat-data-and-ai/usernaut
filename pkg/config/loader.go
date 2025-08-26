@@ -87,6 +87,7 @@ func (c *Config) Load(env string, config interface{}) error {
 		return err
 	}
 	SubstituteConfigValues(reflect.ValueOf(config))
+
 	return nil
 }
 

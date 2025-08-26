@@ -28,8 +28,8 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # This variable is used to construct full image tags for bundle and catalog images.
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
-# usernaut.dev/usernaut-bundle:$VERSION and usernaut.dev/usernaut-catalog:$VERSION.
-IMAGE_TAG_BASE ?= usernaut.dev/usernaut
+# operator.dataverse.redhat.com/usernaut-bundle:$VERSION and operator.dataverse.redhat.com/usernaut-catalog:$VERSION.
+IMAGE_TAG_BASE ?= operator.dataverse.redhat.com/usernaut
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
@@ -144,7 +144,7 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
+run: setup-pre-commit manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
@@ -187,8 +187,16 @@ ifndef ignore-not-found
   ignore-not-found = false
 endif
 
+.PHONY: setup-pre-commit
+setup-pre-commit:
+	@if [ ! -f .git/hooks/pre-commit ]; then \
+		echo "Installing pre-commit hook to run 'make lint test'..."; \
+		cp ./scripts/pre-commit .git/hooks/pre-commit; \
+		chmod +x .git/hooks/pre-commit;	\
+	fi
+
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: setup-pre-commit manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
 
 .PHONY: uninstall
@@ -222,7 +230,7 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 KUSTOMIZE_VERSION ?= v5.4.3
 CONTROLLER_TOOLS_VERSION ?= v0.16.1
 ENVTEST_VERSION ?= release-0.19
-GOLANGCI_LINT_VERSION ?= v1.59.1
+GOLANGCI_LINT_VERSION ?= v1.64.8
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

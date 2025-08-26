@@ -23,8 +23,11 @@ import (
 	"flag"
 	"os"
 
+
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/server"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -144,7 +147,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "dd1e5158.usernaut.dev",
+		LeaderElectionID:       "dd1e5158.operator.dataverse.redhat.com",
 		Cache: k8sCache.Options{
 			DefaultNamespaces: map[string]k8sCache.Config{
 				watchedNs: {},
@@ -173,6 +176,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	
+
 	ldapConn, err := ldap.InitLdap(appConf.LDAP)
 	if err != nil {
 		setupLog.Error(err, "failed to initialize LDAP connection")
@@ -199,6 +204,13 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Group")
 		os.Exit(1)
 	}
+    // start server
+	apiServer := server.NewAPIServer(appConf)
+	go func() {
+		if err := apiServer.Start(); err != nil {
+			setupLog.Error(err, "failed to start HTTP API server")
+		}
+	}()
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

@@ -2,7 +2,7 @@
 # This file is used to track the info used to scaffold your project
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
-domain: usernaut.dev
+domain: operator.dataverse.redhat.com
 layout:
 - go.kubebuilder.io/v4
 plugins:
@@ -15,7 +15,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: usernaut.dev
+  domain: operator.dataverse.redhat.com
   kind: Group
   path: github.com/redhat-data-and-ai/usernaut/api/v1alpha1
   version: v1alpha1
