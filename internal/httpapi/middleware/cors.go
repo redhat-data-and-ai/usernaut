@@ -17,8 +17,6 @@ limitations under the License.
 package middleware
 
 import (
-	"strings"
-
 	"github.com/gin-gonic/gin"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
