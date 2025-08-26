@@ -29,8 +29,6 @@ go.work
 
 appconfig/local.yaml
 
-**/mocks/*
-
 # Any certificate files
 *.key
 *.csr
