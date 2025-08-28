@@ -9,6 +9,9 @@ on:
       - reopened
       - synchronize
     branches: [main]
+  merge_group:
+    types:
+      - checks_requested
 
 env:
   REGISTRY: ghcr.io
