@@ -47,6 +47,35 @@ To get started with developing for Usernaut, you should familiarize yourself wit
    go mod tidy
    ```
 
+1. **Start a Kubernetes Cluster**:
+
+   Before installing CRDs, ensure you have a running Kubernetes cluster. If you don't have one, you can create a local KinD cluster:
+
+   ```bash
+   # Check if you have a running cluster
+   kubectl cluster-info
+   
+   # If no cluster is running, create a KinD cluster
+   kind create cluster
+   
+   # Verify the cluster is running
+   kubectl cluster-info
+   ```
+
+   **Note**: If you see connection refused errors, make sure your cluster is running and kubectl context is set correctly.
+
+1. **Generate Mock Files**:
+
+   Before building, generate the required mock files for testing:
+
+   ```bash
+   make mockgen
+   ```
+
+   This will create mock files in:
+   - `pkg/clients/ldap/mocks/`
+   - `internal/controller/mocks/`
+
 1. **Install the CRDs**:
 
    Usernaut uses Custom Resource Definitions (CRDs) to define the resources it manages. You can install the CRDs using the following command:
@@ -76,7 +105,7 @@ To get started with developing for Usernaut, you should familiarize yourself wit
    To run the operator locally, you can use the following command:
 
    ```bash
-   make run
+   APP_ENV=local make run
    ```
 
    This will start the operator in your local environment, allowing you to test changes in real-time.

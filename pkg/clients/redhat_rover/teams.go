@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	ot "github.com/opentracing/opentracing-go"
 
@@ -91,6 +92,33 @@ func (rC *RoverClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 }
 
 func (rC *RoverClient) DeleteTeamByID(ctx context.Context, teamID string) error {
-	// This will be implemented in the future when Usernaut supports deleting teams.
+	span, ctx := ot.StartSpanFromContext(ctx, "backend.redhatrover.DeleteTeamByID")
+	defer span.Finish()
+
+	log := logger.Logger(ctx).WithField("teamID", teamID).WithField("service", "rover")
+	log.Info("Delete Rover team")
+
+	resp, respCode, err := rC.sendRequest(ctx, rC.url+"/v1/groups/"+url.PathEscape(teamID),
+		http.MethodDelete, nil,
+		headers, "backend.redhatrover.DeleteTeamByID")
+
+	// Handle 404 as successful deletion (group doesn't exist)
+	if respCode == http.StatusNotFound {
+		log.Warn("Rover group not found, considering deletion successful")
+		return nil
+	}
+
+	if err != nil {
+		log.WithError(err).Error("failed to delete rover group")
+		return err
+	}
+
+	// Accept both 200 (OK) and 204 (No Content) as successful deletion
+	if respCode != http.StatusOK && respCode != http.StatusNoContent {
+		log.Error("failed to delete rover group")
+		return fmt.Errorf("failed to delete rover group: %s", string(resp))
+	}
+
+	log.Info("Rover group deleted successfully")
 	return nil
 }

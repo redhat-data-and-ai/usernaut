@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"slices"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
@@ -83,9 +81,23 @@ func NewClient(roverAppConfig map[string]interface{},
 
 func (rC *RoverClient) sendRequest(ctx context.Context, url string, method string, body interface{},
 	headers map[string]string, methodName string) ([]byte, int, error) {
-	requestBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, 0, err
+
+	// Validate URL and method
+	if url == "" {
+		return nil, 0, fmt.Errorf("URL cannot be empty")
+	}
+	if method == "" {
+		return nil, 0, fmt.Errorf("HTTP method cannot be empty")
+	}
+
+	// For DELETE requests, we don't want to send "null" in request body
+	var requestBody []byte
+	if body != nil {
+		var err error
+		requestBody, err = json.Marshal(body)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	req, err := request.NewRequest(ctx, method, url, requestBody)
@@ -94,13 +106,5 @@ func (rC *RoverClient) sendRequest(ctx context.Context, url string, method strin
 	}
 	req.SetHeaders(headers)
 
-	response, statusCode, err := req.MakeRequest(rC.client, methodName, "redhat_rover")
-	if err != nil {
-		return nil, statusCode, err
-	}
-
-	if !slices.Contains([]int{http.StatusOK, http.StatusCreated}, statusCode) {
-		return nil, statusCode, fmt.Errorf("unexpected status code: %d", statusCode)
-	}
-	return response, statusCode, nil
+	return req.MakeRequest(rC.client, methodName, "redhat_rover")
 }
