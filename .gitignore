@@ -35,3 +35,4 @@ appconfig/local.yaml
 *.p12
 *.crt
 *.pem
+.env

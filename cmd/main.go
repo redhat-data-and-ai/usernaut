@@ -46,7 +46,9 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
+
 	// +kubebuilder:scaffold:imports
+	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/server"
 )
 
 var (
@@ -210,6 +212,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	apiServer := server.NewAPIServer(appConf)
+	go func() {
+		if err := apiServer.Start(); err != nil {
+			setupLog.Error(err, "failed to start HTTP API server")
+			os.Exit(1)
+		}
+	}()
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")

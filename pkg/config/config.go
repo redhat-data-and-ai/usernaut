@@ -35,7 +35,28 @@ type AppConfig struct {
 		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
 		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
 	} `yaml:"httpClient"`
+	APIServer  APIServerConfig               `yaml:"apiServer"`
 	BackendMap map[string]map[string]Backend `yaml:"-"`
+}
+
+type APIServerConfig struct {
+	Address string     `yaml:"address"`
+	Auth    AuthConfig `yaml:"auth"`
+	CORS    CORSConfig `yaml:"cors"`
+}
+
+type CORSConfig struct {
+	AllowedOrigins []string `yaml:"allowed_origins"`
+}
+
+type BasicUser struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+}
+
+type AuthConfig struct {
+	Enabled    bool        `yaml:"enabled"`
+	BasicUsers []BasicUser `yaml:"basic_users" mapstructure:"basic_users"`
 }
 
 // PatternEntry represents the input and output pattern of group names
@@ -49,6 +70,7 @@ type App struct {
 	Name        string `yaml:"name"`
 	Version     string `yaml:"version"`
 	Environment string `yaml:"environment"`
+	Debug       bool   `yaml:"debug"`
 }
 
 // Backend represents a backend service configuration
