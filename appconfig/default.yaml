@@ -88,3 +88,13 @@ backends:
       pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
 
+apiServer:
+  address: "0.0.0.0:8080"
+  auth:
+    enabled: true
+    basic_users:
+      - username: "app1"
+        password: env|APP1_PASSWORD
+
+  cors:
+    allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
