@@ -194,6 +194,12 @@ setup-pre-commit:
 		cp ./scripts/pre-commit .git/hooks/pre-commit; \
 		chmod +x .git/hooks/pre-commit;	\
 	fi
+	@if [ ! -f .git/hooks/commit-msg ]; then \
+		echo "Installing commit-msg hook for DCO validation..."; \
+		echo '#!/bin/bash' > .git/hooks/commit-msg; \
+		echo 'bash scripts/check-dco.sh "$$1"' >> .git/hooks/commit-msg; \
+		chmod +x .git/hooks/commit-msg; \
+	fi
 
 .PHONY: install
 install: setup-pre-commit manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
