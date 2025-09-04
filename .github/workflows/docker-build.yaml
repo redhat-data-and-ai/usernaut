@@ -3,9 +3,29 @@ name: Build and Push Docker Image
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - ".gemini/**"
+      - ".github/**"
+      - ".cursor/**"
+      - "config/**"
+      - "hack/**"
+      - ".gitignore"
+      - "*.md"
+      - "LICENSE"
+      - "PROJECT"
     tags:
       - "v*"
   pull_request_target:
+    paths-ignore:
+      - ".gemini/**"
+      - ".github/**"
+      - ".cursor/**"
+      - "config/**"
+      - "hack/**"
+      - ".gitignore"
+      - "*.md"
+      - "LICENSE"
+      - "PROJECT"
     types:
       - opened
       - reopened

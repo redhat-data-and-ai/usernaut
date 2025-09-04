@@ -1,6 +1,19 @@
 name: ci
 
-on: [pull_request] # yamllint disable-line rule:truthy
+on:
+  pull_request:
+    paths-ignore:
+      - ".gemini/**"
+      - ".github/**"
+      - ".cursor/**"
+      - "Dockerfile"
+      - "config/**"
+      - "hack/**"
+      - ".dockerignore"
+      - ".gitignore"
+      - "*.md"
+      - "LICENSE"
+      - "PROJECT"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -51,7 +64,7 @@ jobs:
         with:
           install-mode: "goinstall"
           version: v1.64.8
-          
+
   unit-tests:
     name: unit-tests
     runs-on: ubuntu-latest
