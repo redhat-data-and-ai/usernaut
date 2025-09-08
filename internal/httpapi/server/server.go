@@ -12,14 +12,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
+	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/handlers"
 	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/middleware"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
 type APIServer struct {
-	config *config.AppConfig
-	router *gin.Engine
-	server *http.Server
+	config   *config.AppConfig
+	router   *gin.Engine
+	server   *http.Server
+	handlers *handlers.Handlers
 }
 
 func NewAPIServer(cfg *config.AppConfig) *APIServer {
@@ -45,8 +47,9 @@ func NewAPIServer(cfg *config.AppConfig) *APIServer {
 	router.Use(middleware.CORS(&cfg.APIServer))
 
 	s := &APIServer{
-		config: cfg,
-		router: router,
+		config:   cfg,
+		router:   router,
+		handlers: handlers.NewHandlers(cfg),
 	}
 
 	s.setupRoutes()
@@ -66,6 +69,9 @@ func (s *APIServer) setupRoutes() {
 	v1.Use(middleware.BasicAuth(s.config))
 
 	// add authenticated endpoints accordingly
+
+	v1.GET("/backends", s.handlers.GetBackends)
+
 }
 
 func (s *APIServer) Start() error {
