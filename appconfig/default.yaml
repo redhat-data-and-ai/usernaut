@@ -96,8 +96,8 @@ backends:
       type: "rover"
     connection:
       url: "https://gitlab.test.com"
-      token: "test-token"
-      ldap_sync: true
+      token: file|/path/to/gitlab_token
+      group_id: 111111
 
 apiServer:
   address: "0.0.0.0:8080"
