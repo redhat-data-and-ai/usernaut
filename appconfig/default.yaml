@@ -88,8 +88,6 @@ backends:
     connection: 
       pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
-<<<<<<< HEAD
-=======
 
 apiServer:
   address: "0.0.0.0:8080"
@@ -101,4 +99,3 @@ apiServer:
 
   cors:
     allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
->>>>>>> a9c107a (API server setup to add endpoints as required)
