@@ -98,20 +98,20 @@ github.com/evanphx/json-patch/v5/internal/json
 # github.com/felixge/httpsnoop v1.0.4
 ## explicit; go 1.13
 github.com/felixge/httpsnoop
-# github.com/fivetran/go-fivetran v1.1.0
+# github.com/fivetran/go-fivetran v1.2.3
 ## explicit; go 1.19
 github.com/fivetran/go-fivetran
 github.com/fivetran/go-fivetran/certificates
 github.com/fivetran/go-fivetran/common
 github.com/fivetran/go-fivetran/connect_card
-github.com/fivetran/go-fivetran/connectors
-github.com/fivetran/go-fivetran/dbt
+github.com/fivetran/go-fivetran/connections
 github.com/fivetran/go-fivetran/destinations
 github.com/fivetran/go-fivetran/external_logging
 github.com/fivetran/go-fivetran/fingerprints
 github.com/fivetran/go-fivetran/groups
 github.com/fivetran/go-fivetran/http_utils
 github.com/fivetran/go-fivetran/hybrid_deployment_agent
+github.com/fivetran/go-fivetran/metadata
 github.com/fivetran/go-fivetran/private_link
 github.com/fivetran/go-fivetran/proxy
 github.com/fivetran/go-fivetran/roles
