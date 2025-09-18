@@ -29,6 +29,7 @@ func NewPeriodicTasksReconciler(
 
 	// Add jobs to the periodic task manager
 	userOffboardingJob, err := periodicjobs.NewUserOffboardingJob()
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user offboarding job: %w", err)
 	}

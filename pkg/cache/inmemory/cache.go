@@ -58,6 +58,23 @@ func (imc *InMemoryCache) Get(ctx context.Context, key string) (interface{}, err
 	return val, nil
 }
 
+// GetByPattern like implements Cache.
+func (imc *InMemoryCache) GetByPattern(ctx context.Context, keyPattern string) (map[string]interface{}, error) {
+	keys, err := imc.ScanKeys(ctx, keyPattern)
+	if err != nil {
+		return nil, fmt.Errorf("error scanning keys: %w", err)
+	}
+
+	values := make(map[string]interface{})
+	for _, key := range keys {
+		val, found := imc.client.Get(key)
+		if found {
+			values[key] = val
+		}
+	}
+	return values, nil
+}
+
 // Delete implements Cache.
 func (imc *InMemoryCache) Delete(ctx context.Context, key string) error {
 	_, found := imc.client.Get(key)

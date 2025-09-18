@@ -155,15 +155,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	userList := make([]string, 0)
 	userListCache, err := r.Cache.Get(ctx, "user_list")
 	if err != nil {
-		r.log.WithError(err).Error("error fetching user list from cache")
-	} else {
-		r.log.WithField("user_list_json", userListCache).Debug("cached user list as JSON string")
+		r.log.WithError(err).Debug("user list not found in cache, will start with empty list")
+	}
+	r.log.WithField("user_list", userListCache).Debug("cached user list as JSON string")
+	if err := json.Unmarshal([]byte(userListCache.(string)), &userList); err != nil {
+		r.log.WithError(err).Error("corrupted user list data in cache, invalidating and starting fresh")
+		userList = make([]string, 0)
+
+		// Invalidate the corrupted cache entry
+		if deleteErr := r.Cache.Delete(ctx, "user_list"); deleteErr != nil {
+			r.log.WithError(deleteErr).Warn("failed to delete corrupted user_list from cache")
+		}
 	}
 
-	if err := json.Unmarshal([]byte(userListCache.(string)), &userList); err != nil {
-		r.log.WithError(err).Error("error unmarshalling user list from cache")
-		return ctrl.Result{}, err
+	// Use a map to track unique UIDs to avoid duplicates
+	uniqueUIDs := make(map[string]bool)
+	for _, uid := range userList {
+		uniqueUIDs[uid] = true
 	}
+
 	for _, user := range uniqueMembers {
 		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
 		if err != nil {
@@ -179,7 +189,12 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		r.allLdapUserData[user] = ldapUser
-		userList = append(userList, ldapUser.UID)
+
+		// Only add UID if it's not already in the list
+		if !uniqueUIDs[ldapUser.GetUID()] {
+			userList = append(userList, ldapUser.GetUID())
+			uniqueUIDs[ldapUser.GetUID()] = true
+		}
 	}
 
 	userListJSON, err := json.Marshal(userList)

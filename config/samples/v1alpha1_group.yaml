@@ -4,12 +4,14 @@ metadata:
   labels:
     app.kubernetes.io/name: usernaut
     app.kubernetes.io/managed-by: kustomize
-  name: platformadmin-group
+  name: dataverse-aggregate-mygroup
+  namespace: usernaut
 spec:
-  group_name: platformadmin-group
+  group_name: dataverse-aggregate-mygroup
   members:
-  - user1
-  - user2
+   users:
+    - subhatta
+    - vinod
   backends:
   - name: fivetran
     type: fivetran

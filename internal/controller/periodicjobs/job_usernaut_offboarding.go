@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +32,6 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
-	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -42,11 +42,7 @@ const (
 
 	// UserOffboardingJobInterval defines how often the user offboarding job runs.
 	// Set to 24 hours to perform daily cleanup of inactive users.
-	UserOffboardingJobInterval = 24 * time.Hour
-
-	// UserCacheKeyPrefix is the Redis key prefix used to identify user entries in the cache.
-	// All user keys should follow the pattern "user:{userID}".
-	UserCacheKeyPrefix = "user:"
+	UserOffboardingJobInterval = 1 * time.Minute
 )
 
 // UserOffboardingJob implements a periodic job that monitors user activity and automatically
@@ -227,18 +223,15 @@ type processingResult struct {
 // Returns:
 //   - processingResult: Summary of processing results including counts and errors
 func (uoj *UserOffboardingJob) processUsers(ctx context.Context, userKeys []string) processingResult {
+	logger := log.FromContext(ctx)
 	var result processingResult
 
 	for _, userKey := range userKeys {
-		userID := strings.TrimPrefix(userKey, UserCacheKeyPrefix)
-		if userID == userKey {
-			continue // Skip keys without expected prefix
-		}
-
-		err := uoj.processUser(ctx, userKey, userID)
+		logger.Info("Processing user", "user", userKey)
+		offboarded, err := uoj.processUser(ctx, userKey)
 		if err != nil {
 			result.errors = append(result.errors, err.Error())
-		} else {
+		} else if offboarded {
 			result.offboardedCount++
 		}
 	}
@@ -259,27 +252,30 @@ func (uoj *UserOffboardingJob) processUsers(ctx context.Context, userKeys []stri
 //   - userID: The extracted user identifier
 //
 // Returns:
+//   - bool: true if user was offboarded, false if user is still active
 //   - error: Any error encountered during user processing, nil if successful
-func (uoj *UserOffboardingJob) processUser(ctx context.Context, userKey, userID string) error {
+func (uoj *UserOffboardingJob) processUser(ctx context.Context, userKey string) (bool, error) {
 	logger := log.FromContext(ctx)
-
-	userData, err := uoj.getUserFromCache(ctx, userKey)
+	isActive, err := uoj.isUserActiveInLDAP(ctx, userKey)
 	if err != nil {
-		logger.Error(err, "Failed to get user data from cache", "userKey", userKey)
-		return fmt.Errorf("failed to get user %s from cache: %v", userID, err)
-	}
-
-	isActive, err := uoj.isUserActiveInLDAP(ctx, userID)
-	if err != nil {
-		logger.Error(err, "Failed to check LDAP status for user", "userID", userID)
-		return fmt.Errorf("failed to check LDAP for user %s: %v", userID, err)
+		logger.Error(err, "Failed to check LDAP status for user", "userKey", userKey)
+		return false, fmt.Errorf("failed to check LDAP for user %s: %v", userKey, err)
 	}
 
 	if !isActive {
-		return uoj.offboardUser(ctx, userKey, userID, userData)
+		if err != nil {
+			logger.Error(err, "Failed to get user data from cache", "userKey", userKey)
+			return false, fmt.Errorf("failed to get user %s from cache: %v", userKey, err)
+		}
+
+		err = uoj.offboardUser(ctx, userKey)
+		if err != nil {
+			return false, err
+		}
+		return true, nil // User was successfully offboarded
 	}
 
-	return nil
+	return false, nil // User is active, no offboarding needed
 }
 
 // offboardUser performs the complete offboarding process for an inactive user.
@@ -297,36 +293,40 @@ func (uoj *UserOffboardingJob) processUser(ctx context.Context, userKey, userID 
 //
 // Returns:
 //   - error: Any error encountered during offboarding, nil if successful
-func (uoj *UserOffboardingJob) offboardUser(ctx context.Context, userKey, userID string, userData *structs.User) error {
+func (uoj *UserOffboardingJob) offboardUser(ctx context.Context, userKey string) error {
 	logger := log.FromContext(ctx)
-	logger.Info("User is inactive in LDAP, starting offboarding", "userID", userID, "email", userData.Email)
+	logger.Info("User is inactive in LDAP, starting offboarding", "userKey", userKey)
 
-	err := uoj.offboardUserFromAllBackends(ctx, userData)
+	userData, userEmail, err := uoj.getUserDataFromCache(ctx, userKey)
 	if err != nil {
-		logger.Error(err, "Failed to offboard user from backends", "userID", userID)
-		return fmt.Errorf("failed to offboard user %s from backends: %v", userID, err)
+		return fmt.Errorf("failed to get user data from cache: %w", err)
+	}
+	err = uoj.offboardUserFromAllBackends(ctx, userKey, userData)
+	if err != nil {
+		logger.Error(err, "Failed to offboard user from backends", "userID", userKey)
+		return fmt.Errorf("failed to offboard user %s from backends: %v", userKey, err)
 	}
 
 	// Lock cache before deletion operations to prevent concurrent modifications
 	uoj.cacheMutex.Lock()
 	defer uoj.cacheMutex.Unlock()
 
-	logger.Info("Acquired cache lock for user deletion operations", "userID", userID)
+	logger.Info("Acquired cache lock for user deletion operations", "userID", userKey)
 
-	err = uoj.cacheClient.Delete(ctx, userKey)
+	err = uoj.cacheClient.Delete(ctx, userEmail)
 	if err != nil {
-		logger.Error(err, "Failed to remove user from cache", "userKey", userKey)
-		return fmt.Errorf("failed to remove user %s from cache: %v", userID, err)
+		logger.Error(err, "Failed to remove user from cache", "userKey", userKey, "userEmail", userEmail)
+		return fmt.Errorf("failed to remove user %s from cache: %v", userKey, err)
 	}
 
 	// Remove user from the user_list cache
-	err = uoj.removeUserFromUserList(ctx, userID)
+	err = uoj.removeUserFromUserList(ctx, userKey)
 	if err != nil {
-		logger.Error(err, "Failed to remove user from user list cache", "userID", userID)
+		logger.Error(err, "Failed to remove user from user list cache", "userID", userKey)
 		// Don't fail the operation, just log the error since the user is already offboarded
 	}
 
-	logger.Info("Successfully offboarded user", "userID", userID, "email", userData.Email)
+	logger.Info("Successfully offboarded user", "userID", userKey)
 	return nil
 }
 
@@ -369,36 +369,47 @@ func (uoj *UserOffboardingJob) getUserKeysFromCache(ctx context.Context) ([]stri
 // getUserFromCache retrieves and deserializes user data from the cache.
 //
 // This method fetches the JSON representation of user data from cache
-// and unmarshals it into a User struct for processing.
+// and unmarshals it into a User struct for processing. It supports both exact key
+// matching and pattern-based searching for email patterns.
 //
 // Parameters:
 //   - ctx: Context for cancellation and logging
-//   - userKey: The Redis key identifying the user data
+//   - userKey: The username to search for in cache (e.g., "subhatta" will match "subhatta@redhat.com")
 //
 // Returns:
-//   - *structs.User: The deserialized user data
+//   - map[string]string: The backend mappings for the user (backend_name_type -> user_id)
 //   - error: Any error encountered during retrieval or unmarshaling
-func (uoj *UserOffboardingJob) getUserFromCache(ctx context.Context, userKey string) (*structs.User, error) {
+func (uoj *UserOffboardingJob) getUserDataFromCache(ctx context.Context, userKey string) (map[string]string, string, error) {
 	// Lock cache for read operation
 	uoj.cacheMutex.RLock()
 	defer uoj.cacheMutex.RUnlock()
 
-	userData, err := uoj.cacheClient.Get(ctx, userKey)
+	// userKey is a username (e.g., "subhatta"), search for cache keys that contain this username
+	// We don't know the exact email, so we search broadly and then filter
+	usernamePattern := fmt.Sprintf("*%s*", userKey)
+
+	userDataList, err := uoj.cacheClient.GetByPattern(ctx, usernamePattern)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	userJSON, ok := userData.(string)
-	if !ok {
-		return nil, fmt.Errorf("user data is not a string")
+	// Search through all matching cache entries to find the user's backend mappings
+	for email, userData := range userDataList {
+
+		matched, err := filepath.Match(usernamePattern, email)
+		if err != nil {
+			continue
+		}
+		if matched {
+			var userDataMap map[string]string
+			if err := json.Unmarshal([]byte(userData.(string)), &userDataMap); err != nil {
+				return nil, "", err
+			}
+			return userDataMap, email, nil
+		}
 	}
 
-	var user structs.User
-	if err := json.Unmarshal([]byte(userJSON), &user); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal user data: %w", err)
-	}
-
-	return &user, nil
+	return nil, "", fmt.Errorf("No user found with username: %s", userKey)
 }
 
 // isUserActiveInLDAP verifies whether a user exists and is active in the LDAP directory.
@@ -419,6 +430,10 @@ func (uoj *UserOffboardingJob) isUserActiveInLDAP(ctx context.Context, userID st
 	if err != nil {
 		if err == ldap.ErrNoUserFound {
 			// User not found in LDAP means they're inactive
+			return false, nil
+		}
+		// Handle LDAP "No Such Object" error as user not found
+		if strings.Contains(err.Error(), "No Such Object") {
 			return false, nil
 		}
 		// Other errors should be returned as is
@@ -447,7 +462,7 @@ func (uoj *UserOffboardingJob) isUserActiveInLDAP(ctx context.Context, userID st
 //
 // Returns:
 //   - error: Combined error message if any backends failed, nil if all succeeded
-func (uoj *UserOffboardingJob) offboardUserFromAllBackends(ctx context.Context, user *structs.User) error {
+func (uoj *UserOffboardingJob) offboardUserFromAllBackends(ctx context.Context, userKey string, userData map[string]string) error {
 	var errors []string
 	logger := log.FromContext(ctx)
 
@@ -469,24 +484,32 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(ctx context.Context, 
 		// Skip backends that are explicitly excluded
 		if skippedBackendTypes[backendType] {
 			logger.Info("Skipping user offboarding for excluded backend type",
-				"userID", user.ID, "backend", backendKey, "type", backendType)
+				"userKey", userKey, "backend", backendKey, "type", backendType)
+			continue
+		}
+
+		// Get the user ID for this specific backend from the userData map
+		userIDStr, exists := userData[backendKey]
+		if !exists {
+			logger.Info("User not found in backend, skipping",
+				"userKey", userKey, "backend", backendKey, "type", backendType)
 			continue
 		}
 
 		// Proceed with offboarding for all other backends
 		logger.Info("Starting user offboarding from backend",
-			"userID", user.ID, "backend", backendKey, "type", backendType)
+			"userKey", userKey, "backendUserID", userIDStr, "backend", backendKey, "type", backendType)
 
-		err := client.DeleteUser(ctx, user.ID)
+		err := client.DeleteUser(ctx, userIDStr)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("backend %s: %v", backendKey, err))
 			logger.Error(err, "Failed to remove user from backend",
-				"userID", user.ID, "backend", backendKey, "type", backendType)
+				"userKey", userKey, "backendUserID", userIDStr, "backend", backendKey, "type", backendType)
 			continue
 		}
 
 		logger.Info("Successfully removed user from backend",
-			"userID", user.ID, "backend", backendKey, "type", backendType)
+			"userKey", userKey, "backendUserID", userIDStr, "backend", backendKey, "type", backendType)
 	}
 
 	if len(errors) > 0 {
@@ -529,7 +552,6 @@ func (uoj *UserOffboardingJob) removeUserFromUserList(ctx context.Context, userI
 		return fmt.Errorf("failed to unmarshal user list: %w", err)
 	}
 
-	// Remove the user from the list
 	updatedUserList := make([]string, 0, len(userList))
 	for _, user := range userList {
 		if user != userID {
