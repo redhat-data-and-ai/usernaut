@@ -17,21 +17,27 @@ limitations under the License.
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	v1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+	"github.com/redhat-data-and-ai/usernaut/pkg/types"
 )
 
 type Handlers struct {
 	config *config.AppConfig
+	cache  cache.Cache
 }
 
-func NewHandlers(cfg *config.AppConfig) *Handlers {
+func NewHandlers(cfg *config.AppConfig, c cache.Cache) *Handlers {
 	return &Handlers{
 		config: cfg,
+		cache:  c,
 	}
 }
 
@@ -45,6 +51,70 @@ func (h *Handlers) GetBackends(c *gin.Context) {
 				Type: backend.Type,
 			})
 		}
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *Handlers) GetUser(c *gin.Context) {
+	email := strings.ToLower(c.Param("userEmail"))
+
+	value, err := h.cache.Get(c.Request.Context(), email)
+	if err != nil {
+
+		if idx := strings.Index(email, "@"); idx > 0 {
+			username := email[:idx]
+			value, err = h.cache.Get(c.Request.Context(), username)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+	}
+
+	rawValue, ok := value.(string)
+
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user data format in cache"})
+		return
+	}
+
+	var cached types.CachedUser
+
+	if err := json.Unmarshal([]byte(rawValue), &cached); err != nil || cached.Groups == nil {
+		// if it fails try to unmarshall as simple map format (reconciliation)
+		var simpleMap map[string]string
+		if mapErr := json.Unmarshal([]byte(rawValue), &simpleMap); mapErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decode user data"})
+			return
+		}
+
+		cached = types.CachedUser{Groups: map[string][]types.BackendUser{}}
+	}
+
+	type GroupResponse struct {
+		Group    string              `json:"group"`
+		Backends []types.BackendUser `json:"backends"`
+	}
+
+	response := []GroupResponse{}
+
+	for groupName, backendUsers := range cached.Groups {
+		backends := make([]types.BackendUser, 0, len(backendUsers))
+		for _, bu := range backendUsers {
+			backends = append(backends, types.BackendUser{
+				Name: bu.Name,
+				Type: bu.Type,
+				ID:   bu.ID,
+			})
+		}
+		response = append(response, GroupResponse{
+			Group:    groupName,
+			Backends: backends,
+		})
 	}
 
 	c.JSON(http.StatusOK, response)

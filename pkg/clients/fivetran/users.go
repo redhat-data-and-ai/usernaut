@@ -3,6 +3,7 @@ package fivetran
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fivetran/go-fivetran/users"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -70,6 +71,103 @@ func (fc *FivetranClient) CreateUser(ctx context.Context, u *structs.User) (*str
 		Do(ctx)
 	if err != nil {
 		log.WithField("response", resp.CommonResponse).WithError(err).Error("error inviting the user")
+
+		// 409 status code conflict
+		if strings.Contains(err.Error(), "status code: 409") ||
+			(resp.CommonResponse.Code == "UserExists") {
+			log.Info("user already exists, fetching existing user details")
+
+			usersByEmail, _, fetchErr := fc.FetchAllUsers(ctx)
+			if fetchErr != nil {
+				log.WithError(fetchErr).Error("failed to fetch users to find existing user")
+				return &structs.User{}, err
+			}
+
+			allUserDetails := make([]map[string]interface{}, 0, len(usersByEmail))
+			allEmails := make([]string, 0, len(usersByEmail))
+			for email, user := range usersByEmail {
+				allEmails = append(allEmails, email)
+				allUserDetails = append(allUserDetails, map[string]interface{}{
+					"key":         email,
+					"id":          user.ID,
+					"email":       user.Email,
+					"username":    user.UserName,
+					"displayName": user.DisplayName,
+				})
+			}
+			log.WithFields(logrus.Fields{
+				"searchingFor": u.Email,
+				"allEmails":    allEmails,
+				"userDetails":  allUserDetails,
+			}).Info("debugging email lookup with full user details")
+
+			if existingUser, found := usersByEmail[u.Email]; found {
+				log.WithField("existingUser", existingUser).Info("found existing user (exact match)")
+				return existingUser, nil
+			}
+
+			lowerEmail := strings.ToLower(u.Email)
+			for email, user := range usersByEmail {
+				if strings.ToLower(email) == lowerEmail {
+					log.WithFields(logrus.Fields{
+						"searchedFor":  u.Email,
+						"foundEmail":   email,
+						"existingUser": user,
+					}).Info("found existing user (case-insensitive match)")
+					return user, nil
+				}
+			}
+
+			for mapKey, user := range usersByEmail {
+				if strings.ToLower(user.Email) == lowerEmail {
+					log.WithFields(logrus.Fields{
+						"searchedFor":      u.Email,
+						"foundInUserField": user.Email,
+						"mapKey":           mapKey,
+						"existingUser":     user,
+					}).Info("found existing user (by user.Email field)")
+					return user, nil
+				}
+			}
+
+			if idx := strings.Index(u.Email, "@"); idx > 0 {
+				username := u.Email[:idx]
+				lowerUsername := strings.ToLower(username)
+
+				for mapKey, user := range usersByEmail {
+					if strings.ToLower(mapKey) == lowerUsername {
+						log.WithFields(logrus.Fields{
+							"searchedFor":       u.Email,
+							"extractedUsername": username,
+							"foundMapKey":       mapKey,
+							"existingUser":      user,
+						}).Info("found existing user (by extracted username)")
+						return user, nil
+					}
+				}
+
+				for mapKey, user := range usersByEmail {
+					if strings.ToLower(user.UserName) == lowerUsername {
+						log.WithFields(logrus.Fields{
+							"searchedFor":       u.Email,
+							"extractedUsername": username,
+							"foundUserName":     user.UserName,
+							"mapKey":            mapKey,
+							"existingUser":      user,
+						}).Info("found existing user (by user.UserName field)")
+						return user, nil
+					}
+				}
+			}
+
+			log.WithFields(logrus.Fields{
+				"searchedFor": u.Email,
+				"totalUsers":  len(usersByEmail),
+				"allEmails":   allEmails,
+				"userDetails": allUserDetails,
+			}).Error("user should exist but not found in user list")
+		}
+
 		return &structs.User{}, err
 	}
 	log.WithField("response", resp).Info("invite sent to the user")
