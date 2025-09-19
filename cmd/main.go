@@ -47,6 +47,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
+	usertypes "github.com/redhat-data-and-ai/usernaut/pkg/types"
 	"github.com/sirupsen/logrus"
 
 	// +kubebuilder:scaffold:imports
@@ -242,7 +243,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiServer := server.NewAPIServer(appConf)
+	apiServer := server.NewAPIServer(appConf, cache)
 	go func() {
 		if err := apiServer.Start(); err != nil {
 			setupLog.Error(err, "failed to start HTTP API server")
@@ -288,42 +289,10 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 		}
 
 		// Fetch all the users and store them in the cache
-		users, _, err := backendClient.FetchAllUsers(ctx)
+		_, usersByEmail, err := backendClient.FetchAllUsers(ctx)
 		if err != nil {
 			log.WithError(err).Error("failed to fetch users from backend")
 			return err
-		}
-		for _, user := range users {
-			userMap := make(map[string]string)
-			userInCache, err := store.Get(ctx, user.GetEmail())
-			// if user is already in the cache, we will update the user details
-			// with the new user ID from the backend
-			if err == nil {
-				// process user details
-				err = json.Unmarshal([]byte(userInCache.(string)), &userMap)
-				if err != nil {
-					log.WithError(err).Error("failed to unmarshal user details from cache")
-					return err
-				}
-			}
-			userMap[backend.Name+"_"+backend.Type] = user.ID
-			newUserValue, err := json.Marshal(userMap)
-			if err != nil {
-				log.WithError(err).Error("failed to marshal user details to JSON")
-				return err
-			}
-			// Store the user in the cache with email as key
-			// and user ID as value
-			// This is done to avoid hitting the backend for every request
-			// and to improve the performance of the application
-			// The user ID is stored in the cache as a JSON string
-			// so that it can be easily retrieved later
-			// The user ID is stored in the cache with the backend name and type as key
-			err = store.Set(ctx, user.Email, string(newUserValue), cache.NoExpiration)
-			if err != nil {
-				log.WithError(err).Error("failed to store user in cache")
-				return err
-			}
 		}
 
 		// Fetch all the teams and store them in the cache
@@ -331,6 +300,54 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 		if err != nil {
 			log.WithError(err).Error("failed to fetch teams from backend")
 			return err
+		}
+
+		for _, team := range teams {
+			members, err := backendClient.FetchTeamMembersByTeamID(ctx, team.ID)
+			if err != nil {
+				log.WithError(err).Warnf("failed to fetch team members from team %s", team.Name)
+				continue
+			}
+			for _, user := range members {
+
+				if user.Email == "" && user.ID != "" {
+					fullUser, err := backendClient.FetchUserDetails(ctx, user.ID)
+					if err != nil {
+						log.WithError(err).WithField("userID", user.ID).Warn("failed to fetch full user details, skipping")
+						continue
+					}
+					user = fullUser
+				}
+
+				if user.Email == "" {
+					log.WithField("userID", user.ID).Warn("user has no email address, skipping cache entry")
+					continue
+				}
+
+				cached := usertypes.CachedUser{Groups: map[string][]usertypes.BackendUser{}}
+				userincache, err := store.Get(ctx, user.Email)
+				if err == nil {
+					_ = json.Unmarshal([]byte(userincache.(string)), &cached)
+				}
+				backenUser := usertypes.BackendUser{
+					Name: backend.Name,
+					Type: backend.Type,
+					ID:   user.ID,
+				}
+				cached.Groups[team.Name] = append(cached.Groups[team.Name], backenUser)
+				newUserValue, _ := json.Marshal(cached)
+				if err := store.Set(ctx, user.Email, string(newUserValue), cache.NoExpiration); err != nil {
+					log.WithError(err).Error("failed to store user in cache")
+					return err
+				}
+
+				log.WithFields(logrus.Fields{
+					"email": user.Email,
+					"team":  team.Name,
+					"value": string(newUserValue),
+				}).Info("cached user entry")
+
+			}
 		}
 		for _, team := range teams {
 			teamMap := make(map[string]string)
@@ -366,7 +383,7 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 			}
 		}
 		log.WithFields(logrus.Fields{
-			"users": len(users),
+			"users": len(usersByEmail),
 			"teams": len(teams),
 		}).Debug("fetched users and teams from backend")
 	}

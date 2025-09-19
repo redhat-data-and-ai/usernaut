@@ -40,6 +40,7 @@ import (
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
+	usertypes "github.com/redhat-data-and-ai/usernaut/pkg/types"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
@@ -306,8 +307,9 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	}
 	r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
 
-	// Create users in backend and cache
-	if err := r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient); err != nil {
+	// create the users in backend and cache if they don't exist
+	err = r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient, groupCR.Spec.GroupName)
+	if err != nil {
 		r.backendLogger.WithError(err).Error("error creating users in backend and cache")
 		return err
 	}
@@ -498,7 +500,6 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			continue
 		}
 
-		userDetailsMap := make(map[string]string)
 		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
 		if err != nil && err != redis.Nil || userDetailsInCache == "" {
 			r.backendLogger.WithError(err).Error("error fetching user details from cache")
@@ -511,11 +512,36 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			return nil, nil, errors.New("user details in cache are not of type string")
 		}
 
-		if jErr := json.Unmarshal([]byte(userDetailsStr), &userDetailsMap); jErr != nil {
-			r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
-			return nil, nil, jErr
+		var userID string
+
+		var cachedUser usertypes.CachedUser
+		if jErr := json.Unmarshal([]byte(userDetailsStr), &cachedUser); jErr == nil && cachedUser.Groups != nil {
+
+			found := false
+			for _, group := range cachedUser.Groups {
+				for _, backend := range group {
+					if backend.Name == backendName && backend.Type == backendType {
+						userID = backend.ID
+						found = true
+						break
+					}
+				}
+				if found {
+					break
+				}
+			}
+		} else {
+
+			// Fallback: try simple map format for backward compatibility
+			userDetailsMap := make(map[string]string)
+			if mapErr := json.Unmarshal([]byte(userDetailsStr), &userDetailsMap); mapErr != nil {
+				r.backendLogger.WithField("user", user).WithError(mapErr).Error("error unmarshalling user details from cache")
+				return nil, nil, mapErr
+			}
+
+			userID = userDetailsMap[backendName+"_"+backendType]
 		}
-		userID := userDetailsMap[backendName+"_"+backendType]
+
 		if userID == "" {
 			r.backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
@@ -544,7 +570,8 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	users []string,
 	backendName, backendType string,
-	backendClient clients.Client) error {
+	backendClient clients.Client,
+	groupName string) error {
 
 	for _, user := range users {
 		userDetails := r.allLdapUserData[user]
@@ -553,17 +580,41 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			continue
 		}
 
-		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
+		userEmail := userDetails.GetEmail()
+		userDetailsInCache, err := r.Cache.Get(ctx, userEmail)
+
 		if err == nil && userDetailsInCache != "" {
-			// handle error for below statement
-			if jErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &userDetailsMap); jErr != nil {
-				r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
-				return jErr
+
+			var cachedUser usertypes.CachedUser
+			var userFound bool
+
+			if jErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &cachedUser); jErr == nil && cachedUser.Groups != nil {
+
+				for _, group := range cachedUser.Groups {
+					for _, backend := range group {
+						if backend.Name == backendName && backend.Type == backendType {
+							r.backendLogger.WithField("user", user).Debug("user already exists in cache (proper format)")
+							userFound = true
+							break
+						}
+					}
+					if userFound {
+						break
+					}
+				}
+			} else {
+				// fallback to simple map format for compatibility
+				userDetailsMap := make(map[string]string)
+				if mapErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &userDetailsMap); mapErr == nil {
+					userID := userDetailsMap[backendName+"_"+backendType]
+					if userID != "" {
+						r.backendLogger.WithField("user", user).Debug("user already exists in cache")
+						userFound = true
+					}
+				}
 			}
-			userID := userDetailsMap[backendName+"_"+backendType]
-			if userID != "" {
-				r.backendLogger.WithField("user", user).Debug("user already exists in cache")
+
+			if userFound {
 				continue
 			}
 		}
@@ -583,9 +634,18 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 		}
 		r.backendLogger.WithField("user", user).Info("created user in backend successfully")
 
-		userDetailsMap[backendName+"_"+backendType] = newUser.ID
-		toBeUpdated, _ := json.Marshal(userDetailsMap)
-		if err := r.Cache.Set(ctx, userDetails.GetEmail(), string(toBeUpdated), cache.NoExpiration); err != nil {
+		cached := usertypes.CachedUser{Groups: make(map[string][]usertypes.BackendUser)}
+		if userInCache, err := r.Cache.Get(ctx, userDetails.GetEmail()); err == nil {
+			_ = json.Unmarshal([]byte(userInCache.(string)), &cached)
+		}
+
+		backendUser := usertypes.BackendUser{Name: backendName, Type: backendType, ID: newUser.ID}
+		cached.Groups[groupName] = append(cached.Groups[groupName], backendUser)
+		toBeUpdated, _ := json.Marshal(cached)
+
+		cacheKey := userDetails.GetEmail()
+
+		if err := r.Cache.Set(ctx, cacheKey, string(toBeUpdated), cache.NoExpiration); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")
 			return err
 		}
