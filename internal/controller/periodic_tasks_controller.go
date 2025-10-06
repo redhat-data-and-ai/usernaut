@@ -15,6 +15,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
+const (
+	cacheHealthCheckMaxRetries = 5
+	cacheHealthCheckRetryDelay = 2 * time.Second
+	cacheHealthCheckKeyTTL     = 30 * time.Second
+)
+
 type PeriodicTasksReconciler struct {
 	client.Client
 	SnowflakeEnvironment string
@@ -105,10 +111,7 @@ func (ptr *PeriodicTasksReconciler) waitForCacheHealth(ctx context.Context) erro
 	logger.Info("Performing cache health check")
 
 	// Perform health check with retries
-	maxRetries := 5
-	retryDelay := 2 * time.Second
-
-	for i := 0; i < maxRetries; i++ {
+	for i := 0; i < cacheHealthCheckMaxRetries; i++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -120,22 +123,22 @@ func (ptr *PeriodicTasksReconciler) waitForCacheHealth(ctx context.Context) erro
 		testValue := "healthy"
 
 		// Test Set operation
-		if err := ptr.cacheClient.Set(ctx, testKey, testValue, 30*time.Second); err != nil {
+		if err := ptr.cacheClient.Set(ctx, testKey, testValue, cacheHealthCheckKeyTTL); err != nil {
 			logger.Info("Cache health check failed, retrying", "attempt", i+1, "error", err)
-			if i == maxRetries-1 {
-				return fmt.Errorf("cache set operation failed after %d attempts: %w", maxRetries, err)
+			if i == cacheHealthCheckMaxRetries-1 {
+				return fmt.Errorf("cache set operation failed after %d attempts: %w", cacheHealthCheckMaxRetries, err)
 			}
-			time.Sleep(retryDelay)
+			time.Sleep(cacheHealthCheckRetryDelay)
 			continue
 		}
 
 		// Test Get operation
 		if _, err := ptr.cacheClient.Get(ctx, testKey); err != nil {
 			logger.Info("Cache health check failed, retrying", "attempt", i+1, "error", err)
-			if i == maxRetries-1 {
-				return fmt.Errorf("cache get operation failed after %d attempts: %w", maxRetries, err)
+			if i == cacheHealthCheckMaxRetries-1 {
+				return fmt.Errorf("cache get operation failed after %d attempts: %w", cacheHealthCheckMaxRetries, err)
 			}
-			time.Sleep(retryDelay)
+			time.Sleep(cacheHealthCheckRetryDelay)
 			continue
 		}
 
@@ -146,5 +149,5 @@ func (ptr *PeriodicTasksReconciler) waitForCacheHealth(ctx context.Context) erro
 		return nil
 	}
 
-	return fmt.Errorf("cache health check failed after %d attempts", maxRetries)
+	return fmt.Errorf("cache health check failed after %d attempts", cacheHealthCheckMaxRetries)
 }
