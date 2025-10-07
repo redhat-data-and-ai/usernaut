@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"sync"
 
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
@@ -148,11 +149,12 @@ var _ = Describe("Group Controller", func() {
 			}, nil).Times(2)
 
 			controllerReconciler := &GroupReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				AppConfig: &appConfig,
-				Cache:     cache,
-				LdapConn:  ldapClient,
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				AppConfig:  &appConfig,
+				Cache:      cache,
+				LdapConn:   ldapClient,
+				CacheMutex: &sync.RWMutex{},
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{

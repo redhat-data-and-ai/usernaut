@@ -3,6 +3,7 @@ package inmemory
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	gocache "github.com/patrickmn/go-cache"
@@ -57,6 +58,23 @@ func (imc *InMemoryCache) Get(ctx context.Context, key string) (interface{}, err
 	return val, nil
 }
 
+// GetByPattern like implements Cache.
+func (imc *InMemoryCache) GetByPattern(ctx context.Context, keyPattern string) (map[string]interface{}, error) {
+	keys, err := imc.ScanKeys(ctx, keyPattern)
+	if err != nil {
+		return nil, fmt.Errorf("error scanning keys: %w", err)
+	}
+
+	values := make(map[string]interface{})
+	for _, key := range keys {
+		val, found := imc.client.Get(key)
+		if found {
+			values[key] = val
+		}
+	}
+	return values, nil
+}
+
 // Delete implements Cache.
 func (imc *InMemoryCache) Delete(ctx context.Context, key string) error {
 	_, found := imc.client.Get(key)
@@ -64,6 +82,24 @@ func (imc *InMemoryCache) Delete(ctx context.Context, key string) error {
 		imc.client.Delete(key)
 	}
 	return nil
+}
+
+// ScanKeys returns all keys matching the given pattern from in-memory cache
+func (imc *InMemoryCache) ScanKeys(ctx context.Context, pattern string) ([]string, error) {
+	items := imc.client.Items()
+	var keys []string
+
+	for key := range items {
+		matched, err := filepath.Match(pattern, key)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %s: %w", pattern, err)
+		}
+		if matched {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys, nil
 }
 
 // Flushes out all the keys from Cache.
