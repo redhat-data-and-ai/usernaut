@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/part-of: usernaut
   name: usernaut-admin-role
 rules:
-# access to all verbs on the usernaut-* namespace
+# access to all verbs on the ddis-asteroid--usernaut-* namespace
 - apiGroups:
   - ""
   resources:
@@ -18,7 +18,7 @@ rules:
   - "*"
   resourceNames:
   - replace
-# access to all verbs on all custom resources belonging to the usernaut
+# access to all verbs on all custom resources belonging to the operator
 - apiGroups:
   - operator.dataverse.redhat.com
   resources:

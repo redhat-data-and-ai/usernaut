@@ -1,7 +1,7 @@
 resources:
   - ../../base
 
-namespace: usernaut-platformtest
+namespace: ddis-asteroid--usernaut-rhplatformtest
 
 patchesJson6902:
   - target:
@@ -9,4 +9,4 @@ patchesJson6902:
       version: v1
       kind: Role
       name: usernaut-admin-role
-    path: patches/usernaut-role-patch.yaml
+    path: patches/usernaut-admin-role-patch.yaml

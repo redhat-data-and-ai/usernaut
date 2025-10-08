@@ -8,8 +8,9 @@ metadata:
 spec:
   group_name: platformadmin-group
   members:
-  - user1
-  - user2
+    users:
+      - user1
+      - user2
   backends:
   - name: fivetran
     type: fivetran

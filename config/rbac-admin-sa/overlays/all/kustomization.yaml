@@ -1,13 +1,12 @@
-namespace: usernaut
-
 resources:
-- ../../base
-- serviceaccount.yaml
+  - ../../base
+
+namespace: ddis-asteroid--usernaut-rhprod
 
 patchesJson6902:
-- target:
-    group: rbac.authorization.k8s.io
-    version: v1
-    kind: Role
-    name: usernaut-admin-role
-  path: patches/usernaut-role-patch.yaml
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: Role
+      name: usernaut-admin-role
+    path: patches/usernaut-admin-role-patch.yaml

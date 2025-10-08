@@ -1,0 +1,6 @@
+- op: replace
+  path: /rules/0/resourceNames
+  value:
+  - ddis-asteroid--usernaut
+  - ddis-asteroid--usernaut-rhplatformtest
+  - ddis-asteroid--usernaut-rhprod

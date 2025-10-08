@@ -1,6 +1,6 @@
-nameSuffix: -prod
+nameSuffix: -rhprod
 
-namespace: usernaut
+namespace: ddis-asteroid--usernaut-rhprod
 
 resources:
   - ../../base
