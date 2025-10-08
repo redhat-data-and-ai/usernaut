@@ -10,4 +10,4 @@ spec:
         - name: manager
           env:
             - name: APP_ENV
-              value: platformtest
+              value: rhplatformtest

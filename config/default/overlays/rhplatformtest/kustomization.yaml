@@ -1,6 +1,6 @@
-nameSuffix: -platformtest
+nameSuffix: -rhplatformtest
 
-namespace: platformtest
+namespace: ddis-asteroid--usernaut-rhplatformtest
 
 resources:
   - ../../base

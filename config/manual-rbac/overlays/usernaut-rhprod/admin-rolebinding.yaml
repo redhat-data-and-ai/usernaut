@@ -4,14 +4,15 @@ kind: RoleBinding
 metadata:
   labels:
     app.kubernetes.io/name: rolebinding
-    app.kubernetes.io/instance: usernaut-admin-rolebinding
+    app.kubernetes.io/instance: usernaut-ns-admin-rolebinding
     app.kubernetes.io/component: rbac
     app.kubernetes.io/part-of: usernaut
-  name: usernaut-admin-rolebinding
+  name: usernaut-namespace-admin-rolebinding
+  namespace: ddis-asteroid--usernaut-rhprod
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: usernaut-admin-role
+  kind: ClusterRole
+  name: admin
 subjects:
 - kind: ServiceAccount
   name: usernaut-admin-sa

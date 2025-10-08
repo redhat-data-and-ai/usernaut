@@ -221,6 +221,26 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default/overlays/${USERNAUT_ENV} | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
+.PHONY: configure-usernaut-rhplatformtest
+configure-usernaut-rhplatformtest:
+	$(KUSTOMIZE) build config/rbac-admin-sa/overlays/rhplatformtest/ | $(KUBECTL) apply -f -
+	@ENVIRONMENT=rhplatformtest bash ./scripts/configmap.sh
+	$(KUSTOMIZE) build config/manual-rbac/overlays/usernaut-rhplatformtest/ | $(KUBECTL) apply -f -
+
+.PHONY: configure-usernaut-rhprod
+configure-usernaut-rhprod:
+	@ENVIRONMENT=rhprod bash ./scripts/configmap.sh
+	$(KUSTOMIZE) build config/manual-rbac/overlays/usernaut-rhprod/ | $(KUBECTL) apply -f -
+
+.PHONY: destroy-usernaut-rhplatformtest
+destroy-usernaut-rhplatformtest:
+	$(KUSTOMIZE) build config/rbac-admin-sa/overlays/rhplatformtest/ | $(KUBECTL) delete --ignore-not-found -f -
+	$(KUSTOMIZE) build config/manual-rbac/overlays/usernaut-rhplatformtest/ | $(KUBECTL) delete --ignore-not-found -f -
+
+.PHONY: destroy-usernaut-rhprod
+destroy-usernaut-rhprod:
+	$(KUSTOMIZE) build config/manual-rbac/overlays/usernaut-rhprod/ | $(KUBECTL) delete --ignore-not-found -f -
+
 ##@ Dependencies
 
 ## Location to install dependencies to
