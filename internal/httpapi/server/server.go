@@ -14,6 +14,7 @@ import (
 
 	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/handlers"
 	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/middleware"
+	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
@@ -22,9 +23,10 @@ type APIServer struct {
 	router   *gin.Engine
 	server   *http.Server
 	handlers *handlers.Handlers
+	cache    cache.Cache
 }
 
-func NewAPIServer(cfg *config.AppConfig) *APIServer {
+func NewAPIServer(cfg *config.AppConfig, c cache.Cache) *APIServer {
 	if cfg.App.Debug {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -49,7 +51,8 @@ func NewAPIServer(cfg *config.AppConfig) *APIServer {
 	s := &APIServer{
 		config:   cfg,
 		router:   router,
-		handlers: handlers.NewHandlers(cfg),
+		cache:    c,
+		handlers: handlers.NewHandlers(cfg, c),
 	}
 
 	s.setupRoutes()
@@ -71,6 +74,7 @@ func (s *APIServer) setupRoutes() {
 	// add authenticated endpoints accordingly
 
 	v1.GET("/backends", s.handlers.GetBackends)
+	v1.GET("/users/:userEmail", s.handlers.GetUser)
 
 }
 

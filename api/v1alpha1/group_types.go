@@ -36,6 +36,22 @@ type Backend struct {
 	Type string `json:"type"`
 }
 
+type BackendUser struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type User struct {
+	Email    string        `json:"email"`
+	Groups   []string      `json:"groups"`
+	Backends []BackendUser `json:"backends"`
+}
+
+type CachedUser struct {
+	Groups map[string][]BackendUser `json:"groups"`
+}
+
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
 	GroupName string    `json:"group_name"`
