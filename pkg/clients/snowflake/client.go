@@ -19,7 +19,6 @@ package snowflake
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -28,6 +27,7 @@ import (
 	"github.com/gojek/heimdall/v7"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
+	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 )
 
 // Compiled regex patterns for Link header parsing (performance optimization)
@@ -41,17 +41,23 @@ func NewClient(connection map[string]interface{}, poolCfg httpclient.ConnectionP
 	hystrixCfg httpclient.HystrixResiliencyConfig) (*SnowflakeClient, error) {
 
 	// Extract connection parameters
-	pat, _ := connection["pat"].(string)
-	baseURL, _ := connection["base_url"].(string)
+	// pat, _ := connection["pat"].(string)
+	// baseURL, _ := connection["base_url"].(string)
 
-	if pat == "" || baseURL == "" {
-		return nil, errors.New("missing required connection parameters for snowflake backend: pat and base_url are required")
+	// if pat == "" || baseURL == "" {
+	// 	return nil, errors.New("missing required connection
+	// parameters for snowflake backend: pat and base_url are required")
+	// }
+
+	config := SnowflakeConfig{}
+	if err := utils.MapToStruct(connection, &config); err != nil {
+		return nil, err
 	}
 
-	config := SnowflakeConfig{
-		PAT:     pat,
-		BaseURL: baseURL,
-	}
+	// config := SnowflakeConfig{
+	// 	PAT:     pat,
+	// 	BaseURL: baseURL,
+	// }
 	client, err := httpclient.InitializeClient(
 		"snowflake",
 		poolCfg,
