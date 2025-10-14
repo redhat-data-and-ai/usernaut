@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -62,6 +63,12 @@ type GroupReconciler struct {
 	backendLogger   *logrus.Entry
 	LdapConn        ldap.LDAPClient
 	allLdapUserData map[string]*structs.LDAPUser
+
+	// CacheMutex prevents concurrent access to the cache during group reconciliation.
+	// This shared mutex ensures that the group controller and user offboarding job don't interfere
+	// with each other when reading or modifying user/team data in Redis.
+	// This mutex is shared across components and passed from main.go.
+	CacheMutex *sync.RWMutex
 }
 
 //nolint:lll
@@ -75,8 +82,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"request": req.NamespacedName.String(),
 	})
 
-	var isError = false
-
 	groupCR := &usernautdevv1alpha1.Group{}
 
 	if err := r.Get(ctx, req.NamespacedName, groupCR); err != nil {
@@ -85,17 +90,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if groupCR.GetDeletionTimestamp() != nil {
-		if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
-			if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
-				return ctrl.Result{}, err
-			}
-
-			controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
-			if err := r.Update(ctx, groupCR); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
+		return r.handleDeletion(ctx, groupCR)
 	}
 
 	// Object is not being deleted, add finalizer if missing
@@ -138,12 +133,45 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
-	// fetch all the data from LDAP for the users in the group
-	r.allLdapUserData = make(map[string]*structs.LDAPUser, 0)
+	// Process LDAP data and update cache
+	if err := r.processLDAPDataAndCache(ctx, uniqueMembers); err != nil {
+		r.log.WithError(err).Error("error processing LDAP data and cache")
+		return ctrl.Result{}, err
+	}
+
+	// Process all backends
+	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers)
+
+	// Update status and handle errors
+	return r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
+}
+
+// processLDAPDataAndCache handles LDAP data fetching and cache operations
+func (r *GroupReconciler) processLDAPDataAndCache(ctx context.Context, uniqueMembers []string) error {
+	// Lock cache for read/write operations during reconciliation
+	r.CacheMutex.Lock()
+	defer r.CacheMutex.Unlock()
+
+	r.log.Info("Acquired cache lock for group reconciliation operations")
+
+	// Initialize LDAP user data map
+	r.allLdapUserData = make(map[string]*structs.LDAPUser, len(uniqueMembers))
+
+	// Get current user list from cache
+	userList := r.getUserListFromCache(ctx)
+
+	// Use a map to track unique UIDs to avoid duplicates
+	uniqueUIDs := make(map[string]bool)
+	for _, uid := range userList {
+		uniqueUIDs[uid] = true
+	}
+
+	// Process each unique member
 	for _, user := range uniqueMembers {
 		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching user data from LDAP")
+			delete(uniqueUIDs, user)
 			continue
 		}
 
@@ -155,103 +183,167 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		r.allLdapUserData[user] = ldapUser
+
+		// Only add UID if it's not already in the list
+		if !uniqueUIDs[ldapUser.GetUID()] {
+			uniqueUIDs[ldapUser.GetUID()] = true
+		}
 	}
 
+	// Building a list of users who are active in LDAP.
+	activeUserList := make([]string, 0, len(uniqueUIDs))
+	for uid, isActive := range uniqueUIDs {
+		if isActive {
+			activeUserList = append(activeUserList, uid)
+		}
+	}
+
+	// Update cache with new user list
+	return r.updateUserListInCache(ctx, activeUserList)
+}
+
+// getUserListFromCache retrieves and unmarshals the user list from cache
+func (r *GroupReconciler) getUserListFromCache(ctx context.Context) []string {
+	userList := make([]string, 0)
+	userListCache, err := r.Cache.Get(ctx, "user_list")
+	if err != nil {
+		r.log.WithError(err).Warn("user list not found in cache, will start with empty list")
+		return userList
+	}
+
+	// Successfully retrieved from cache, now try to unmarshal
+	r.log.WithField("user_list", userListCache).Debug("cached user list as JSON string")
+	userListStr, ok := userListCache.(string)
+	if !ok {
+		r.log.Error("user list cache data is not a string, starting with empty list")
+		return userList
+	}
+
+	if err := json.Unmarshal([]byte(userListStr), &userList); err != nil {
+		r.log.WithError(err).Error("corrupted user list data in cache, invalidating and starting fresh")
+		userList = make([]string, 0)
+
+		// Invalidate the corrupted cache entry
+		if deleteErr := r.Cache.Delete(ctx, "user_list"); deleteErr != nil {
+			r.log.WithError(deleteErr).Warn("failed to delete corrupted user_list from cache")
+		}
+	}
+	r.log.WithField("user_list_count", len(userList)).Info("user list retrieved from cache successfully")
+	return userList
+}
+
+// updateUserListInCache marshals and stores the user list in cache
+func (r *GroupReconciler) updateUserListInCache(ctx context.Context, userList []string) error {
+	userListJSON, err := json.Marshal(userList)
+	if err != nil {
+		r.log.WithError(err).Error("error marshaling user list to JSON")
+		return err
+	}
+
+	if err := r.Cache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration); err != nil {
+		r.log.WithError(err).Error("error updating user list in cache")
+		return err
+	}
+
+	return nil
+}
+
+// processAllBackends handles processing of all backends in the group CR
+func (r *GroupReconciler) processAllBackends(
+	ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group,
+	uniqueMembers []string,
+) map[string]string {
 	backendErrors := make(map[string]string, 0)
-	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
-
 	for _, backend := range groupCR.Spec.Backends {
-
 		r.backendLogger = r.log.WithFields(logrus.Fields{
 			"backend":      backend.Name,
 			"backend_type": backend.Type,
 		})
 
-		// process each backend in the group CR
-		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
-		if err != nil {
-			r.backendLogger.WithError(err).Error("error creating backend client")
-			isError = true
+		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers); err != nil {
+			r.backendLogger.WithError(err).Error("error processing backend")
 			backendErrors[backend.Type] = err.Error()
-			continue
 		}
-		r.backendLogger.Debug("created backend client successfully")
+	}
 
-		// fetch the teamID or create a new team if it doesn't exist
-		teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
-		if err != nil {
-			r.backendLogger.WithError(err).Error("error fetching or creating team")
-			backendErrors[backend.Type] = err.Error()
-			isError = true
-			continue
+	return backendErrors
+}
+
+// processSingleBackend handles processing of a single backend
+func (r *GroupReconciler) processSingleBackend(ctx context.Context, groupCR *usernautdevv1alpha1.Group, backend usernautdevv1alpha1.Backend, uniqueMembers []string) error {
+	// Create backend client
+	backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
+	if err != nil {
+		r.backendLogger.WithError(err).Error("error creating backend client")
+		return err
+	}
+	r.backendLogger.Debug("created backend client successfully")
+
+	// Fetch or create team
+	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
+	if err != nil {
+		r.backendLogger.WithError(err).Error("error fetching or creating team")
+		return err
+	}
+	r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
+
+	// Create users in backend and cache
+	if err := r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient); err != nil {
+		r.backendLogger.WithError(err).Error("error creating users in backend and cache")
+		return err
+	}
+	r.backendLogger.Info("created users in backend and cache successfully")
+
+	// Fetch existing team members
+	members, err := backendClient.FetchTeamMembersByTeamID(ctx, teamID)
+	if err != nil {
+		r.backendLogger.WithError(err).Error("error fetching team members")
+		return err
+	}
+	r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
+
+	// Process users (determine who to add/remove)
+	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type)
+	if err != nil {
+		r.backendLogger.WithError(err).Error("error processing users")
+		return err
+	}
+
+	// Add users to team if needed
+	if len(usersToAdd) > 0 {
+		r.backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
+		if err := backendClient.AddUserToTeam(ctx, teamID, usersToAdd); err != nil {
+			r.backendLogger.WithError(err).Error("error while adding users to the team")
+			return err
 		}
-		r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
-
-		// create the users in backend and cache if they don't exist
-		err = r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient)
-		if err != nil {
-			r.backendLogger.WithError(err).Error("error creating users in backend and cache")
-			backendErrors[backend.Type] = err.Error()
-			isError = true
-			continue
-		}
-		r.backendLogger.Info("created users in backend and cache successfully")
-
-		// fetch the existing team members in the backend
-		members, err := backendClient.FetchTeamMembersByTeamID(ctx, teamID)
-		if err != nil {
-			r.backendLogger.WithError(err).Error("error fetching team members")
-			backendErrors[backend.Type] = err.Error()
-			isError = true
-			continue
-		}
-
-		// members field doesn't contains an email mapped to the user, we need to map it before finding the diff
-		r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
-
-		usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type)
-
-		if err != nil {
-			r.backendLogger.WithError(err).Error("error processing users")
-			backendErrors[backend.Type] = err.Error()
-			isError = true
-			continue
-		}
-
-		if len(usersToAdd) > 0 {
-			r.backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
-
-			err := backendClient.AddUserToTeam(ctx, teamID, usersToAdd)
-			if err != nil {
-				r.backendLogger.WithError(err).Error("error while adding users to the team")
-				return ctrl.Result{}, err
-			}
-		}
-
 		r.backendLogger.WithField("users_to_add", usersToAdd).Info("added users to team successfully")
+	}
 
-		if len(usersToRemove) > 0 {
-			r.backendLogger.WithField("user_count", len(usersToRemove)).Info("removing users from a team")
-
-			err := backendClient.RemoveUserFromTeam(ctx, teamID, usersToRemove)
-			if err != nil {
-				r.backendLogger.WithError(err).Error("error while removing users from the team")
-				return ctrl.Result{}, err
-			}
-
+	// Remove users from team if needed
+	if len(usersToRemove) > 0 {
+		r.backendLogger.WithField("user_count", len(usersToRemove)).Info("removing users from a team")
+		if err := backendClient.RemoveUserFromTeam(ctx, teamID, usersToRemove); err != nil {
+			r.backendLogger.WithError(err).Error("error while removing users from the team")
+			return err
 		}
-
 		r.backendLogger.WithField("users_to_remove", usersToRemove).Info("removed users from team successfully")
 	}
 
-	// Updating status
+	return nil
+}
+
+// updateStatusAndHandleErrors updates the CR status and handles any backend errors
+func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, groupCR *usernautdevv1alpha1.Group, backendErrors map[string]string) (ctrl.Result, error) {
+	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
+
+	// Build status for each backend
 	for _, backend := range groupCR.Spec.Backends {
 		status := usernautdevv1alpha1.BackendStatus{
 			Name: backend.Name,
 			Type: backend.Type,
 		}
 		if msg, found := backendErrors[backend.Type]; found {
-
 			status.Status = false
 			status.Message = msg
 		} else {
@@ -260,16 +352,37 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		backendStatus = append(backendStatus, status)
 	}
+
+	// Update CR status
 	groupCR.Status.BackendsStatus = backendStatus
-	groupCR.UpdateStatus(isError)
+	groupCR.UpdateStatus(false)
+	if len(backendErrors) > 0 {
+		groupCR.UpdateStatus(true)
+	}
 	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
 		r.log.WithError(updateStatusErr).Error("error while updating final status")
 	}
 
+	// Return error if any backends failed
 	if len(backendErrors) > 0 {
 		return ctrl.Result{}, errors.New("failed to reconcile all backends")
 	}
 
+	return ctrl.Result{}, nil
+}
+
+// handleDeletion processes the deletion of a Group CR and its finalizer
+func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautdevv1alpha1.Group) (ctrl.Result, error) {
+	if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
+		if err := r.Update(ctx, groupCR); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	return ctrl.Result{}, nil
 }
 
