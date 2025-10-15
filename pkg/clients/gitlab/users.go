@@ -152,7 +152,7 @@ func (g *GitlabClient) DeleteUser(ctx context.Context, userID string) error {
 func userDetails(u *gitlab.User) *structs.User {
 	return &structs.User{
 		ID:          fmt.Sprintf("%d", u.ID),
-		Email:       u.PublicEmail,
+		Email:       u.Email,
 		UserName:    u.Username,
 		DisplayName: u.Name,
 	}
