@@ -76,6 +76,40 @@ func (rc *RedisCache) Get(ctx context.Context, key string) (interface{}, error) 
 	return val, nil
 }
 
+func (rc *RedisCache) GetByPattern(ctx context.Context, keyPattern string) (map[string]interface{}, error) {
+	// First, collect all keys matching the pattern
+	var keys []string
+	iter := rc.client.WithContext(ctx).Scan(0, keyPattern, 0).Iterator()
+	for iter.Next() {
+		keys = append(keys, iter.Val())
+	}
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+
+	// If no keys found, return empty map
+	if len(keys) == 0 {
+		return make(map[string]interface{}), nil
+	}
+
+	// Use MGET to retrieve all values in a single round trip
+	vals, err := rc.client.WithContext(ctx).MGet(keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the result map, handling nil values (expired keys)
+	values := make(map[string]interface{}, len(keys))
+	for i, key := range keys {
+		if vals[i] != nil {
+			values[key] = vals[i]
+		}
+		// Skip nil values (keys that expired between SCAN and MGET)
+	}
+
+	return values, nil
+}
+
 // Delete - deletes a key from redis
 func (rc *RedisCache) Delete(ctx context.Context, key string) error {
 	err := rc.client.WithContext(ctx).Del(key).Err()
