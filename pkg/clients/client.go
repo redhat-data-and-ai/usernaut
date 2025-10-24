@@ -103,7 +103,7 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 		if err != nil {
 			return nil, err
 		}
-		gitlabClient, err := gitlab.NewClient(backend.Connection,
+		gitlabClient, err := gitlab.NewClient(backend.Connection, backend.DependsOn,
 			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
 		if err != nil {
 			return nil, err

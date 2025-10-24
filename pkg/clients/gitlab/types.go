@@ -26,11 +26,12 @@ var (
 )
 
 type GitlabClient struct {
-	gitlabClient *gitlab.Client
-	ldapSync     bool
-	cn           string
-	gitlabConfig *GitlabConfig
-	httpClient   heimdall.Doer
+	gitlabClient    *gitlab.Client
+	ldapSync        bool
+	dependantExists bool
+	cn              string
+	gitlabConfig    *GitlabConfig
+	httpClient      heimdall.Doer
 }
 
 type GitlabConfig struct {

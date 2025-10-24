@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -103,16 +104,18 @@ func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 		// Add group to LDAP
 		ldapLink, err := g.addToLdapGroup(g.cn, group.ID)
 		if err != nil {
-			return nil, err
+			log.WithError(err).Error("failed to add group to LDAP", "groupID", group.ID)
+		} else {
+			log.Info("ldap link added successfully", ldapLink)
 		}
-		log.Info("ldap link added successfully", ldapLink)
 
 		// Initiate LDAP sync
-		resp, err := g.initiateSync(ctx, g.gitlabConfig)
+		statusCode, err := g.initiateSync(ctx)
 		if err != nil {
-			return nil, err
+			log.WithError(err).Error("failed to initiate LDAP sync", "groupID", group.ID)
+		} else {
+			log.Infof("ldap sync initiated successfully with status: %d", statusCode)
 		}
-		log.Infof("ldap sync initiated successfully with status: %s", resp.Status)
 	}
 
 	return &structs.Team{
@@ -128,16 +131,30 @@ func (g *GitlabClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 	})
 	log.Info("deleting team")
 
-	// Delete group
-	permanentlyRemove := false
-	deleteGroupOpts := &gitlab.DeleteGroupOptions{
-		PermanentlyRemove: &permanentlyRemove,
+	// 1. Initiate Soft Delete
+	resp, err := g.gitlabClient.Groups.DeleteGroup(teamID, &gitlab.DeleteGroupOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to initiate soft delete: %w", err)
 	}
-	resp, err := g.gitlabClient.Groups.DeleteGroup(teamID, deleteGroupOpts)
+	log.Infof("team %v soft-deleted with status: %s", teamID, resp.Status)
+
+	// 2. Poll until pending deletion status is confirmed
+	groupFullPath, err := g.pollForPendingDeletion(ctx, teamID, 5, 5*time.Second)
 	if err != nil {
 		return err
 	}
-	log.Infof("team soft-deleted, permanent deletion will be done after 7 days. With status: %s", resp.Status)
+
+	// 3. Perform Hard Delete
+	permanentlyRemove := true
+	deleteGroupOpts := &gitlab.DeleteGroupOptions{
+		PermanentlyRemove: &permanentlyRemove,
+		FullPath:          &groupFullPath,
+	}
+	resp, err = g.gitlabClient.Groups.DeleteGroup(teamID, deleteGroupOpts)
+	if err != nil {
+		return err
+	}
+	log.Infof("team %v hard-deleted with status: %s", teamID, resp.Status)
 	return nil
 }
 
@@ -154,28 +171,45 @@ func (g *GitlabClient) addToLdapGroup(cn string, groupID int) (*gitlab.LDAPGroup
 	return ldapLink, nil
 }
 
-func (g *GitlabClient) initiateSync(ctx context.Context, cfg *GitlabConfig) (*http.Response, error) {
+func (g *GitlabClient) initiateSync(ctx context.Context) (int, error) {
 	log := logger.Logger(ctx).WithField("service", "gitlab")
 	log.Info("initiating LDAP sync")
 
-	url := fmt.Sprintf("%s/groups/%d/ldap_sync", cfg.URL, cfg.GroupId)
-	req, err := http.NewRequest(http.MethodPost, url, http.NoBody)
+	resp, statusCode, err := g.sendLdapSyncRequest(ctx)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	if statusCode != http.StatusAccepted {
+		return 0, fmt.Errorf("ldap synchronization request failed with status: %s", string(resp))
+	}
+	return statusCode, nil
+}
 
-	resp, err := g.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.WithError(err).Error("error closing response body")
+func (g *GitlabClient) pollForPendingDeletion(ctx context.Context,
+	teamID string,
+	maxAttempts int,
+	interval time.Duration) (string, error) {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"service": "gitlab",
+		"teamID":  teamID,
+	})
+	for i := 0; i < maxAttempts; i++ {
+		group, resp, err := g.gitlabClient.Groups.GetGroup(teamID, &gitlab.GetGroupOptions{})
+		if err != nil {
+			if resp.StatusCode == 404 {
+				log.Infof("Group %v not found", teamID)
+				return "", nil
+			}
+			log.Infof("Error checking group status (attempt %d/%d): %v\n", i+1, maxAttempts, err)
 		}
-	}()
-	if resp.StatusCode != http.StatusAccepted {
-		return nil, fmt.Errorf("ldap synchronization request failed with status: %s", resp.Status)
+		if group.MarkedForDeletionOn != nil {
+			log.Infof("Group %s is now marked for deletion on %s.", group.Name, group.MarkedForDeletionOn.String())
+			return group.FullPath, nil
+		}
+
+		log.Infof("Group %s not yet marked for deletion. Retrying in %v.", group.Name, interval)
+		time.Sleep(interval)
 	}
-	return resp, nil
+
+	return "", fmt.Errorf("timeout: Group %v was not marked for deletion after %d attempts", teamID, maxAttempts)
 }

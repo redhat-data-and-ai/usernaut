@@ -17,10 +17,14 @@ limitations under the License.
 package gitlab
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+	"github.com/redhat-data-and-ai/usernaut/pkg/request"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -29,6 +33,7 @@ import (
 // NewClient creates a GitlabClient with a heimdall-backed HTTP client and passes it to the SDK.
 func NewClient(
 	gitlabAppConfig map[string]interface{},
+	dependsOn config.Dependant,
 	poolCfg httpclient.ConnectionPoolConfig,
 	hystrixCfg httpclient.HystrixResiliencyConfig,
 ) (*GitlabClient, error) {
@@ -58,16 +63,34 @@ func NewClient(
 		return nil, fmt.Errorf("failed to initialize http client: %w", err)
 	}
 
+	dependantExists := false
+	if dependsOn.Name != "" && dependsOn.Type != "" {
+		dependantExists = true
+	}
+
 	gitlabConfig.URL = baseUrl
 	return &GitlabClient{
-		gitlabClient: client,
-		ldapSync:     false,
-		gitlabConfig: &gitlabConfig,
-		httpClient:   heimdallClient,
+		gitlabClient:    client,
+		dependantExists: dependantExists,
+		gitlabConfig:    &gitlabConfig,
+		httpClient:      heimdallClient,
 	}, nil
 }
 
 func (g *GitlabClient) SetLdapSync(ldapSync bool, cn string) {
 	g.ldapSync = ldapSync
 	g.cn = cn
+}
+
+func (g *GitlabClient) sendLdapSyncRequest(ctx context.Context) ([]byte, int, error) {
+	url := fmt.Sprintf("%s/groups/%d/ldap_sync", g.gitlabConfig.URL, g.gitlabConfig.GroupId)
+	requestBody := []byte{}
+	request, err := request.NewRequest(ctx, http.MethodPost, url, requestBody)
+	if err != nil {
+		return nil, 0, err
+	}
+	request.SetHeaders(map[string]string{
+		"Authorization": "Bearer " + g.gitlabConfig.Token,
+	})
+	return request.MakeRequest(g.httpClient, "backend.gitlab.InitiateLdapSync", "gitlab")
 }

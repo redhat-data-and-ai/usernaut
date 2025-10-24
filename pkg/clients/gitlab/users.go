@@ -34,7 +34,17 @@ func (g *GitlabClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 	userEmailMap := make(map[string]*structs.User)
 	userIDMap := make(map[string]*structs.User)
 
+	if g.dependantExists {
+		// Since users will be fetched using Rover as LDAP, we don't need to fetch users from Gitlab API
+		// if it has dependant in gitlab backend configs
+		return userEmailMap, userIDMap, nil
+	}
+
+	human := true
+	active := true
 	opt := &gitlab.ListUsersOptions{
+		Humans: &human,
+		Active: &active,
 		ListOptions: gitlab.ListOptions{
 			PerPage: 100, // Maximum allowed
 			Page:    1,
