@@ -97,7 +97,7 @@ backends:
     connection:
       url: "https://gitlab.test.com"
       token: file|/path/to/gitlab_token
-      group_id: 111111
+      parent_group_id: 111111
 
 apiServer:
   address: "0.0.0.0:8080"
