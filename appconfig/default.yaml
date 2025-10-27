@@ -88,6 +88,16 @@ backends:
     connection: 
       pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
+  - name: gitlab
+    type: "gitlab"
+    enabled: true
+    depends_on: 
+      name: "rover"
+      type: "rover"
+    connection:
+      url: "https://gitlab.test.com"
+      token: file|/path/to/gitlab_token
+      parent_group_id: 111111
 
 apiServer:
   address: "0.0.0.0:8080"

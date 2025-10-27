@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
 	redhatrover "github.com/redhat-data-and-ai/usernaut/pkg/clients/redhat_rover"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/snowflake"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -97,6 +98,17 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 
 		return snowflake.NewClient(backend.Connection,
 			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
+	case "gitlab":
+		appConfig, err := config.GetConfig()
+		if err != nil {
+			return nil, err
+		}
+		gitlabClient, err := gitlab.NewClient(backend.Connection, backend.DependsOn,
+			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
+		if err != nil {
+			return nil, err
+		}
+		return gitlabClient, nil
 	default:
 		// If no valid backend type is matched, return an error
 		return nil, ErrInvalidBackend
