@@ -266,7 +266,7 @@ func (r *GroupReconciler) processAllBackends(
 
 		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers); err != nil {
 			r.backendLogger.WithError(err).Error("error processing backend")
-			backendErrors[backend.Type] = err.Error()
+			backendErrors[backend.Name] = err.Error()
 		}
 	}
 
@@ -363,7 +363,7 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, group
 			Name: backend.Name,
 			Type: backend.Type,
 		}
-		if msg, found := backendErrors[backend.Type]; found {
+		if msg, found := backendErrors[backend.Name]; found {
 			status.Status = false
 			status.Message = msg
 		} else {
