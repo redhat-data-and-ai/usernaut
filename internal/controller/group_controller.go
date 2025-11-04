@@ -256,8 +256,8 @@ func (r *GroupReconciler) processAllBackends(
 	ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	uniqueMembers []string,
-) map[string]string {
-	backendErrors := make(map[string]string, 0)
+) map[string]map[string]string {
+	backendErrors := make(map[string]map[string]string, 0)
 	for _, backend := range groupCR.Spec.Backends {
 		r.backendLogger = r.log.WithFields(logrus.Fields{
 			"backend":      backend.Name,
@@ -266,7 +266,10 @@ func (r *GroupReconciler) processAllBackends(
 
 		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers); err != nil {
 			r.backendLogger.WithError(err).Error("error processing backend")
-			backendErrors[backend.Name] = err.Error()
+			if _, ok := backendErrors[backend.Type]; !ok {
+				backendErrors[backend.Type] = make(map[string]string)
+			}
+			backendErrors[backend.Type][backend.Name] = err.Error()
 		}
 	}
 
@@ -354,7 +357,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 }
 
 // updateStatusAndHandleErrors updates the CR status and handles any backend errors
-func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, groupCR *usernautdevv1alpha1.Group, backendErrors map[string]string) (ctrl.Result, error) {
+func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, groupCR *usernautdevv1alpha1.Group, backendErrors map[string]map[string]string) (ctrl.Result, error) {
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
 	// Build status for each backend
@@ -363,9 +366,14 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, group
 			Name: backend.Name,
 			Type: backend.Type,
 		}
-		if msg, found := backendErrors[backend.Name]; found {
-			status.Status = false
-			status.Message = msg
+		if typeMap, ok := backendErrors[backend.Type]; ok {
+			if msg, found := typeMap[backend.Name]; found {
+				status.Status = false
+				status.Message = msg
+			} else {
+				status.Status = true
+				status.Message = "Successful"
+			}
 		} else {
 			status.Status = true
 			status.Message = "Successful"
@@ -376,7 +384,14 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, group
 	// Update CR status
 	groupCR.Status.BackendsStatus = backendStatus
 	groupCR.UpdateStatus(false)
-	if len(backendErrors) > 0 {
+	hasErrors := false
+	for _, m := range backendErrors {
+		if len(m) > 0 {
+			hasErrors = true
+			break
+		}
+	}
+	if hasErrors {
 		groupCR.UpdateStatus(true)
 	}
 	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
@@ -384,7 +399,7 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, group
 	}
 
 	// Return error if any backends failed
-	if len(backendErrors) > 0 {
+	if hasErrors {
 		return ctrl.Result{}, errors.New("failed to reconcile all backends")
 	}
 
