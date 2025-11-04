@@ -134,7 +134,7 @@ var _ = Describe("Group Controller", func() {
 				},
 			}
 
-			cache, err := cache.New(&appConfig.Cache)
+            cch, err := cache.New(&appConfig.Cache)
 			Expect(err).NotTo(HaveOccurred())
 
 			ctrl := gomock.NewController(GinkgoT())
@@ -148,11 +148,11 @@ var _ = Describe("Group Controller", func() {
 				"uid":         "testuser",
 			}, nil).Times(2)
 
-			controllerReconciler := &GroupReconciler{
+            controllerReconciler := &GroupReconciler{
 				Client:     k8sClient,
 				Scheme:     k8sClient.Scheme(),
 				AppConfig:  &appConfig,
-				Cache:      cache,
+                Cache:      cch,
 				LdapConn:   ldapClient,
 				CacheMutex: &sync.RWMutex{},
 			}
@@ -165,6 +165,124 @@ var _ = Describe("Group Controller", func() {
 			Expect(err).To(HaveOccurred())
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
 			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		})
+
+		It("should handle multiple same-type backends independently", func() {
+			By("creating a resource with two backends of the same type but different names")
+
+			const multiName = "test-resource-group-multi"
+			multiNN := types.NamespacedName{Name: multiName, Namespace: "default"}
+
+			multi := &usernautdevv1alpha1.Group{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      multiName,
+					Namespace: "default",
+				},
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: multiName,
+					Members: usernautdevv1alpha1.Members{
+						Groups: []string{},
+						Users:  []string{"test-user-1", "test-user-2"},
+					},
+					Backends: []usernautdevv1alpha1.Backend{
+						{Name: "fivetran-a", Type: "fivetran"},
+						{Name: "fivetran-b", Type: "fivetran"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, multi)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, multi) }()
+
+			fivetranA := config.Backend{
+				Name:    "fivetran-a",
+				Type:    "fivetran",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyApiKey: "testKeyA",
+					// Intentionally omit apiSecret to force client creation error
+				},
+			}
+			fivetranB := config.Backend{
+				Name:    "fivetran-b",
+				Type:    "fivetran",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyApiKey: "testKeyB",
+					// Intentionally omit apiSecret to force client creation error
+				},
+			}
+
+			backendMap := make(map[string]map[string]config.Backend)
+			backendMap[fivetranA.Type] = make(map[string]config.Backend)
+			backendMap[fivetranA.Type][fivetranA.Name] = fivetranA
+			backendMap[fivetranB.Type][fivetranB.Name] = fivetranB
+
+			appConfig := config.AppConfig{
+				App: config.App{
+					Name:        "usernaut-test",
+					Version:     "v0.0.1",
+					Environment: "test",
+				},
+				LDAP: ldap.LDAP{
+					Server:           "ldap://ldap.test.com:389",
+					BaseDN:           "ou=adhoc,ou=managedGroups,dc=org,dc=com",
+					UserDN:           "uid=%s,ou=users,dc=org,dc=com",
+					UserSearchFilter: "(objectClass=filteClass)",
+					Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
+				},
+				Backends:   []config.Backend{fivetranA, fivetranB},
+				BackendMap: backendMap,
+				Cache: cache.Config{
+					Driver: "memory",
+					InMemory: &inmemory.Config{
+						DefaultExpiration: int32(-1),
+						CleanupInterval:   int32(-1),
+					},
+				},
+			}
+
+			cch, err := cache.New(&appConfig.Cache)
+			Expect(err).NotTo(HaveOccurred())
+
+			ctrl := gomock.NewController(GinkgoT())
+			ldapClient := mocks.NewMockLDAPClient(ctrl)
+
+			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
+				"cn":          "Test",
+				"sn":          "User",
+				"displayName": "Test User",
+				"mail":        "testuser@gmail.com",
+				"uid":         "testuser",
+			}, nil).Times(2)
+
+			reconciler := &GroupReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				AppConfig:  &appConfig,
+				Cache:      cch,
+				LdapConn:   ldapClient,
+				CacheMutex: &sync.RWMutex{},
+			}
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: multiNN})
+			Expect(err).To(HaveOccurred())
+
+			// Reload the resource to inspect status
+			fresh := &usernautdevv1alpha1.Group{}
+			Expect(k8sClient.Get(ctx, multiNN, fresh)).To(Succeed())
+			Expect(fresh.Status.BackendsStatus).To(HaveLen(2))
+
+			statuses := map[string]usernautdevv1alpha1.BackendStatus{}
+			for _, s := range fresh.Status.BackendsStatus {
+				statuses[s.Name] = s
+			}
+
+			Expect(statuses).To(HaveKey("fivetran-a"))
+			Expect(statuses).To(HaveKey("fivetran-b"))
+			Expect(statuses["fivetran-a"].Status).To(BeFalse())
+			Expect(statuses["fivetran-b"].Status).To(BeFalse())
+			Expect(statuses["fivetran-a"].Message).To(ContainSubstring("missing required connection parameters"))
+			Expect(statuses["fivetran-b"].Message).To(ContainSubstring("missing required connection parameters"))
 		})
 	})
 })
