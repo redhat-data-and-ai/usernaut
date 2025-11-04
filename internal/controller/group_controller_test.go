@@ -134,7 +134,7 @@ var _ = Describe("Group Controller", func() {
 				},
 			}
 
-            cch, err := cache.New(&appConfig.Cache)
+			cache, err := cache.New(&appConfig.Cache)
 			Expect(err).NotTo(HaveOccurred())
 
 			ctrl := gomock.NewController(GinkgoT())
@@ -148,11 +148,11 @@ var _ = Describe("Group Controller", func() {
 				"uid":         "testuser",
 			}, nil).Times(2)
 
-            controllerReconciler := &GroupReconciler{
+			controllerReconciler := &GroupReconciler{
 				Client:     k8sClient,
 				Scheme:     k8sClient.Scheme(),
 				AppConfig:  &appConfig,
-                Cache:      cch,
+				Cache:      cache,
 				LdapConn:   ldapClient,
 				CacheMutex: &sync.RWMutex{},
 			}
@@ -241,7 +241,7 @@ var _ = Describe("Group Controller", func() {
 				},
 			}
 
-			cch, err := cache.New(&appConfig.Cache)
+			Cache, err := cache.New(&appConfig.Cache)
 			Expect(err).NotTo(HaveOccurred())
 
 			ctrl := gomock.NewController(GinkgoT())
@@ -259,7 +259,7 @@ var _ = Describe("Group Controller", func() {
 				Client:     k8sClient,
 				Scheme:     k8sClient.Scheme(),
 				AppConfig:  &appConfig,
-				Cache:      cch,
+				Cache:      Cache,
 				LdapConn:   ldapClient,
 				CacheMutex: &sync.RWMutex{},
 			}
