@@ -5,23 +5,24 @@ import (
 	"fmt"
 	"net/http"
 
+	account "github.com/fivetran/go-fivetran/account"
 	"github.com/fivetran/go-fivetran/certificates"
 	connectcard "github.com/fivetran/go-fivetran/connect_card"
-	"github.com/fivetran/go-fivetran/connectors"
-	"github.com/fivetran/go-fivetran/dbt"
+	"github.com/fivetran/go-fivetran/connections"
 	"github.com/fivetran/go-fivetran/destinations"
 	externallogging "github.com/fivetran/go-fivetran/external_logging"
 	"github.com/fivetran/go-fivetran/fingerprints"
 	"github.com/fivetran/go-fivetran/groups"
 	httputils "github.com/fivetran/go-fivetran/http_utils"
 	hybriddeploymentagent "github.com/fivetran/go-fivetran/hybrid_deployment_agent"
+	"github.com/fivetran/go-fivetran/metadata"
 	privatelink "github.com/fivetran/go-fivetran/private_link"
 	"github.com/fivetran/go-fivetran/proxy"
 	"github.com/fivetran/go-fivetran/roles"
 	"github.com/fivetran/go-fivetran/teams"
+	"github.com/fivetran/go-fivetran/transformations"
 	"github.com/fivetran/go-fivetran/users"
 	"github.com/fivetran/go-fivetran/webhooks"
-	"github.com/fivetran/go-fivetran/transformations"
 )
 
 // Client holds client configuration
@@ -38,7 +39,7 @@ const defaultBaseURL = "https://api.fivetran.com/v1"
 const restAPIv2 = "application/json;version=2"
 
 // WARNING: Update Agent version on each release!
-const defaultUserAgent = "Go-Fivetran/1.0.7"
+const defaultUserAgent = "Go-Fivetran/1.2.4"
 
 // New receives API Key and API Secret, and returns a new Client with the
 // default HTTP client
@@ -101,14 +102,14 @@ func (c *Client) commonHeaders() map[string]string {
 	}
 }
 
-func (c *Client) NewConnectorSync() *connectors.ConnectorSyncService {
-	return &connectors.ConnectorSyncService{
+func (c *Client) NewConnectionSync() *connections.ConnectionSyncService {
+	return &connections.ConnectionSyncService{
 		HttpService: c.NewHttpService(),
 	}
 }
 
-func (c *Client) NewCertificateConnectorCertificateApprove() *certificates.ConnectorCertificateApproveService {
-	return &certificates.ConnectorCertificateApproveService{
+func (c *Client) NewCertificateConnectionCertificateApprove() *certificates.ConnectionCertificateApproveService {
+	return &certificates.ConnectionCertificateApproveService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -119,8 +120,8 @@ func (c *Client) NewCertificateDestinationCertificateApprove() *certificates.Des
 	}
 }
 
-func (c *Client) NewCertificateConnectorFingerprintApprove() *fingerprints.ConnectorFingerprintApproveService {
-	return &fingerprints.ConnectorFingerprintApproveService{
+func (c *Client) NewCertificateConnectionFingerprintApprove() *fingerprints.ConnectionFingerprintApproveService {
+	return &fingerprints.ConnectionFingerprintApproveService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -131,8 +132,8 @@ func (c *Client) NewCertificateDestinationFingerprintApprove() *fingerprints.Des
 	}
 }
 
-func (c *Client) NewConnectorCertificateRevoke() *certificates.ConnectorCertificateRevokeService {
-	return &certificates.ConnectorCertificateRevokeService{
+func (c *Client) NewConnectionCertificateRevoke() *certificates.ConnectionCertificateRevokeService {
+	return &certificates.ConnectionCertificateRevokeService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -143,8 +144,8 @@ func (c *Client) NewDestinationCertificateRevoke() *certificates.DestinationCert
 	}
 }
 
-func (c *Client) NewConnectorCertificatesList() *certificates.ConnectorCertificatesListService {
-	return &certificates.ConnectorCertificatesListService{
+func (c *Client) NewConnectionCertificatesList() *certificates.ConnectionCertificatesListService {
+	return &certificates.ConnectionCertificatesListService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -155,8 +156,8 @@ func (c *Client) NewDestinationCertificatesList() *certificates.DestinationCerti
 	}
 }
 
-func (c *Client) NewConnectorCertificateDetails() *certificates.ConnectorCertificateDetailsService {
-	return &certificates.ConnectorCertificateDetailsService{
+func (c *Client) NewConnectionCertificateDetails() *certificates.ConnectionCertificateDetailsService {
+	return &certificates.ConnectionCertificateDetailsService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -167,8 +168,8 @@ func (c *Client) NewDestinationCertificateDetails() *certificates.DestinationCer
 	}
 }
 
-func (c *Client) NewConnectorFingerprintRevoke() *fingerprints.ConnectorFingerprintRevokeService {
-	return &fingerprints.ConnectorFingerprintRevokeService{
+func (c *Client) NewConnectionFingerprintRevoke() *fingerprints.ConnectionFingerprintRevokeService {
+	return &fingerprints.ConnectionFingerprintRevokeService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -179,8 +180,8 @@ func (c *Client) NewDestinationFingerprintRevoke() *fingerprints.DestinationFing
 	}
 }
 
-func (c *Client) NewConnectorFingerprintsList() *fingerprints.ConnectorFingerprintsListService {
-	return &fingerprints.ConnectorFingerprintsListService{
+func (c *Client) NewConnectionFingerprintsList() *fingerprints.ConnectionFingerprintsListService {
+	return &fingerprints.ConnectionFingerprintsListService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -191,8 +192,8 @@ func (c *Client) NewDestinationFingerprintsList() *fingerprints.DestinationFinge
 	}
 }
 
-func (c *Client) NewConnectorFingerprintDetails() *fingerprints.ConnectorFingerprintDetailsService {
-	return &fingerprints.ConnectorFingerprintDetailsService{
+func (c *Client) NewConnectionFingerprintDetails() *fingerprints.ConnectionFingerprintDetailsService {
+	return &fingerprints.ConnectionFingerprintDetailsService{
 		HttpService: c.NewHttpService(),
 	}
 }
@@ -223,12 +224,12 @@ func (c *Client) NewGroupDelete() *groups.GroupDeleteService {
 	return &groups.GroupDeleteService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewGroupModify() *groups.GroupModifyService {
-	return &groups.GroupModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewGroupUpdate() *groups.GroupUpdateService {
+	return &groups.GroupUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewGroupListConnectors() *groups.GroupListConnectorsService {
-	return &groups.GroupListConnectorsService{HttpService: c.NewHttpService()}
+func (c *Client) NewGroupListConnections() *groups.GroupListConnectionsService {
+	return &groups.GroupListConnectionsService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewGroupListUsers() *groups.GroupListUsersService {
@@ -260,8 +261,8 @@ func (c *Client) NewExternalLoggingDetails() *externallogging.ExternalLoggingDet
 	return &externallogging.ExternalLoggingDetailsService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewExternalLoggingModify() *externallogging.ExternalLoggingModifyService {
-	return &externallogging.ExternalLoggingModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewExternalLoggingUpdate() *externallogging.ExternalLoggingUpdateService {
+	return &externallogging.ExternalLoggingUpdateService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewExternalLoggingSetupTests() *externallogging.ExternalLoggingSetupTestsService {
@@ -289,10 +290,10 @@ func (c *Client) NewDestinationDetails() *destinations.DestinationDetailsService
 	return &destinations.DestinationDetailsService{HttpService: http}
 }
 
-func (c *Client) NewDestinationModify() *destinations.DestinationModifyService {
+func (c *Client) NewDestinationUpdate() *destinations.DestinationUpdateService {
 	http := c.NewHttpService()
 	http.CommonHeaders["Accept"] = restAPIv2
-	return &destinations.DestinationModifyService{HttpService: http}
+	return &destinations.DestinationUpdateService{HttpService: http}
 }
 
 func (c *Client) NewDestinationSetupTests() *destinations.DestinationSetupTestsService {
@@ -314,8 +315,8 @@ func (c *Client) NewUserDetails() *users.UserDetailsService {
 	return &users.UserDetailsService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewUserModify() *users.UserModifyService {
-	return &users.UserModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewUserUpdate() *users.UserUpdateService {
+	return &users.UserUpdateService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewUserInvite() *users.UserInviteService {
@@ -342,77 +343,28 @@ func (c *Client) NewUserGroupMembershipsList() *users.UserGroupMembershipsListSe
 	return &users.UserGroupMembershipsListService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewUserGroupMembershipModify() *users.UserGroupMembershipModifyService {
-	return &users.UserGroupMembershipModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewUserGroupMembershipUpdate() *users.UserGroupMembershipUpdateService {
+	return &users.UserGroupMembershipUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewUserConnectorMembershipsList() *users.UserConnectorMembershipsListService {
-	return &users.UserConnectorMembershipsListService{HttpService: c.NewHttpService()}
+func (c *Client) NewUserConnectionMembershipsList() *users.UserConnectionMembershipsListService {
+	return &users.UserConnectionMembershipsListService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewUserConnectorMembershipModify() *users.UserConnectorMembershipModifyService {
-	return &users.UserConnectorMembershipModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewUserConnectionMembershipUpdate() *users.UserConnectionMembershipUpdateService {
+	return &users.UserConnectionMembershipUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewUserConnectorMembershipCreate() *users.UserConnectorMembershipCreateService {
-	return &users.UserConnectorMembershipCreateService{HttpService: c.NewHttpService()}
+func (c *Client) NewUserConnectionMembershipCreate() *users.UserConnectionMembershipCreateService {
+	return &users.UserConnectionMembershipCreateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewUserConnectorMembershipDelete() *users.UserConnectorMembershipDeleteService {
-	return &users.UserConnectorMembershipDeleteService{HttpService: c.NewHttpService()}
+func (c *Client) NewUserConnectionMembershipDelete() *users.UserConnectionMembershipDeleteService {
+	return &users.UserConnectionMembershipDeleteService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewUserConnectorMembershipDetails() *users.UserConnectorMembershipDetailsService {
-	return &users.UserConnectorMembershipDetailsService{HttpService: c.NewHttpService()}
-}
-
-/* DBT */
-func (c *Client) NewDbtModelDetails() *dbt.DbtModelDetailsService {
-	return &dbt.DbtModelDetailsService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtModelsList() *dbt.DbtModelsListService {
-	return &dbt.DbtModelsListService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtProjectDetails() *dbt.DbtProjectDetailsService {
-	return &dbt.DbtProjectDetailsService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtProjectDelete() *dbt.DbtProjectDeleteService {
-	return &dbt.DbtProjectDeleteService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtProjectCreate() *dbt.DbtProjectCreateService {
-	return &dbt.DbtProjectCreateService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtProjectModify() *dbt.DbtProjectModifyService {
-	return &dbt.DbtProjectModifyService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtProjectsList() *dbt.DbtProjectsListService {
-	return &dbt.DbtProjectsListService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtProjectTest() *dbt.DbtProjectTestService {
-	return &dbt.DbtProjectTestService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtTransformationCreateService() *dbt.DbtTransformationCreateService {
-	return &dbt.DbtTransformationCreateService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtTransformationDeleteService() *dbt.DbtTransformationDeleteService {
-	return &dbt.DbtTransformationDeleteService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtTransformationDetailsService() *dbt.DbtTransformationDetailsService {
-	return &dbt.DbtTransformationDetailsService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewDbtTransformationModifyService() *dbt.DbtTransformationModifyService {
-	return &dbt.DbtTransformationModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewUserConnectionMembershipDetails() *users.UserConnectionMembershipDetailsService {
+	return &users.UserConnectionMembershipDetailsService{HttpService: c.NewHttpService()}
 }
 
 /* Webhooks */
@@ -420,8 +372,8 @@ func (c *Client) NewWebhookDelete() *webhooks.WebhookDeleteService {
 	return &webhooks.WebhookDeleteService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewWebhookModify() *webhooks.WebhookModifyService {
-	return &webhooks.WebhookModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewWebhookUpdate() *webhooks.WebhookUpdateService {
+	return &webhooks.WebhookUpdateService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewWebhookGroupCreate() *webhooks.WebhookGroupCreateService {
@@ -461,28 +413,28 @@ func (c *Client) NewTeamsList() *teams.TeamsListService {
 	return &teams.TeamsListService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamsModify() *teams.TeamsModifyService {
-	return &teams.TeamsModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamsUpdate() *teams.TeamsUpdateService {
+	return &teams.TeamsUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamConnectorMembershipCreate() *teams.TeamConnectorMembershipCreateService {
-	return &teams.TeamConnectorMembershipCreateService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamConnectionMembershipCreate() *teams.TeamConnectionMembershipCreateService {
+	return &teams.TeamConnectionMembershipCreateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamConnectorMembershipDelete() *teams.TeamConnectorMembershipDeleteService {
-	return &teams.TeamConnectorMembershipDeleteService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamConnectionMembershipDelete() *teams.TeamConnectionMembershipDeleteService {
+	return &teams.TeamConnectionMembershipDeleteService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamConnectorMembershipDetails() *teams.TeamConnectorMembershipDetailsService {
-	return &teams.TeamConnectorMembershipDetailsService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamConnectionMembershipDetails() *teams.TeamConnectionMembershipDetailsService {
+	return &teams.TeamConnectionMembershipDetailsService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamConnectorMembershipsList() *teams.TeamConnectorMembershipsListService {
-	return &teams.TeamConnectorMembershipsListService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamConnectionMembershipsList() *teams.TeamConnectionMembershipsListService {
+	return &teams.TeamConnectionMembershipsListService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamConnectorMembershipModify() *teams.TeamConnectorMembershipModifyService {
-	return &teams.TeamConnectorMembershipModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamConnectionMembershipUpdate() *teams.TeamConnectionMembershipUpdateService {
+	return &teams.TeamConnectionMembershipUpdateService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewTeamGroupMembershipCreate() *teams.TeamGroupMembershipCreateService {
@@ -501,8 +453,8 @@ func (c *Client) NewTeamGroupMembershipsList() *teams.TeamGroupMembershipsListSe
 	return &teams.TeamGroupMembershipsListService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamGroupMembershipModify() *teams.TeamGroupMembershipModifyService {
-	return &teams.TeamGroupMembershipModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamGroupMembershipUpdate() *teams.TeamGroupMembershipUpdateService {
+	return &teams.TeamGroupMembershipUpdateService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewTeamUserMembershipCreate() *teams.TeamUserMembershipCreateService {
@@ -521,8 +473,8 @@ func (c *Client) NewTeamUserMembershipsList() *teams.TeamUserMembershipsListServ
 	return &teams.TeamUserMembershipsListService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewTeamUserMembershipModify() *teams.TeamUserMembershipModifyService {
-	return &teams.TeamUserMembershipModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewTeamUserMembershipUpdate() *teams.TeamUserMembershipUpdateService {
+	return &teams.TeamUserMembershipUpdateService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewTeamsDeleteRoleInAccount() *teams.TeamsDeleteRoleInAccountService {
@@ -537,71 +489,67 @@ func (c *Client) NewConnectCard() *connectcard.ConnectCardService {
 	return &connectcard.ConnectCardService{HttpService: c.NewHttpService()}
 }
 
-/* Connectors */
-func (c *Client) NewConnectorCreate() *connectors.ConnectorCreateService {
-	return &connectors.ConnectorCreateService{HttpService: c.NewHttpService()}
+/* Connections */
+func (c *Client) NewConnectionCreate() *connections.ConnectionCreateService {
+	return &connections.ConnectionCreateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorDetails() *connectors.ConnectorDetailsService {
+func (c *Client) NewConnectionDetails() *connections.ConnectionDetailsService {
 	http := c.NewHttpService()
 	http.CommonHeaders["Accept"] = restAPIv2
-	return &connectors.ConnectorDetailsService{HttpService: http}
+	return &connections.ConnectionDetailsService{HttpService: http}
 }
 
-func (c *Client) NewConnectorModify() *connectors.ConnectorModifyService {
-	return &connectors.ConnectorModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionUpdate() *connections.ConnectionUpdateService {
+	return &connections.ConnectionUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorDelete() *connectors.ConnectorDeleteService {
-	return &connectors.ConnectorDeleteService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionDelete() *connections.ConnectionDeleteService {
+	return &connections.ConnectionDeleteService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorSetupTests() *connectors.ConnectorSetupTestsService {
-	return &connectors.ConnectorSetupTestsService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionSetupTests() *connections.ConnectionSetupTestsService {
+	return &connections.ConnectionSetupTestsService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorColumnConfigListService() *connectors.ConnectorColumnConfigListService {
-	return &connectors.ConnectorColumnConfigListService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionColumnConfigListService() *connections.ConnectionColumnConfigListService {
+	return &connections.ConnectionColumnConfigListService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorColumnConfigModifyService() *connectors.ConnectorColumnConfigModifyService {
-	return &connectors.ConnectorColumnConfigModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionColumnConfigUpdateService() *connections.ConnectionColumnConfigUpdateService {
+	return &connections.ConnectionColumnConfigUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorDatabaseSchemaConfigModifyService() *connectors.ConnectorDatabaseSchemaConfigModifyService {
-	return &connectors.ConnectorDatabaseSchemaConfigModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionDatabaseSchemaConfigUpdateService() *connections.ConnectionDatabaseSchemaConfigUpdateService {
+	return &connections.ConnectionDatabaseSchemaConfigUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorReSyncTable() *connectors.ConnectorReSyncTableService {
-	return &connectors.ConnectorReSyncTableService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionReSyncTable() *connections.ConnectionReSyncTableService {
+	return &connections.ConnectionReSyncTableService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorSchemaDetails() *connectors.ConnectorSchemaDetailsService {
-	return &connectors.ConnectorSchemaDetailsService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionSchemaDetails() *connections.ConnectionSchemaDetailsService {
+	return &connections.ConnectionSchemaDetailsService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorSchemaReload() *connectors.ConnectorSchemaReloadService {
-	return &connectors.ConnectorSchemaReloadService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionSchemaReload() *connections.ConnectionSchemaReloadService {
+	return &connections.ConnectionSchemaReloadService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorSchemaUpdateService() *connectors.ConnectorSchemaConfigUpdateService {
-	return &connectors.ConnectorSchemaConfigUpdateService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionSchemaUpdateService() *connections.ConnectionSchemaConfigUpdateService {
+	return &connections.ConnectionSchemaConfigUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorSchemaCreateService() *connectors.ConnectorSchemaConfigCreateService {
-	return &connectors.ConnectorSchemaConfigCreateService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionSchemaCreateService() *connections.ConnectionSchemaConfigCreateService {
+	return &connections.ConnectionSchemaConfigCreateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorTableConfigModifyService() *connectors.ConnectorTableConfigModifyService {
-	return &connectors.ConnectorTableConfigModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionTableConfigUpdateService() *connections.ConnectionTableConfigUpdateService {
+	return &connections.ConnectionTableConfigUpdateService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewConnectorsSourceMetadata() *connectors.ConnectorsSourceMetadataService {
-	return &connectors.ConnectorsSourceMetadataService{HttpService: c.NewHttpService()}
-}
-
-func (c *Client) NewConnectorsList() *connectors.ConnectorsListService {
-	return &connectors.ConnectorsListService{HttpService: c.NewHttpService()}
+func (c *Client) NewConnectionsList() *connections.ConnectionsListService {
+	return &connections.ConnectionsListService{HttpService: c.NewHttpService()}
 }
 
 /* Private Links */
@@ -621,8 +569,8 @@ func (c *Client) NewPrivateLinkDetails() *privatelink.PrivateLinkDetailsService 
 	return &privatelink.PrivateLinkDetailsService{HttpService: c.NewHttpService()}
 }
 
-func (c *Client) NewPrivateLinkModify() *privatelink.PrivateLinkModifyService {
-	return &privatelink.PrivateLinkModifyService{HttpService: c.NewHttpService()}
+func (c *Client) NewPrivateLinkUpdate() *privatelink.PrivateLinkUpdateService {
+	return &privatelink.PrivateLinkUpdateService{HttpService: c.NewHttpService()}
 }
 
 /* Proxy */
@@ -640,6 +588,10 @@ func (c *Client) NewProxyDetails() *proxy.ProxyDetailsService {
 
 func (c *Client) NewProxyDelete() *proxy.ProxyDeleteService {
 	return &proxy.ProxyDeleteService{HttpService: c.NewHttpService()}
+}
+
+func (c *Client) NewProxyRegenerateSecrets() *proxy.ProxyRegenerateSecretsService {
+	return &proxy.ProxyRegenerateSecretsService{HttpService: c.NewHttpService()}
 }
 
 func (c *Client) NewProxyConnectionMembershipsList() *proxy.ProxyConnectionMembershipsListService {
@@ -730,4 +682,17 @@ func (c *Client) NewQuickstartPackagesList() *transformations.QuickstartPackages
 
 func (c *Client) NewQuickstartPackageDetails() *transformations.QuickstartPackageDetailsService {
 	return &transformations.QuickstartPackageDetailsService{HttpService: c.NewHttpService()}
+}
+
+func (c *Client) NewMetadataDetails() *metadata.MetadataDetailsService {
+	return &metadata.MetadataDetailsService{HttpService: c.NewHttpService()}
+}
+
+func (c *Client) NewMetadataList() *metadata.MetadataListService {
+	return &metadata.MetadataListService{HttpService: c.NewHttpService()}
+}
+
+/* Account Info */
+func (c *Client) AccountInfo() *account.AccountInfoService {
+	return &account.AccountInfoService{HttpService: c.NewHttpService()}
 }
