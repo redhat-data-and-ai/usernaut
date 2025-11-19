@@ -146,6 +146,12 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
 	}
 
+	// DATA-3526: Handle backend removal - offboard from backends that were removed from spec
+	if err := r.handleRemovedBackends(ctx, groupCR); err != nil {
+		r.log.WithError(err).Error("error handling removed backends")
+		return ctrl.Result{}, err
+	}
+
 	visitedGroups := make(map[string]struct{})
 	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups)
 	if err != nil {
@@ -1242,4 +1248,155 @@ func isGroupCRHasDependants(backends []usernautdevv1alpha1.Backend, dependsOn co
 		}
 	}
 	return false
+}
+
+// DATA-3526: handleRemovedBackends detects and offboards from backends that were removed from the spec
+func (r *GroupReconciler) handleRemovedBackends(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+	// Detect backends that were removed from the spec
+	removedBackends := r.detectRemovedBackends(groupCR)
+
+	if len(removedBackends) == 0 {
+		r.log.Debug("no backends were removed from the spec")
+		return nil
+	}
+
+	r.log.WithField("removed_backends_count", len(removedBackends)).Info("detected removed backends, starting offboarding process")
+
+	// Offboard from the removed backends
+	return r.offboardFromRemovedBackends(ctx, groupCR, removedBackends)
+}
+
+// getBackendKey creates a unique key for a backend using name and type
+func getBackendKey(name, backendType string) string {
+	return name + "_" + backendType
+}
+
+// detectRemovedBackends compares the current status against the spec to find removed backends
+func (r *GroupReconciler) detectRemovedBackends(groupCR *usernautdevv1alpha1.Group) []usernautdevv1alpha1.BackendStatus {
+	var removedBackends []usernautdevv1alpha1.BackendStatus
+
+	// Create a map of current backends for quick lookup
+	currentBackends := make(map[string]bool)
+	for _, backend := range groupCR.Spec.Backends {
+		key := getBackendKey(backend.Name, backend.Type)
+		currentBackends[key] = true
+	}
+
+	// Check each backend in status to see if it still exists in spec
+	for _, statusBackend := range groupCR.Status.BackendsStatus {
+		key := getBackendKey(statusBackend.Name, statusBackend.Type)
+
+		// If backend exists in status but not in current spec, it was removed
+		if !currentBackends[key] && statusBackend.Status {
+			r.log.WithFields(logrus.Fields{
+				"backend":      statusBackend.Name,
+				"backend_type": statusBackend.Type,
+			}).Info("detected removed backend")
+			removedBackends = append(removedBackends, statusBackend)
+		}
+	}
+
+	return removedBackends
+}
+
+// offboardFromRemovedBackends performs the actual cleanup for removed backends
+// This reuses the existing deleteBackendsTeam logic but for specific backends only
+func (r *GroupReconciler) offboardFromRemovedBackends(ctx context.Context, groupCR *usernautdevv1alpha1.Group, removedBackends []usernautdevv1alpha1.BackendStatus) error {
+	r.log.Info("starting offboarding process for removed backends")
+
+	var allErrors []error
+
+	for _, removedBackend := range removedBackends {
+		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, removedBackend.Type, groupCR.Spec.GroupName)
+		if err != nil {
+			r.log.WithFields(logrus.Fields{
+				"team_name":    groupCR.Spec.GroupName,
+				"backend":      removedBackend.Name,
+				"backend_type": removedBackend.Type,
+			}).WithError(err).Error("offboarding: error in transforming group name")
+			allErrors = append(allErrors, err)
+			continue
+		}
+
+		backendLoggerInfo := r.log.WithFields(logrus.Fields{
+			"team_name":             groupCR.Spec.GroupName,
+			"transformed_team_name": transformedGroupName,
+			"backend":               removedBackend.Name,
+			"backend_type":          removedBackend.Type,
+		})
+		backendLoggerInfo.Info("offboarding: deleting team from removed backend")
+
+		backendClient, err := clients.New(removedBackend.Name, removedBackend.Type, r.AppConfig.BackendMap)
+		if err != nil {
+			backendLoggerInfo.WithError(err).Errorf("offboarding: error creating client for backend %s", removedBackend.Name)
+			allErrors = append(allErrors, err)
+			continue
+		}
+
+		teamDetailsMap := make(map[string]string)
+		teamDetailsInCache, err := r.Cache.Get(ctx, transformedGroupName)
+		if err == nil && teamDetailsInCache != "" {
+			if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
+				backendLoggerInfo.WithError(jErr).Error("offboarding: error unmarshalling team details from cache")
+				allErrors = append(allErrors, jErr)
+				continue
+			}
+
+			cacheKey := getBackendKey(removedBackend.Name, removedBackend.Type)
+
+			if teamID, exists := teamDetailsMap[cacheKey]; exists && teamID != "" {
+				backendLoggerInfo.Infof("offboarding: deleting team with (ID: %s) from removed backend %s", teamID, removedBackend.Type)
+
+				if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
+					backendLoggerInfo.WithError(err).Error("offboarding: failed to delete team from the removed backend")
+					allErrors = append(allErrors, err)
+					continue
+				}
+				backendLoggerInfo.Infof("offboarding: successfully deleted team with id '%s' from removed backend %s", teamID, removedBackend.Type)
+
+				// Remove the backend from the map
+				delete(teamDetailsMap, cacheKey)
+
+				// Atomically update or delete the cache entry
+				if len(teamDetailsMap) > 0 {
+					updatedCacheData, err := json.Marshal(teamDetailsMap)
+					if err != nil {
+						backendLoggerInfo.WithError(err).Error("offboarding: failed to marshal updated team details for cache")
+						allErrors = append(allErrors, err)
+						continue
+					}
+					if err := r.Cache.Set(ctx, transformedGroupName, string(updatedCacheData), cache.NoExpiration); err != nil {
+						backendLoggerInfo.WithError(err).Error("offboarding: failed to update cache after deleting team")
+						allErrors = append(allErrors, err)
+						continue
+					}
+					backendLoggerInfo.Infof("offboarding: updated cache after removing team ID '%s' for group '%s'", teamID, transformedGroupName)
+				} else {
+					// If no backends are left for this group, delete the cache entry.
+					if err := r.Cache.Delete(ctx, transformedGroupName); err != nil {
+						backendLoggerInfo.WithError(err).Error("offboarding: failed to delete cache entry after cleanup")
+						allErrors = append(allErrors, err)
+						continue
+					}
+					backendLoggerInfo.Info("offboarding: no more backend entries in cache; deleted group entry")
+				}
+			} else {
+				backendLoggerInfo.Info("offboarding: team not found in cache, skipping deletion")
+			}
+		} else {
+			backendLoggerInfo.Info("offboarding: cache entry not found, skipping deletion")
+		}
+	}
+
+	if len(allErrors) > 0 {
+		r.log.WithField("error_count", len(allErrors)).Error("offboarding completed with some errors")
+		// Return the first error for reconcile retry, but log all errors
+		for i, err := range allErrors {
+			r.log.WithField("error_index", i).WithError(err).Error("offboarding error details")
+		}
+		return allErrors[0]
+	}
+
+	r.log.Info("completed offboarding process for all removed backends")
+	return nil
 }
