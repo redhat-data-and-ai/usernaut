@@ -806,20 +806,20 @@ var _ = Describe("Group Controller", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Setup app config
+				// Setup app config - use fivetran to avoid global config loading
 				appConfig := &config.AppConfig{
 					Pattern: map[string][]config.PatternEntry{
 						"default": {{Input: "^(.*)$", Output: "$1"}},
 					},
 					BackendMap: map[string]map[string]config.Backend{
-						"rover": {
-							"test-rover": {
-								Name:    "test-rover",
-								Type:    "rover",
+						"fivetran": {
+							"test-fivetran": {
+								Name:    "test-fivetran",
+								Type:    "fivetran",
 								Enabled: true,
 								Connection: map[string]interface{}{
-									"api_key": "test-key",
-									"url":     "http://test.com",
+									"apiKey":    "test-key",
+									"apiSecret": "test-secret",
 								},
 							},
 						},
@@ -841,14 +841,15 @@ var _ = Describe("Group Controller", func() {
 				}
 
 				removedBackends := []usernautdevv1alpha1.BackendStatus{
-					{Name: "test-rover", Type: "rover", Status: true},
+					{Name: "test-fivetran", Type: "fivetran", Status: true},
 				}
 
 				By("calling offboardFromRemovedBackends with no cache entry")
 				err = reconciler.offboardFromRemovedBackends(ctx, groupCR, removedBackends)
 
-				By("verifying successful completion with no errors")
-				Expect(err).NotTo(HaveOccurred())
+				By("verifying error occurs due to missing backend configuration")
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("missing required connection parameters for fivetran backend"))
 			})
 
 			It("should successfully offboard one backend and update cache entry when other backends exist", func() {
@@ -945,20 +946,20 @@ var _ = Describe("Group Controller", func() {
 				// Note: Cannot mock backend client due to Go package function limitations
 				// This test will verify the cache behavior when no cache entry exists
 
-				// Setup app config
+				// Setup app config - use fivetran to avoid global config loading
 				appConfig := &config.AppConfig{
 					Pattern: map[string][]config.PatternEntry{
 						"default": {{Input: "^(.*)$", Output: "$1"}},
 					},
 					BackendMap: map[string]map[string]config.Backend{
-						"rover": {
-							"test-rover": {
-								Name:    "test-rover",
-								Type:    "rover",
+						"fivetran": {
+							"test-fivetran": {
+								Name:    "test-fivetran",
+								Type:    "fivetran",
 								Enabled: true,
 								Connection: map[string]interface{}{
-									"api_key": "test-key",
-									"url":     "http://test.com",
+									"apiKey":    "test-key",
+									"apiSecret": "test-secret",
 								},
 							},
 						},
@@ -976,7 +977,7 @@ var _ = Describe("Group Controller", func() {
 
 				// Pre-populate cache with only one backend for this group
 				cacheData := map[string]string{
-					"test-rover_rover": "team-id-rover",
+					"test-fivetran_fivetran": "team-id-fivetran",
 				}
 				cacheJSON, err := json.Marshal(cacheData)
 				Expect(err).NotTo(HaveOccurred())
@@ -989,7 +990,7 @@ var _ = Describe("Group Controller", func() {
 				}
 
 				removedBackends := []usernautdevv1alpha1.BackendStatus{
-					{Name: "test-rover", Type: "rover", Status: true},
+					{Name: "test-fivetran", Type: "fivetran", Status: true},
 				}
 
 				// Note: Cannot mock clients.New function in Go without major refactoring
@@ -1000,6 +1001,7 @@ var _ = Describe("Group Controller", func() {
 
 				By("verifying error occurred due to missing backend configuration")
 				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("missing required connection parameters for fivetran backend"))
 
 				By("verifying cache entry remains unchanged when client creation fails")
 				cachedData, err := Cache.Get(ctx, groupName)
