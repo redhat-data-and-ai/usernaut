@@ -95,27 +95,42 @@ func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 		Path:       &groupName,
 		Visibility: &visibility,
 	}
-	group, _, err := g.gitlabClient.Groups.CreateGroup(createGroupOptions)
+	group, response, err := g.gitlabClient.Groups.CreateGroup(createGroupOptions)
 	if err != nil {
-		return nil, err
+		if response.StatusCode == http.StatusConflict || response.StatusCode == http.StatusBadRequest {
+			log.Infof("team %s already exists, fetching team details", group.Name)
+		} else {
+			return nil, fmt.Errorf("failed to create team: %v, status code: %d", err, response.StatusCode)
+		}
 	}
 
 	if g.ldapSync {
 		// Add group to LDAP
-		ldapLink, err := g.addToLdapGroup(group.ID)
+		ldapLink, statusCode, err := g.addToLdapGroup(group.ID)
 		if err != nil {
-			log.WithError(err).Error("failed to add group to LDAP", "groupID", group.ID)
-		} else {
-			log.Info("ldap link added successfully", ldapLink)
+			return nil, fmt.Errorf("failed to add group to LDAP: %v, status code: %d", err, statusCode)
 		}
+		log.Infof("ldap link %s added successfully with status: %d", ldapLink, statusCode)
 
 		// Initiate LDAP sync
-		statusCode, err := g.initiateSync(ctx)
+		statusCode, err = g.initiateSync(ctx)
 		if err != nil {
-			log.WithError(err).Error("failed to initiate LDAP sync", "groupID", group.ID)
-		} else {
-			log.Infof("ldap sync initiated successfully with status: %d", statusCode)
+			return nil, fmt.Errorf("failed to initiate LDAP sync: %v, status code: %d", err, statusCode)
 		}
+		log.Infof("ldap sync initiated successfully with status: %d", statusCode)
+	}
+
+	// Add group as project developer if team params are present
+	if team.TeamParams.Property == "project_access_paths" {
+		for _, value := range team.TeamParams.Value {
+			statusCode, err := g.addGroupAsProjectDeveloper(group.ID, value)
+			if err != nil || statusCode != http.StatusCreated {
+				return nil, fmt.Errorf("failed to add group as project developer: %v, status code: %d", err, statusCode)
+			}
+			log.Infof("group %s added as project developer with status: %d", group.Name, statusCode)
+		}
+	} else {
+		log.Infof("Property type for gitlab is invalid: %s, skipping project access paths addition", team.TeamParams.Property)
 	}
 
 	return &structs.Team{
@@ -158,17 +173,17 @@ func (g *GitlabClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 	return nil
 }
 
-func (g *GitlabClient) addToLdapGroup(groupID int) (*gitlab.LDAPGroupLink, error) {
+func (g *GitlabClient) addToLdapGroup(groupID int) (string, int, error) {
 	accessLevel := gitlab.DeveloperPermissions
-	ldapLink, _, err := g.gitlabClient.Groups.AddGroupLDAPLink(groupID, &gitlab.AddGroupLDAPLinkOptions{
+	ldapLink, response, err := g.gitlabClient.Groups.AddGroupLDAPLink(groupID, &gitlab.AddGroupLDAPLinkOptions{
 		GroupAccess: &accessLevel,
 		CN:          &g.cn,
 		Provider:    &ldapProvider,
 	})
 	if err != nil {
-		return nil, err
+		return "", 0, err
 	}
-	return ldapLink, nil
+	return ldapLink.CN, response.StatusCode, nil
 }
 
 func (g *GitlabClient) initiateSync(ctx context.Context) (int, error) {
@@ -212,4 +227,18 @@ func (g *GitlabClient) pollForPendingDeletion(ctx context.Context,
 	}
 
 	return "", fmt.Errorf("timeout: Group %v was not marked for deletion after %d attempts", teamID, maxAttempts)
+}
+
+func (g *GitlabClient) addGroupAsProjectDeveloper(groupID int, projectPathString string) (int, error) {
+	developerAccess := gitlab.DeveloperPermissions
+	opt := &gitlab.ShareWithGroupOptions{
+		GroupID:     &groupID,
+		GroupAccess: &developerAccess,
+	}
+
+	response, err := g.gitlabClient.Projects.ShareProjectWithGroup(projectPathString, opt)
+	if err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
 }
