@@ -118,6 +118,18 @@ func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 		}
 	}
 
+	// Add group as project developer if team params are present
+	if team.TeamParams.Property != "" && team.TeamParams.Value != nil {
+		for _, value := range team.TeamParams.Value {
+			statusCode, err := g.addGroupAsProjectDeveloper(group.ID, value)
+			if err != nil || statusCode != http.StatusCreated {
+				log.WithError(err).Error("failed to add group as project developer", "groupID", group.ID, "to project path", value)
+			} else {
+				log.Infof("group %v added as project developer with status: %d", group.ID, statusCode)
+			}
+		}
+	}
+
 	return &structs.Team{
 		ID:   fmt.Sprintf("%d", group.ID),
 		Name: group.Name,
@@ -212,4 +224,18 @@ func (g *GitlabClient) pollForPendingDeletion(ctx context.Context,
 	}
 
 	return "", fmt.Errorf("timeout: Group %v was not marked for deletion after %d attempts", teamID, maxAttempts)
+}
+
+func (g *GitlabClient) addGroupAsProjectDeveloper(groupID int, projectPathString string) (int, error) {
+	developerAccess := gitlab.DeveloperPermissions
+	opt := &gitlab.ShareWithGroupOptions{
+		GroupID:     &groupID,
+		GroupAccess: &developerAccess,
+	}
+
+	response, err := g.gitlabClient.Projects.ShareProjectWithGroup(projectPathString, opt)
+	if err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
 }
