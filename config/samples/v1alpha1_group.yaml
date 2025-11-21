@@ -12,6 +12,14 @@ spec:
    users:
     - subhatta
     - vinod
+  group_params:
+    - backend: gitlab
+      name: gitlab
+      property: project_access_paths
+      value:
+        - dataverse/datavers-config/dataproduct-config
+        - dataverse/astro/astro-toolkit
+        - dataverse/platform-tooling/fivetran_terraform
   backends:
   - name: fivetran
     type: fivetran
