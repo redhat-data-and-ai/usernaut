@@ -258,13 +258,24 @@ func (r *GroupReconciler) processAllBackends(
 	uniqueMembers []string,
 ) map[string]map[string]string {
 	backendErrors := make(map[string]map[string]string, 0)
+
+	// Group Params by backend name for direct lookup.
+	groupParamsByBackend := make(map[string]structs.TeamParams)
+	for _, param := range groupCR.Spec.GroupParams {
+		groupParamsByBackend[param.Backend] = structs.TeamParams{
+			Property: param.Property,
+			Value:    param.Value,
+		}
+	}
+
 	for _, backend := range groupCR.Spec.Backends {
 		r.backendLogger = r.log.WithFields(logrus.Fields{
 			"backend":      backend.Name,
 			"backend_type": backend.Type,
 		})
 
-		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers); err != nil {
+		backendGroupParams := groupParamsByBackend[backend.Type]
+		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers, backendGroupParams); err != nil {
 			r.backendLogger.WithError(err).Error("error processing backend")
 			if _, ok := backendErrors[backend.Type]; !ok {
 				backendErrors[backend.Type] = make(map[string]string)
@@ -281,6 +292,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	backend usernautdevv1alpha1.Backend,
 	uniqueMembers []string,
+	backendGroupParams structs.TeamParams,
 ) error {
 	// Create backend client
 	backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
@@ -302,7 +314,9 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	}
 
 	// Fetch or create team
-	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
+	teamID, err := r.fetchOrCreateTeam(
+		ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient, backendGroupParams,
+	)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching or creating team")
 		return err
@@ -612,7 +626,8 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	groupName string,
 	backendName, backendType string,
-	backendClient clients.Client) (string, error) {
+	backendClient clients.Client,
+	backendGroupParams structs.TeamParams) (string, error) {
 
 	// transforming the group name
 	transformed_group_name, err := utils.GetTransformedGroupName(r.AppConfig, backendType, groupName)
@@ -642,6 +657,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		Name:        transformed_group_name,
 		Description: "team for " + groupName,
 		Role:        fivetran.AccountReviewerRole,
+		TeamParams:  backendGroupParams,
 	})
 	if err != nil {
 		// TODO: handle the error in case team already exists in backend, we need to again populate the cache

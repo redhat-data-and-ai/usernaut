@@ -60,6 +60,26 @@ spec:
                 type: array
               group_name:
                 type: string
+              group_params:
+                items:
+                  properties:
+                    backend:
+                      type: string
+                    name:
+                      type: string
+                    property:
+                      type: string
+                    value:
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - backend
+                  - name
+                  - property
+                  - value
+                  type: object
+                type: array
               members:
                 properties:
                   groups:
@@ -76,6 +96,7 @@ spec:
             required:
             - backends
             - group_name
+            - group_params
             - members
             type: object
           status:
