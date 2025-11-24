@@ -47,7 +47,7 @@ jobs:
         run: |
           make mockgen
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6.0.1
+        uses: golangci/golangci-lint-action@v9.1.0
         with:
           install-mode: "goinstall"
           version: v1.64.8
