@@ -42,7 +42,7 @@ func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*struct
 	resultByEmail := make(map[string]*structs.User)
 
 	// Use the generic pagination helper with a closure that processes user pages
-	err := c.fetchAllWithPagination(ctx, "/api/v2/users", func(resp []byte) error {
+	err := c.fetchAllWithPagination(ctx, "/api/v2/users?showLimit=100", func(resp []byte) error {
 		return c.processUsersPage(resp, resultByID, resultByEmail)
 	})
 	if err != nil {
