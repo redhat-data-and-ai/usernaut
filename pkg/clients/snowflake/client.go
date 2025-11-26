@@ -98,17 +98,6 @@ func (c *SnowflakeClient) prepareRequest(ctx context.Context, endpoint, method s
 	return req, nil
 }
 
-// makeRequest uses the common request package for standard HTTP requests (with logging, tracing, etc.)
-func (c *SnowflakeClient) makeRequest(ctx context.Context, endpoint,
-	method string, body interface{}) ([]byte, int, error) {
-	req, err := c.prepareRequest(ctx, endpoint, method, body)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return req.MakeRequest(c.client, method, "snowflake")
-}
-
 // makeRequestWithHeader uses the common request package for HTTP requests
 // and returns headers (with logging, tracing, etc.)
 func (c *SnowflakeClient) makeRequestWithHeader(ctx context.Context, endpoint,
@@ -121,29 +110,74 @@ func (c *SnowflakeClient) makeRequestWithHeader(ctx context.Context, endpoint,
 	return req.MakeRequestWithHeader(c.client, method, "snowflake")
 }
 
+// makeRequestWithPolling handles 202 async responses by polling the Location header
+func (c *SnowflakeClient) makeRequestWithPolling(ctx context.Context, endpoint,
+	method string, body interface{}) ([]byte, http.Header, int, error) {
+	resp, headers, status, err := c.makeRequestWithHeader(ctx, endpoint, method, body)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	if status != http.StatusAccepted {
+		return resp, headers, status, nil
+	}
+
+	location := headers.Get("Location")
+	if location == "" {
+		return nil, nil, status, fmt.Errorf("received 202 response but no Location header found")
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	return c.pollForResults(pollCtx, location)
+}
+
+// pollForResults polls every 10 seconds until the endpoint returns 200
+func (c *SnowflakeClient) pollForResults(ctx context.Context, endpoint string) ([]byte, http.Header, int, error) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		resp, headers, status, err := c.makeRequestWithHeader(ctx, endpoint, http.MethodGet, nil)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		if status == http.StatusOK {
+			return resp, headers, status, nil
+		}
+		if status != http.StatusAccepted {
+			return nil, nil, status, fmt.Errorf("unexpected status while polling: %s", http.StatusText(status))
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, nil, 0, fmt.Errorf("polling cancelled: %w", ctx.Err())
+		case <-ticker.C:
+			// Continue to next iteration
+		}
+	}
+}
+
 func (c *SnowflakeClient) fetchAllWithPagination(ctx context.Context,
 	endpoint string, processPage func([]byte) error) error {
-	// First request to get initial page and Link header
-	resp, headers, status, err := c.makeRequestWithHeader(ctx, endpoint, http.MethodGet, nil)
+	resp, headers, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		return err
 	}
+
 	if status != http.StatusOK {
 		return fmt.Errorf("failed to fetch data from %s, status: %s, body: %s",
 			endpoint, http.StatusText(status), string(resp))
 	}
 
-	// Process first page
 	if err := processPage(resp); err != nil {
 		return err
 	}
 
-	// Check for additional pages in Link header
 	linkHeader := headers.Get("Link")
 	if linkHeader != "" {
 		nextURL := parseLinkHeader(linkHeader, "next")
 
-		// Follow pagination using Link header URLs
 		for nextURL != "" {
 			resp, headers, status, err := c.makeRequestWithHeader(ctx, nextURL, http.MethodGet, nil)
 			if err != nil {
@@ -153,12 +187,10 @@ func (c *SnowflakeClient) fetchAllWithPagination(ctx context.Context,
 				return fmt.Errorf("unexpected status during pagination: %s, body: %s", http.StatusText(status), string(resp))
 			}
 
-			// Process this page
 			if err := processPage(resp); err != nil {
 				return err
 			}
 
-			// Get next page URL
 			linkHeader = headers.Get("Link")
 			if linkHeader != "" {
 				nextURL = parseLinkHeader(linkHeader, "next")
