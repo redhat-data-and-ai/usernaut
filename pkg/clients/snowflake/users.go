@@ -57,16 +57,13 @@ func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*struct
 	return resultByID, resultByEmail, nil
 }
 
-// processUsersPage processes a page of users and adds them to both result maps
 func (c *SnowflakeClient) processUsersPage(resp []byte, resultByID map[string]*structs.User,
 	resultByEmail map[string]*structs.User) error {
-	// Parse the response using type-safe struct unmarshaling
 	var users []SnowflakeUser
 	if err := json.Unmarshal(resp, &users); err != nil {
 		return fmt.Errorf("failed to parse users response: %w", err)
 	}
 
-	// Extract users from the response
 	for _, user := range users {
 		structUser := &structs.User{
 			ID:          strings.ToLower(user.Name),
@@ -75,7 +72,6 @@ func (c *SnowflakeClient) processUsersPage(resp []byte, resultByID map[string]*s
 			DisplayName: user.DisplayName,
 		}
 
-		// Add to both maps
 		resultByID[strings.ToLower(user.Name)] = structUser
 		if user.Email != "" {
 			resultByEmail[strings.ToLower(user.Email)] = structUser
@@ -101,32 +97,28 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 
 	payload := map[string]interface{}{
 		"name":  user.UserName,
-		"email": user.Email, // Email is now mandatory
+		"email": user.Email,
 	}
 
-	// Add optional fields if provided
 	if user.DisplayName != "" {
 		payload["displayName"] = user.DisplayName
 	}
 
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
+	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodPost, payload)
 	if err != nil {
 		log.WithError(err).Error("error creating user")
 		return nil, err
 	}
 
-	// Check for successful creation
 	if status != http.StatusOK && status != http.StatusCreated {
 		return nil, fmt.Errorf("failed to create user, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
 
-	// Parse response using type-safe struct unmarshaling
 	var createdUserResponse SnowflakeUser
 	if err := json.Unmarshal(resp, &createdUserResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse create user response: %w", err)
 	}
 
-	// Return the created user using actual API response data
 	return &structs.User{
 		ID:          strings.ToLower(createdUserResponse.Name),
 		UserName:    strings.ToLower(createdUserResponse.Name),
@@ -144,7 +136,7 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 	log.Info("fetching user details by ID")
 
 	endpoint := fmt.Sprintf("/api/v2/users/%s", userID)
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
+	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		log.WithError(err).Error("error fetching user details")
 		return nil, err
@@ -153,7 +145,6 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 		return nil, fmt.Errorf("failed to fetch user details, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
 
-	// Parse the response using strongly-typed struct
 	var userResponse SnowflakeUser
 	if err := json.Unmarshal(resp, &userResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse user response: %w", err)
@@ -180,13 +171,12 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 	log.Info("deleting user")
 	endpoint := fmt.Sprintf("/api/v2/users/%s", userID)
 
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodDelete, nil)
+	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodDelete, nil)
 	if err != nil {
 		log.WithError(err).Error("error deleting user")
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
 
-	// Check for successful deletion
 	if status != http.StatusOK && status != http.StatusNoContent {
 		return fmt.Errorf("failed to delete user, status: %s, body: %s", http.StatusText(status), string(resp))
 	}

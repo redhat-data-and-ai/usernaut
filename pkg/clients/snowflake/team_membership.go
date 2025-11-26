@@ -28,7 +28,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// FetchTeamMembersByTeamID fetches team members for a given team ID using the correct REST API endpoint
+// FetchTeamMembersByTeamID fetches team members for a given team ID with pagination support
 func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 	teamID string) (map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
@@ -37,38 +37,39 @@ func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 	})
 	log.Info("fetching team members by team ID")
 
+	members := make(map[string]*structs.User)
+
 	// Use the correct endpoint: grants-of (not grants-on)
 	endpoint := fmt.Sprintf("/api/v2/roles/%s/grants-of", teamID)
 
-	response, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
+	err := c.fetchAllWithPagination(ctx, endpoint, func(resp []byte) error {
+		return c.processGrantsPage(resp, members)
+	})
 	if err != nil {
 		log.WithError(err).Error("error fetching team members by team ID")
-		return nil, fmt.Errorf("error making request to fetch team members: %w", err)
-	}
-	if status != http.StatusOK {
-		return nil,
-			fmt.Errorf("failed to fetch team members, status: %s, body: %s", http.StatusText(status), string(response))
+		return nil, err
 	}
 
+	return members, nil
+}
+
+func (c *SnowflakeClient) processGrantsPage(resp []byte, members map[string]*structs.User) error {
 	var grants []SnowflakeGrant
-	if err := json.Unmarshal(response, &grants); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	if err := json.Unmarshal(resp, &grants); err != nil {
+		return fmt.Errorf("error unmarshaling grants response: %w", err)
 	}
-
-	members := make(map[string]*structs.User)
 
 	for _, grant := range grants {
-		// Check if this grant is for a USER (not ROLE)
 		if grant.GrantedTo == "USER" && grant.GranteeName != "" {
 			members[strings.ToLower(grant.GranteeName)] = &structs.User{
 				ID:       strings.ToLower(grant.GranteeName),
 				UserName: strings.ToLower(grant.GranteeName),
-				Email:    "", // Email not available from grants API
+				Email:    "",
 			}
 		}
 	}
 
-	return members, nil
+	return nil
 }
 
 // AddUserToTeam adds users to a team (grants role to users)
@@ -133,5 +134,6 @@ func (c *SnowflakeClient) makeRoleRequest(ctx context.Context, teamID, endpoint 
 		"privileges":     []string{},
 	}
 
-	return c.makeRequest(ctx, endpoint, http.MethodPost, payload)
+	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodPost, payload)
+	return resp, status, err
 }
