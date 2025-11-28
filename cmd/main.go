@@ -27,6 +27,7 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"golang.org/x/sync/errgroup"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -256,6 +257,46 @@ func main() {
 	}
 }
 
+// storeItemInCache is a helper function to store items (users/teams) in cache
+// It handles the atomic read-modify-write operation with proper locking
+func storeItemInCache(ctx context.Context, store cache.Cache, cacheMutex *sync.Mutex,
+	cacheKey, backendKey, itemID, itemType string) error {
+
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"item_type": itemType,
+		"component": "storeItemInCache",
+	})
+
+	itemMap := make(map[string]string)
+	itemInCache, err := store.Get(ctx, cacheKey)
+
+	// If item is already in cache, unmarshal and update with new backend ID
+	if err == nil {
+		if err := json.Unmarshal([]byte(itemInCache.(string)), &itemMap); err != nil {
+			log.WithError(err).Errorf("failed to unmarshal %s details from cache", itemType)
+			return err
+		}
+	}
+
+	itemMap[backendKey] = itemID
+	newItemValue, err := json.Marshal(itemMap)
+	if err != nil {
+		log.WithError(err).Errorf("failed to marshal %s details to JSON", itemType)
+		return err
+	}
+
+	// Store in cache with no expiration
+	if err := store.Set(ctx, cacheKey, string(newItemValue), cache.NoExpiration); err != nil {
+		log.WithError(err).Errorf("failed to store %s in cache", itemType)
+		return err
+	}
+
+	return nil
+}
+
 // Preload the cache with all the users and teams from the backends
 // This is done to avoid hitting the backend for every request
 // and to improve the performance of the application
@@ -265,110 +306,90 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 
 	ctx := context.Background()
 
-	for _, backend := range appConfig.Backends {
-		log := logger.Logger(ctx).
-			WithFields(logrus.Fields{
-				"backend":   backend.Name,
-				"type":      backend.Type,
-				"component": "preloadCache",
-			})
+	// Use errgroup for concurrent processing with proper error handling
+	g, ctx := errgroup.WithContext(ctx)
+
+	// Mutex to protect concurrent read-modify-write operations on cache
+	// Multiple backends might update the same user/team concurrently
+	cacheMutex := &sync.Mutex{}
+
+	// Process each backend concurrently
+	for _, backendObj := range appConfig.Backends {
+
+		// Capture loop variable for goroutine
+		backend := backendObj
 
 		// don't preload the cache in case of a disabled backend
 		if !backend.Enabled {
+			log := logger.Logger(ctx).
+				WithFields(logrus.Fields{
+					"backend":   backend.Name,
+					"type":      backend.Type,
+					"component": "preloadCache",
+				})
 			log.Warn("Backend is disabled, skipping preload")
 			continue
 		}
 
-		log.Info("preloading cache with users and teams from backend")
+		// Launch goroutine for each backend
+		g.Go(func() error {
+			log := logger.Logger(ctx).
+				WithFields(logrus.Fields{
+					"backend":   backend.Name,
+					"type":      backend.Type,
+					"component": "preloadCache",
+				})
 
-		backendClient, err := clients.New(backend.Name, backend.Type, appConfig.BackendMap)
-		if err != nil {
-			log.WithError(err).Error("failed to create backend client")
-			return err
-		}
+			log.Info("preloading cache with users and teams from backend")
 
-		// Fetch all the users and store them in the cache
-		users, _, err := backendClient.FetchAllUsers(ctx)
-		if err != nil {
-			log.WithError(err).Error("failed to fetch users from backend")
-			return err
-		}
-		for _, user := range users {
-			userMap := make(map[string]string)
-			userInCache, err := store.Get(ctx, user.GetEmail())
-			// if user is already in the cache, we will update the user details
-			// with the new user ID from the backend
-			if err == nil {
-				// process user details
-				err = json.Unmarshal([]byte(userInCache.(string)), &userMap)
-				if err != nil {
-					log.WithError(err).Error("failed to unmarshal user details from cache")
+			backendClient, err := clients.New(backend.Name, backend.Type, appConfig.BackendMap)
+			if err != nil {
+				log.WithError(err).Error("failed to create backend client")
+				return err
+			}
+
+			// Fetch all the users and store them in the cache
+			users, _, err := backendClient.FetchAllUsers(ctx)
+			if err != nil {
+				log.WithError(err).Error("failed to fetch users from backend")
+				return err
+			}
+
+			for _, user := range users {
+				backendKey := backend.Name + "_" + backend.Type
+				if err := storeItemInCache(ctx, store, cacheMutex, user.GetEmail(), backendKey, user.ID, "user"); err != nil {
 					return err
 				}
 			}
-			userMap[backend.Name+"_"+backend.Type] = user.ID
-			newUserValue, err := json.Marshal(userMap)
-			if err != nil {
-				log.WithError(err).Error("failed to marshal user details to JSON")
-				return err
-			}
-			// Store the user in the cache with email as key
-			// and user ID as value
-			// This is done to avoid hitting the backend for every request
-			// and to improve the performance of the application
-			// The user ID is stored in the cache as a JSON string
-			// so that it can be easily retrieved later
-			// The user ID is stored in the cache with the backend name and type as key
-			err = store.Set(ctx, user.Email, string(newUserValue), cache.NoExpiration)
-			if err != nil {
-				log.WithError(err).Error("failed to store user in cache")
-				return err
-			}
-		}
 
-		// Fetch all the teams and store them in the cache
-		teams, err := backendClient.FetchAllTeams(ctx)
-		if err != nil {
-			log.WithError(err).Error("failed to fetch teams from backend")
-			return err
-		}
-		for _, team := range teams {
-			teamMap := make(map[string]string)
-			teamInCache, err := store.Get(ctx, team.GetName())
-			// if team is already in the cache, we will update the team details
-			// with the new team ID from the backend
-			if err == nil {
-				// process user details
-				err = json.Unmarshal([]byte(teamInCache.(string)), &teamMap)
-				if err != nil {
-					log.WithError(err).Error("failed to unmarshal team details from cache")
+			// Fetch all the teams and store them in the cache
+			teams, err := backendClient.FetchAllTeams(ctx)
+			if err != nil {
+				log.WithError(err).Error("failed to fetch teams from backend")
+				return err
+			}
+
+			for _, team := range teams {
+				backendKey := backend.Name + "_" + backend.Type
+				if err := storeItemInCache(ctx, store, cacheMutex, team.GetName(), backendKey, team.ID, "team"); err != nil {
 					return err
 				}
 			}
-			teamMap[backend.Name+"_"+backend.Type] = team.ID
-			newTeamValue, err := json.Marshal(teamMap)
-			if err != nil {
-				log.WithError(err).Error("failed to marshal team details to JSON")
-				return err
-			}
 
-			// Store the team in the cache with name as key
-			// and team ID as value
-			// This is done to avoid hitting the backend for every request
-			// and to improve the performance of the application
-			// The team ID is stored in the cache as a JSON string
-			// so that it can be easily retrieved later
-			// The team ID is stored in the cache with the backend name and type as key
-			err = store.Set(ctx, team.Name, string(newTeamValue), cache.NoExpiration)
-			if err != nil {
-				log.WithError(err).Error("failed to store team in cache")
-				return err
-			}
-		}
-		log.WithFields(logrus.Fields{
-			"users": len(users),
-			"teams": len(teams),
-		}).Debug("fetched users and teams from backend")
+			log.WithFields(logrus.Fields{
+				"users": len(users),
+				"teams": len(teams),
+			}).Info("successfully preloaded cache from backend")
+
+			return nil
+		})
 	}
+
+	// Wait for all goroutines to complete and return any errors
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	setupLog.Info("cache preload completed for all backends")
 	return nil
 }
