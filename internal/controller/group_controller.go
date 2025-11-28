@@ -93,7 +93,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if groupCR.GetDeletionTimestamp() != nil {
-		return r.handleDeletion(ctx, groupCR)
+		return ctrl.Result{}, r.handleDeletion(ctx, groupCR)
 	}
 
 	// Object is not being deleted, add finalizer if missing
@@ -136,27 +136,30 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
+	// Lock cache for all read/write operations during reconciliation
+	// This prevents race conditions when multiple Group CRs reference the same users/teams
+	// and their reconciliations run concurrently
+	r.CacheMutex.Lock()
+	defer r.CacheMutex.Unlock()
+
+	r.log.Info("Acquired cache lock for entire reconciliation (LDAP + backends)")
+
 	// Process LDAP data and update cache
 	if err := r.processLDAPDataAndCache(ctx, uniqueMembers); err != nil {
 		r.log.WithError(err).Error("error processing LDAP data and cache")
 		return ctrl.Result{}, err
 	}
 
-	// Process all backends
+	// Process all backends (cache operations protected by lock)
 	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers)
 
 	// Update status and handle errors
-	return r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
+	return ctrl.Result{}, r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
 }
 
 // processLDAPDataAndCache handles LDAP data fetching and cache operations
+// NOTE: This function assumes CacheMutex is already held by the caller
 func (r *GroupReconciler) processLDAPDataAndCache(ctx context.Context, uniqueMembers []string) error {
-	// Lock cache for read/write operations during reconciliation
-	r.CacheMutex.Lock()
-	defer r.CacheMutex.Unlock()
-
-	r.log.Info("Acquired cache lock for group reconciliation operations")
-
 	// Initialize LDAP user data map
 	r.allLdapUserData = make(map[string]*structs.LDAPUser, len(uniqueMembers))
 
@@ -353,11 +356,15 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 		}
 	}
 
+	r.backendLogger.Info("successfully processed backend")
+
 	return nil
 }
 
 // updateStatusAndHandleErrors updates the CR status and handles any backend errors
-func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, groupCR *usernautdevv1alpha1.Group, backendErrors map[string]map[string]string) (ctrl.Result, error) {
+func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group,
+	backendErrors map[string]map[string]string) error {
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
 	// Build status for each backend
@@ -396,29 +403,36 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context, group
 	}
 	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
 		r.log.WithError(updateStatusErr).Error("error while updating final status")
+		return updateStatusErr
 	}
 
 	// Return error if any backends failed
 	if hasErrors {
-		return ctrl.Result{}, errors.New("failed to reconcile all backends")
+		return errors.New("failed to reconcile all backends")
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // handleDeletion processes the deletion of a Group CR and its finalizer
-func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautdevv1alpha1.Group) (ctrl.Result, error) {
+func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
 	if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+		// Lock cache for deletion operations
+		// Multiple Group CRs might reference the same team and delete concurrently
+		r.CacheMutex.Lock()
+		defer r.CacheMutex.Unlock()
+
 		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
-			return ctrl.Result{}, err
+			return err
 		}
 
 		controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
 		if err := r.Update(ctx, groupCR); err != nil {
-			return ctrl.Result{}, err
+			r.log.WithError(err).Error("error while updating group CR")
+			return err
 		}
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
