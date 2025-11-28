@@ -110,6 +110,11 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 		return nil, err
 	}
 
+	if status == http.StatusConflict {
+		log.WithField("status", status).Info("user already exists, fetching user details")
+		return c.FetchUserDetails(ctx, user.UserName)
+	}
+
 	if status != http.StatusOK && status != http.StatusCreated {
 		return nil, fmt.Errorf("failed to create user, status: %s, body: %s", http.StatusText(status), string(resp))
 	}

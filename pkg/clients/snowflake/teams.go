@@ -82,6 +82,11 @@ func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 		return nil, err
 	}
 
+	if status == http.StatusConflict {
+		log.WithField("status", status).Info("team already exists, fetching team details")
+		return c.FetchTeamDetails(ctx, team.Name)
+	}
+
 	if status != http.StatusOK && status != http.StatusCreated {
 		return nil, fmt.Errorf("failed to create role, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
