@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -48,6 +47,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
+	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 	"github.com/sirupsen/logrus"
 
 	// +kubebuilder:scaffold:imports
@@ -189,19 +189,22 @@ func main() {
 		setupLog.Error(err, "failed to initialize cache")
 	}
 
-	if err = preloadCache(*appConf, cache); err != nil {
+	// Create shared cache mutex to prevent race conditions between GroupReconciler and UserOffboardingJob
+	sharedCacheMutex := &sync.RWMutex{}
+
+	// Create store layer that wraps cache with prefixed keys and encapsulated operations
+	dataStore := store.New(cache)
+
+	if err = preloadCache(*appConf, dataStore, sharedCacheMutex); err != nil {
 		setupLog.Error(err, "failed to preload cache")
 		os.Exit(1)
 	}
-
-	// Create shared cache mutex to prevent race conditions between GroupReconciler and UserOffboardingJob
-	sharedCacheMutex := &sync.RWMutex{}
 
 	if err = (&controller.GroupReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		AppConfig:  appConf,
-		Cache:      cache,
+		Store:      dataStore,
 		LdapConn:   ldapConn,
 		CacheMutex: sharedCacheMutex,
 	}).SetupWithManager(mgr); err != nil {
@@ -223,7 +226,8 @@ func main() {
 		}
 	}
 
-	ptr, err := controller.NewPeriodicTasksReconciler(mgr.GetClient(), sharedCacheMutex, cache, ldapConn, backendClients)
+	ptr, err := controller.NewPeriodicTasksReconciler(
+		mgr.GetClient(), sharedCacheMutex, cache, dataStore, ldapConn, backendClients)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PeriodicTasks")
 		os.Exit(1)
@@ -257,61 +261,18 @@ func main() {
 	}
 }
 
-// storeItemInCache is a helper function to store items (users/teams) in cache
-// It handles the atomic read-modify-write operation with proper locking
-func storeItemInCache(ctx context.Context, store cache.Cache, cacheMutex *sync.Mutex,
-	cacheKey, backendKey, itemID, itemType string) error {
-
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-
-	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"item_type": itemType,
-		"component": "storeItemInCache",
-	})
-
-	itemMap := make(map[string]string)
-	itemInCache, err := store.Get(ctx, cacheKey)
-
-	// If item is already in cache, unmarshal and update with new backend ID
-	if err == nil {
-		if err := json.Unmarshal([]byte(itemInCache.(string)), &itemMap); err != nil {
-			log.WithError(err).Errorf("failed to unmarshal %s details from cache", itemType)
-			return err
-		}
-	}
-
-	itemMap[backendKey] = itemID
-	newItemValue, err := json.Marshal(itemMap)
-	if err != nil {
-		log.WithError(err).Errorf("failed to marshal %s details to JSON", itemType)
-		return err
-	}
-
-	// Store in cache with no expiration
-	if err := store.Set(ctx, cacheKey, string(newItemValue), cache.NoExpiration); err != nil {
-		log.WithError(err).Errorf("failed to store %s in cache", itemType)
-		return err
-	}
-
-	return nil
-}
-
 // Preload the cache with all the users and teams from the backends
 // This is done to avoid hitting the backend for every request
 // and to improve the performance of the application
 // This is done only once at the start of the application
 // and the cache is flushed when the application is restarted
-func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
+// Optimized to use goroutines for parallel processing of backends
+func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex *sync.RWMutex) error {
 
 	ctx := context.Background()
 
 	// Use errgroup for concurrent processing with proper error handling
 	g, ctx := errgroup.WithContext(ctx)
-
-	// Mutex to protect concurrent read-modify-write operations on cache
-	// Multiple backends might update the same user/team concurrently
-	cacheMutex := &sync.Mutex{}
 
 	// Process each backend concurrently
 	for _, backendObj := range appConfig.Backends {
@@ -355,9 +316,16 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 				return err
 			}
 
+			backendKey := backend.Name + "_" + backend.Type
 			for _, user := range users {
-				backendKey := backend.Name + "_" + backend.Type
-				if err := storeItemInCache(ctx, store, cacheMutex, user.GetEmail(), backendKey, user.ID, "user"); err != nil {
+				// Lock for read-modify-write operation
+				// Multiple backends might update the same user concurrently
+				cacheMutex.Lock()
+				err := dataStore.User.SetBackend(ctx, user.GetEmail(), backendKey, user.ID)
+				cacheMutex.Unlock()
+
+				if err != nil {
+					log.WithError(err).Error("failed to store user in cache")
 					return err
 				}
 			}
@@ -370,8 +338,14 @@ func preloadCache(appConfig config.AppConfig, store cache.Cache) error {
 			}
 
 			for _, team := range teams {
-				backendKey := backend.Name + "_" + backend.Type
-				if err := storeItemInCache(ctx, store, cacheMutex, team.GetName(), backendKey, team.ID, "team"); err != nil {
+				// Lock for read-modify-write operation
+				// Multiple backends might update the same team concurrently
+				cacheMutex.Lock()
+				err := dataStore.Team.SetBackend(ctx, team.GetName(), backendKey, team.ID)
+				cacheMutex.Unlock()
+
+				if err != nil {
+					log.WithError(err).Error("failed to store team in cache")
 					return err
 				}
 			}
