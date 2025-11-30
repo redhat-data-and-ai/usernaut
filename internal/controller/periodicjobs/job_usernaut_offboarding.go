@@ -22,16 +22,15 @@ package periodicjobs
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	goldap "github.com/go-ldap/ldap/v3"
-	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -57,8 +56,8 @@ const (
 // or become inactive in the LDAP directory.
 type UserOffboardingJob struct {
 
-	// cacheClient provides access to the Redis cache containing user data.
-	cacheClient cache.Cache
+	// store provides access to the store layer with prefixed keys
+	store *store.Store
 
 	// ldapClient enables verification of user status in the LDAP directory.
 	ldapClient ldap.LDAPClient
@@ -84,7 +83,7 @@ type UserOffboardingJob struct {
 //
 // Parameters:
 //   - sharedCacheMutex: Shared mutex to prevent race conditions with other components
-//   - cacheClient: Shared cache client instance
+//   - dataStore: Shared store instance with prefixed keys
 //   - ldapClient: Shared LDAP client instance
 //   - backendClients: Map of initialized backend clients
 //
@@ -92,12 +91,12 @@ type UserOffboardingJob struct {
 //   - *UserOffboardingJob: A configured job instance
 func NewUserOffboardingJob(
 	sharedCacheMutex *sync.RWMutex,
-	cacheClient cache.Cache,
+	dataStore *store.Store,
 	ldapClient ldap.LDAPClient,
 	backendClients map[string]clients.Client,
 ) *UserOffboardingJob {
 	return &UserOffboardingJob{
-		cacheClient:    cacheClient,
+		store:          dataStore,
 		ldapClient:     ldapClient,
 		backendClients: backendClients,
 		cacheMutex:     sharedCacheMutex,
@@ -285,7 +284,7 @@ func (uoj *UserOffboardingJob) offboardUser(ctx context.Context, userKey string)
 
 	logger.Info("Acquired cache lock for user deletion operations", "userID", userKey)
 
-	err = uoj.cacheClient.Delete(ctx, userEmail)
+	err = uoj.store.User.Delete(ctx, userEmail)
 	if err != nil {
 		logger.Error(err, "Failed to remove user from cache", "userKey", userKey, "userEmail", userEmail)
 		return fmt.Errorf("failed to remove user %s from cache: %v", userKey, err)
@@ -321,18 +320,9 @@ func (uoj *UserOffboardingJob) getUserListFromCache(ctx context.Context) ([]stri
 	uoj.cacheMutex.RLock()
 	defer uoj.cacheMutex.RUnlock()
 
-	keys, err := uoj.cacheClient.Get(ctx, "user_list")
+	userKeys, err := uoj.store.Meta.GetUserList(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to scan cache for user keys: %w", err)
-	}
-
-	var userKeys []string
-	keysStr, ok := keys.(string)
-	if !ok {
-		return nil, fmt.Errorf("user keys are not a string")
-	}
-	if err := json.Unmarshal([]byte(keysStr), &userKeys); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal user keys: %w", err)
+		return nil, fmt.Errorf("failed to get user list from cache: %w", err)
 	}
 
 	return userKeys, nil
@@ -354,37 +344,24 @@ func (uoj *UserOffboardingJob) getUserListFromCache(ctx context.Context) ([]stri
 func (uoj *UserOffboardingJob) getUserDataFromCache(
 	ctx context.Context, userKey string,
 ) (map[string]string, string, error) {
-	logger := log.FromContext(ctx)
-
 	// Lock cache for read operation
 	uoj.cacheMutex.RLock()
 	defer uoj.cacheMutex.RUnlock()
 
 	// userKey is a username (e.g., "subhatta"), search for cache keys that contain this username
 	// We don't know the exact email, so we search broadly and then filter
+	// Pattern: *username* (e.g., "*subhatta*" matches emails like "subhatta@example.com")
 	usernamePattern := fmt.Sprintf("*%s*", userKey)
 
-	userDataList, err := uoj.cacheClient.GetByPattern(ctx, usernamePattern)
+	userDataList, err := uoj.store.User.GetByPattern(ctx, usernamePattern)
 	if err != nil {
 		return nil, "", err
 	}
 
 	// Search through all matching cache entries to find the user's backend mappings
-	for email, userData := range userDataList {
-		var userDataMap map[string]string
-		userDataStr, ok := userData.(string)
-		if !ok {
-			// Log error and continue to next entry if this is an unexpected state
-			logger.Error(fmt.Errorf("user data is not a string"), "Invalid cache data type", "userKey", userKey, "email", email)
-			continue
-		}
-		if err := json.Unmarshal([]byte(userDataStr), &userDataMap); err != nil {
-			// Log error and continue to next entry if JSON is malformed
-			logger.Error(err, "Failed to unmarshal user data", "userKey", userKey, "email", email)
-			continue
-		}
+	for email, backendMap := range userDataList {
 		// Return the first valid match
-		return userDataMap, email, nil
+		return backendMap, email, nil
 	}
 
 	return nil, "", fmt.Errorf("No user found with username: %s", userKey)
@@ -517,19 +494,9 @@ func (uoj *UserOffboardingJob) removeUserFromUserList(ctx context.Context, userI
 
 	// Note: This method assumes the caller has already acquired the necessary mutex lock
 	// Get current user list
-	userListCache, err := uoj.cacheClient.Get(ctx, "user_list")
+	userList, err := uoj.store.Meta.GetUserList(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get user list from cache: %w", err)
-	}
-
-	var userList []string
-	userListStr, ok := userListCache.(string)
-	if !ok {
-		return fmt.Errorf("user list is not a string")
-	}
-
-	if err := json.Unmarshal([]byte(userListStr), &userList); err != nil {
-		return fmt.Errorf("failed to unmarshal user list: %w", err)
 	}
 
 	updatedUserList := make([]string, 0, len(userList))
@@ -540,12 +507,7 @@ func (uoj *UserOffboardingJob) removeUserFromUserList(ctx context.Context, userI
 	}
 
 	// Update the cache with the modified list
-	updatedUserListJSON, err := json.Marshal(updatedUserList)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated user list: %w", err)
-	}
-
-	err = uoj.cacheClient.Set(ctx, "user_list", string(updatedUserListJSON), cache.NoExpiration)
+	err = uoj.store.Meta.SetUserList(ctx, updatedUserList)
 	if err != nil {
 		return fmt.Errorf("failed to update user list in cache: %w", err)
 	}

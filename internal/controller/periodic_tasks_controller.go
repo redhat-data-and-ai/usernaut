@@ -10,6 +10,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -24,13 +25,15 @@ const (
 type PeriodicTasksReconciler struct {
 	client.Client
 	taskManager *periodicjobs.PeriodicTaskManager
-	cacheClient cache.Cache
+	cacheClient cache.Cache // Keep for health checks
+	store       *store.Store
 }
 
 func NewPeriodicTasksReconciler(
 	k8sClient client.Client,
 	sharedCacheMutex *sync.RWMutex,
 	cacheClient cache.Cache,
+	dataStore *store.Store,
 	ldapClient ldap.LDAPClient,
 	backendClients map[string]clients.Client,
 ) (*PeriodicTasksReconciler, error) {
@@ -39,7 +42,7 @@ func NewPeriodicTasksReconciler(
 	// Add jobs to the periodic task manager
 	userOffboardingJob := periodicjobs.NewUserOffboardingJob(
 		sharedCacheMutex,
-		cacheClient,
+		dataStore,
 		ldapClient,
 		backendClients,
 	)
@@ -49,6 +52,7 @@ func NewPeriodicTasksReconciler(
 		Client:      k8sClient,
 		taskManager: periodicTaskManager,
 		cacheClient: cacheClient,
+		store:       dataStore,
 	}, nil
 }
 

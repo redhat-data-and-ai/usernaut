@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -36,9 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/go-redis/redis"
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
-	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
@@ -48,6 +45,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
+	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -61,7 +59,7 @@ type GroupReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
 	AppConfig       *config.AppConfig
-	Cache           cache.Cache
+	Store           *store.Store
 	log             *logrus.Entry
 	backendLogger   *logrus.Entry
 	LdapConn        ldap.LDAPClient
@@ -208,45 +206,23 @@ func (r *GroupReconciler) processLDAPDataAndCache(ctx context.Context, uniqueMem
 	return r.updateUserListInCache(ctx, activeUserList)
 }
 
-// getUserListFromCache retrieves and unmarshals the user list from cache
+// getUserListFromCache retrieves the user list from cache
+// NOTE: Caller must hold CacheMutex lock
 func (r *GroupReconciler) getUserListFromCache(ctx context.Context) []string {
-	userList := make([]string, 0)
-	userListCache, err := r.Cache.Get(ctx, "user_list")
+	userList, err := r.Store.Meta.GetUserList(ctx)
 	if err != nil {
 		r.log.WithError(err).Warn("user list not found in cache, will start with empty list")
-		return userList
+		return []string{}
 	}
 
-	// Successfully retrieved from cache, now try to unmarshal
-	r.log.WithField("user_list", userListCache).Debug("cached user list as JSON string")
-	userListStr, ok := userListCache.(string)
-	if !ok {
-		r.log.Error("user list cache data is not a string, starting with empty list")
-		return userList
-	}
-
-	if err := json.Unmarshal([]byte(userListStr), &userList); err != nil {
-		r.log.WithError(err).Error("corrupted user list data in cache, invalidating and starting fresh")
-		userList = make([]string, 0)
-
-		// Invalidate the corrupted cache entry
-		if deleteErr := r.Cache.Delete(ctx, "user_list"); deleteErr != nil {
-			r.log.WithError(deleteErr).Warn("failed to delete corrupted user_list from cache")
-		}
-	}
 	r.log.WithField("user_list_count", len(userList)).Info("user list retrieved from cache successfully")
 	return userList
 }
 
-// updateUserListInCache marshals and stores the user list in cache
+// updateUserListInCache stores the user list in cache
+// NOTE: Caller must hold CacheMutex lock
 func (r *GroupReconciler) updateUserListInCache(ctx context.Context, userList []string) error {
-	userListJSON, err := json.Marshal(userList)
-	if err != nil {
-		r.log.WithError(err).Error("error marshaling user list to JSON")
-		return err
-	}
-
-	if err := r.Cache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration); err != nil {
+	if err := r.Store.Meta.SetUserList(ctx, userList); err != nil {
 		r.log.WithError(err).Error("error updating user list in cache")
 		return err
 	}
@@ -458,48 +434,33 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 			return err
 		}
 
-		teamDetailsMap := make(map[string]string)
-		teamDetailsInCache, err := r.Cache.Get(ctx, transformed_group_name)
-		if err == nil && teamDetailsInCache != "" {
-			if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
-				backendLoggerInfo.WithError(err).Error("Finalizer: error unmarshalling team details from cache")
-				return jErr
+		// Get team backends from cache
+		// NOTE: CacheMutex is already held by caller (handleDeletion)
+		teamBackends, err := r.Store.Team.GetBackends(ctx, transformed_group_name)
+		if err != nil {
+			backendLoggerInfo.WithError(err).Error("Finalizer: error fetching team details from cache")
+			return err
+		}
+
+		cacheKey := backend.Name + "_" + backend.Type
+
+		if teamID, exists := teamBackends[cacheKey]; exists && teamID != "" {
+			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
+
+			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
+				backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete team from the backend")
+				return err
+			}
+			backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
+
+			// Delete this backend from the team's cache entry
+			if err := r.Store.Team.DeleteBackend(ctx, transformed_group_name, cacheKey); err != nil {
+				backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete backend from team cache")
+				return err
 			}
 
-			cacheKey := backend.Name + "_" + backend.Type
-
-			if teamID, exists := teamDetailsMap[cacheKey]; exists && teamID != "" {
-				backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
-
-				if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
-					backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete team from the backend")
-					return err
-				}
-				backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
-
-				delete(teamDetailsMap, cacheKey)
-
-				if err := r.Cache.Delete(ctx, transformed_group_name); err != nil {
-					backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete cache entry after cleanup")
-					return err
-				}
-
-				if len(teamDetailsMap) > 0 {
-					updatedCacheData, err := json.Marshal(teamDetailsMap)
-					if err != nil {
-						backendLoggerInfo.WithError(err).Error("Finalizer: failed to marshal updated team details for cache")
-						return err
-					}
-					if err := r.Cache.Set(ctx, transformed_group_name, string(updatedCacheData), cache.NoExpiration); err != nil {
-						backendLoggerInfo.WithError(err).Error("Finalizer: failed to update cache after deleting team")
-						return err
-					}
-					backendLoggerInfo.Infof(
-						"Finalizer: Updated cache after removing team ID '%s' for group '%s'", teamID, transformed_group_name)
-				} else {
-					backendLoggerInfo.Info("Finalizer: No more entries are there in the cache")
-				}
-			}
+			backendLoggerInfo.Infof(
+				"Finalizer: Updated cache after removing team ID '%s' for group '%s'", teamID, transformed_group_name)
 		}
 	}
 	return nil
@@ -527,24 +488,16 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			continue
 		}
 
-		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
-		if err != nil && err != redis.Nil || userDetailsInCache == "" {
+		// NOTE: CacheMutex is already held by caller (Reconcile)
+		// Get user backends from cache
+		userBackends, err := r.Store.User.GetBackends(ctx, userDetails.GetEmail())
+		if err != nil {
 			r.backendLogger.WithError(err).Error("error fetching user details from cache")
 			return nil, nil, err
 		}
 
-		userDetailsStr, ok := userDetailsInCache.(string)
-		if !ok {
-			r.backendLogger.WithField("user", user).Error("user details in cache are not of type string")
-			return nil, nil, errors.New("user details in cache are not of type string")
-		}
-
-		if jErr := json.Unmarshal([]byte(userDetailsStr), &userDetailsMap); jErr != nil {
-			r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
-			return nil, nil, jErr
-		}
-		userID := userDetailsMap[backendName+"_"+backendType]
+		backendKey := backendName + "_" + backendType
+		userID := userBackends[backendKey]
 		if userID == "" {
 			r.backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
@@ -575,6 +528,9 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	backendName, backendType string,
 	backendClient clients.Client) error {
 
+	// NOTE: CacheMutex is already held by caller (Reconcile)
+	backendKey := backendName + "_" + backendType
+
 	for _, user := range users {
 		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {
@@ -582,19 +538,17 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			continue
 		}
 
-		userDetailsMap := make(map[string]string)
-		userDetailsInCache, err := r.Cache.Get(ctx, userDetails.GetEmail())
-		if err == nil && userDetailsInCache != "" {
-			// handle error for below statement
-			if jErr := json.Unmarshal([]byte(userDetailsInCache.(string)), &userDetailsMap); jErr != nil {
-				r.backendLogger.WithField("user", user).WithError(jErr).Error("error unmarshalling user details from cache")
-				return jErr
-			}
-			userID := userDetailsMap[backendName+"_"+backendType]
-			if userID != "" {
-				r.backendLogger.WithField("user", user).Debug("user already exists in cache")
-				continue
-			}
+		// Get user backends from cache
+		userBackends, err := r.Store.User.GetBackends(ctx, userDetails.GetEmail())
+		if err != nil {
+			r.backendLogger.WithField("user", user).WithError(err).Error("error fetching user details from cache")
+			return err
+		}
+
+		// Check if user already has ID for this backend
+		if userID, exists := userBackends[backendKey]; exists && userID != "" {
+			r.backendLogger.WithField("user", user).Debug("user already exists in cache")
+			continue
 		}
 
 		// if user details are not found in cache, create a new user in backend
@@ -612,9 +566,8 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 		}
 		r.backendLogger.WithField("user", user).Info("created user in backend successfully")
 
-		userDetailsMap[backendName+"_"+backendType] = newUser.ID
-		toBeUpdated, _ := json.Marshal(userDetailsMap)
-		if err := r.Cache.Set(ctx, userDetails.GetEmail(), string(toBeUpdated), cache.NoExpiration); err != nil {
+		// Update cache with new user ID
+		if err := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, newUser.ID); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")
 			return err
 		}
@@ -628,6 +581,8 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	backendName, backendType string,
 	backendClient clients.Client) (string, error) {
 
+	// NOTE: CacheMutex is already held by caller (Reconcile)
+
 	// transforming the group name
 	transformed_group_name, err := utils.GetTransformedGroupName(r.AppConfig, backendType, groupName)
 	if err != nil {
@@ -635,20 +590,21 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		return "", err
 	}
 
-	teamDetailsMap := make(map[string]string)
+	backendKey := backendName + "_" + backendType
 
-	teamDetailsInCache, err := r.Cache.Get(ctx, transformed_group_name)
-	if err == nil && teamDetailsInCache != "" {
-		if jErr := json.Unmarshal([]byte(teamDetailsInCache.(string)), &teamDetailsMap); jErr != nil {
-			r.backendLogger.WithError(jErr).Error("error unmarshalling team details from cache")
-			return "", jErr
-		}
-		// Check if the team details for the backend exist in cache
-		if teamID, exists := teamDetailsMap[backendName+"_"+backendType]; exists && teamID != "" {
-			r.backendLogger.WithField("teamID", teamID).Info("team details found in cache")
-			return teamID, nil
-		}
+	// Get team backends from cache
+	teamBackends, err := r.Store.Team.GetBackends(ctx, transformed_group_name)
+	if err != nil {
+		r.backendLogger.WithError(err).Error("error fetching team details from cache")
+		return "", err
 	}
+
+	// Check if the team details for the backend exist in cache
+	if teamID, exists := teamBackends[backendKey]; exists && teamID != "" {
+		r.backendLogger.WithField("teamID", teamID).Info("team details found in cache")
+		return teamID, nil
+	}
+
 	// If team details are not found in cache, create a new team
 	r.backendLogger.Info("team details not found in cache, creating a new team")
 
@@ -665,10 +621,8 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 
 	r.backendLogger.Info("created team in backend successfully")
 
-	// Create the team in cache
-	teamDetailsMap[backendName+"_"+backendType] = newTeam.ID
-	toBeUpdated, _ := json.Marshal(teamDetailsMap)
-	if err := r.Cache.Set(ctx, transformed_group_name, string(toBeUpdated), cache.NoExpiration); err != nil {
+	// Update cache with new team ID
+	if err := r.Store.Team.SetBackend(ctx, transformed_group_name, backendKey, newTeam.ID); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in cache")
 		return "", err
 	}
@@ -890,8 +844,9 @@ func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupN
 		return fmt.Errorf("%s is not enabled", dependsOn.Type)
 	}
 	// Check if the RoverGroup exists or not by checking the cache...
-	teamDetailsInCache, err := r.Cache.Get(context.Background(), groupName)
-	if err != nil || teamDetailsInCache == "" {
+	// NOTE: This is called without holding CacheMutex (called from ldap sync)
+	exists, err := r.Store.Team.Exists(context.Background(), groupName)
+	if err != nil || !exists {
 		r.backendLogger.WithError(err).Error("rover team details not found in cache, skipping ldap sync")
 		return err
 	}

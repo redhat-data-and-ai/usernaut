@@ -35,6 +35,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
 
 const (
@@ -152,7 +153,7 @@ var _ = Describe("Group Controller", func() {
 				Client:     k8sClient,
 				Scheme:     k8sClient.Scheme(),
 				AppConfig:  &appConfig,
-				Cache:      cache,
+				Store:      store.New(cache),
 				LdapConn:   ldapClient,
 				CacheMutex: &sync.RWMutex{},
 			}
@@ -259,7 +260,7 @@ var _ = Describe("Group Controller", func() {
 				Client:     k8sClient,
 				Scheme:     k8sClient.Scheme(),
 				AppConfig:  &appConfig,
-				Cache:      Cache,
+				Store:      store.New(Cache),
 				LdapConn:   ldapClient,
 				CacheMutex: &sync.RWMutex{},
 			}

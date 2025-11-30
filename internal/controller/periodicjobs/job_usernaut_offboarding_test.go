@@ -2,7 +2,6 @@ package periodicjobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -13,11 +12,11 @@ import (
 
 	ldapmocks "github.com/redhat-data-and-ai/usernaut/internal/controller/mocks"
 	clientmocks "github.com/redhat-data-and-ai/usernaut/internal/controller/periodicjobs/mocks"
-	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
+	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
 
 // TestUserOffboardingJob tests the offboarding job using mocks
@@ -37,6 +36,9 @@ func TestUserOffboardingJob(t *testing.T) {
 	inMemCache, err := inmemory.NewCache(cacheConfig)
 	require.NoError(t, err, "Failed to create in-memory cache")
 
+	// Create store layer
+	dataStore := store.New(inMemCache)
+
 	// Setup test data
 	ctx := context.Background()
 	testUser := &structs.User{
@@ -49,22 +51,12 @@ func TestUserOffboardingJob(t *testing.T) {
 		Role:        "test_role",
 	}
 
-	// Setup cache with user data
-	backendMappings := map[string]string{
-		"fivetran_fivetran": testUser.ID,
-	}
-	userDataJSON, err := json.Marshal(backendMappings)
+	// Setup cache with user data using store layer
+	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_fivetran", testUser.ID)
 	require.NoError(t, err)
 
-	err = inMemCache.Set(ctx, testUser.Email, string(userDataJSON), cache.NoExpiration)
-	require.NoError(t, err)
-
-	// Add user to user_list
-	userList := []string{testUser.UserName}
-	userListJSON, err := json.Marshal(userList)
-	require.NoError(t, err)
-
-	err = inMemCache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration)
+	// Add user to user_list using store layer
+	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
 	require.NoError(t, err)
 
 	// Create backend clients map
@@ -76,7 +68,7 @@ func TestUserOffboardingJob(t *testing.T) {
 	sharedCacheMutex := &sync.RWMutex{}
 	job := NewUserOffboardingJob(
 		sharedCacheMutex,
-		inMemCache,
+		dataStore,
 		mockLDAPClient,
 		backendClients,
 	)
@@ -98,23 +90,21 @@ func TestUserOffboardingJob(t *testing.T) {
 		err := job.Run(ctx)
 		assert.NoError(t, err)
 
-		// Verify user is removed from cache
-		_, err = inMemCache.Get(ctx, testUser.Email)
-		assert.Error(t, err, "User should be removed from cache")
-
-		// Verify user is removed from user_list
-		userListData, err := inMemCache.Get(ctx, "user_list")
+		// Verify user is removed from cache using store layer
+		exists, err := dataStore.User.Exists(ctx, testUser.Email)
 		require.NoError(t, err)
-		var updatedUserList []string
-		err = json.Unmarshal([]byte(userListData.(string)), &updatedUserList)
+		assert.False(t, exists, "User should be removed from cache")
+
+		// Verify user is removed from user_list using store layer
+		updatedUserList, err := dataStore.Meta.GetUserList(ctx)
 		require.NoError(t, err)
 		assert.NotContains(t, updatedUserList, testUser.UserName, "User should be removed from user list")
 	})
 
-	// Reset cache for next test
-	err = inMemCache.Set(ctx, testUser.Email, string(userDataJSON), cache.NoExpiration)
+	// Reset cache for next test using store layer
+	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_fivetran", testUser.ID)
 	require.NoError(t, err)
-	err = inMemCache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration)
+	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
 	require.NoError(t, err)
 
 	t.Run("User_In_LDAP_Should_Not_Be_Offboarded", func(t *testing.T) {
@@ -134,16 +124,13 @@ func TestUserOffboardingJob(t *testing.T) {
 		err := job.Run(ctx)
 		assert.NoError(t, err)
 
-		// Verify user is still in cache
-		cachedData, err := inMemCache.Get(ctx, testUser.Email)
-		assert.NoError(t, err, "User should remain in cache")
-		assert.NotEmpty(t, cachedData)
-
-		// Verify user is still in user_list
-		userListData, err := inMemCache.Get(ctx, "user_list")
+		// Verify user is still in cache using store layer
+		exists, err := dataStore.User.Exists(ctx, testUser.Email)
 		require.NoError(t, err)
-		var updatedUserList []string
-		err = json.Unmarshal([]byte(userListData.(string)), &updatedUserList)
+		assert.True(t, exists, "User should remain in cache")
+
+		// Verify user is still in user_list using store layer
+		updatedUserList, err := dataStore.Meta.GetUserList(ctx)
 		require.NoError(t, err)
 		assert.Contains(t, updatedUserList, testUser.UserName, "User should remain in user list")
 	})
@@ -164,6 +151,9 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 	inMemCache, err := inmemory.NewCache(cacheConfig)
 	require.NoError(t, err)
 
+	// Create store layer
+	dataStore := store.New(inMemCache)
+
 	ctx := context.Background()
 	testUser := &structs.User{
 		ID:       "test_user_456",
@@ -171,21 +161,11 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 		Email:    "erroruser@example.com",
 	}
 
-	// Setup cache
-	backendMappings := map[string]string{
-		"fivetran_fivetran": testUser.ID,
-	}
-	userDataJSON, err := json.Marshal(backendMappings)
+	// Setup cache using store layer
+	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_fivetran", testUser.ID)
 	require.NoError(t, err)
 
-	err = inMemCache.Set(ctx, testUser.Email, string(userDataJSON), cache.NoExpiration)
-	require.NoError(t, err)
-
-	userList := []string{testUser.UserName}
-	userListJSON, err := json.Marshal(userList)
-	require.NoError(t, err)
-
-	err = inMemCache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration)
+	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
 	require.NoError(t, err)
 
 	backendClients := map[string]clients.Client{
@@ -195,7 +175,7 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 	sharedCacheMutex := &sync.RWMutex{}
 	job := NewUserOffboardingJob(
 		sharedCacheMutex,
-		inMemCache,
+		dataStore,
 		mockLDAPClient,
 		backendClients,
 	)
@@ -235,14 +215,13 @@ func TestUserOffboardingJobEmptyUserList(t *testing.T) {
 	inMemCache, err := inmemory.NewCache(cacheConfig)
 	require.NoError(t, err)
 
+	// Create store layer
+	dataStore := store.New(inMemCache)
+
 	ctx := context.Background()
 
-	// Setup empty user list
-	userList := []string{}
-	userListJSON, err := json.Marshal(userList)
-	require.NoError(t, err)
-
-	err = inMemCache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration)
+	// Setup empty user list using store layer
+	err = dataStore.Meta.SetUserList(ctx, []string{})
 	require.NoError(t, err)
 
 	backendClients := map[string]clients.Client{}
@@ -250,7 +229,7 @@ func TestUserOffboardingJobEmptyUserList(t *testing.T) {
 	sharedCacheMutex := &sync.RWMutex{}
 	job := NewUserOffboardingJob(
 		sharedCacheMutex,
-		inMemCache,
+		dataStore,
 		mockLDAPClient,
 		backendClients,
 	)
@@ -276,6 +255,9 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 	inMemCache, err := inmemory.NewCache(cacheConfig)
 	require.NoError(t, err)
 
+	// Create store layer
+	dataStore := store.New(inMemCache)
+
 	ctx := context.Background()
 	testUser := &structs.User{
 		ID:       "multi_backend_user",
@@ -283,22 +265,13 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 		Email:    "multiuser@example.com",
 	}
 
-	// User exists in multiple backends
-	backendMappings := map[string]string{
-		"fivetran_prod":  "fivetran_id_123",
-		"snowflake_prod": "snowflake_id_456",
-	}
-	userDataJSON, err := json.Marshal(backendMappings)
+	// Setup user with multiple backends using store layer
+	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_prod", "fivetran_id_123")
+	require.NoError(t, err)
+	err = dataStore.User.SetBackend(ctx, testUser.Email, "snowflake_prod", "snowflake_id_456")
 	require.NoError(t, err)
 
-	err = inMemCache.Set(ctx, testUser.Email, string(userDataJSON), cache.NoExpiration)
-	require.NoError(t, err)
-
-	userList := []string{testUser.UserName}
-	userListJSON, err := json.Marshal(userList)
-	require.NoError(t, err)
-
-	err = inMemCache.Set(ctx, "user_list", string(userListJSON), cache.NoExpiration)
+	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
 	require.NoError(t, err)
 
 	backendClients := map[string]clients.Client{
@@ -309,7 +282,7 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 	sharedCacheMutex := &sync.RWMutex{}
 	job := NewUserOffboardingJob(
 		sharedCacheMutex,
-		inMemCache,
+		dataStore,
 		mockLDAPClient,
 		backendClients,
 	)
@@ -335,7 +308,8 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 	err = job.Run(ctx)
 	assert.NoError(t, err)
 
-	// Verify user is removed from cache
-	_, err = inMemCache.Get(ctx, testUser.Email)
-	assert.Error(t, err, "User should be removed from cache")
+	// Verify user is removed from cache using store layer
+	exists, err := dataStore.User.Exists(ctx, testUser.Email)
+	require.NoError(t, err)
+	assert.False(t, exists, "User should be removed from cache")
 }
