@@ -27,7 +27,9 @@ func TestNew(t *testing.T) {
 	assert.NotNil(t, store)
 	assert.NotNil(t, store.User)
 	assert.NotNil(t, store.Team)
+	assert.NotNil(t, store.Group)
 	assert.NotNil(t, store.Meta)
+	assert.NotNil(t, store.UserGroups)
 }
 
 func TestStore_InterfaceCompliance(t *testing.T) {
@@ -49,12 +51,18 @@ func TestStore_InterfaceCompliance(t *testing.T) {
 	// Verify Team implements TeamStoreInterface
 	var _ TeamStoreInterface = store.Team
 
+	// Verify Group implements GroupStoreInterface
+	var _ GroupStoreInterface = store.Group
+
 	// Verify Meta implements MetaStoreInterface
 	var _ MetaStoreInterface = store.Meta
+
+	// Verify UserGroups implements UserGroupsStoreInterface
+	var _ UserGroupsStoreInterface = store.UserGroups
 }
 
 func TestStore_IndependentOperations(t *testing.T) {
-	// Test that User, Team, and Meta operations don't interfere with each other
+	// Test that User, Group, Meta, and UserGroups operations don't interfere with each other
 	c, err := inmemory.NewCache(&inmemory.Config{
 		DefaultExpiration: 300,
 		CleanupInterval:   600,
@@ -68,12 +76,16 @@ func TestStore_IndependentOperations(t *testing.T) {
 	err = store.User.SetBackend(ctx, "user@example.com", "fivetran_prod", "user_123")
 	require.NoError(t, err)
 
-	// Create team
-	err = store.Team.SetBackend(ctx, "data-team", "fivetran_prod", "team_456")
+	// Create group with backend
+	err = store.Group.SetBackend(ctx, "data-team", "fivetran", "fivetran", "team_456")
 	require.NoError(t, err)
 
 	// Create meta
 	err = store.Meta.SetUserList(ctx, []string{"user1", "user2"})
+	require.NoError(t, err)
+
+	// Create user groups
+	err = store.UserGroups.AddGroup(ctx, "user@example.com", "data-team")
 	require.NoError(t, err)
 
 	// Verify all exist independently
@@ -81,13 +93,17 @@ func TestStore_IndependentOperations(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "user_123", userBackends["fivetran_prod"])
 
-	teamBackends, err := store.Team.GetBackends(ctx, "data-team")
+	groupBackends, err := store.Group.GetBackends(ctx, "data-team")
 	require.NoError(t, err)
-	assert.Equal(t, "team_456", teamBackends["fivetran_prod"])
+	assert.Equal(t, "team_456", groupBackends["fivetran_fivetran"].ID)
 
 	userList, err := store.Meta.GetUserList(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user1", "user2"}, userList)
+
+	userGroups, err := store.UserGroups.GetGroups(ctx, "user@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"data-team"}, userGroups)
 }
 
 func TestStore_KeyNamespacing(t *testing.T) {
@@ -101,13 +117,13 @@ func TestStore_KeyNamespacing(t *testing.T) {
 	store := New(c)
 	ctx := testContext(t)
 
-	// Use the same name for user email and team name
+	// Use the same name for user email and group name
 	sameName := "test@example.com"
 
 	err = store.User.SetBackend(ctx, sameName, "backend1", "id1")
 	require.NoError(t, err)
 
-	err = store.Team.SetBackend(ctx, sameName, "backend1", "id2")
+	err = store.Group.SetBackend(ctx, sameName, "backend1", "backend1", "id2")
 	require.NoError(t, err)
 
 	// Verify they don't collide
@@ -115,7 +131,7 @@ func TestStore_KeyNamespacing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "id1", userBackends["backend1"])
 
-	teamBackends, err := store.Team.GetBackends(ctx, sameName)
+	groupBackends, err := store.Group.GetBackends(ctx, sameName)
 	require.NoError(t, err)
-	assert.Equal(t, "id2", teamBackends["backend1"])
+	assert.Equal(t, "id2", groupBackends["backend1_backend1"].ID)
 }

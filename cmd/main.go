@@ -330,7 +330,10 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 				}
 			}
 
-			// Fetch all the teams and store them in the cache
+			// Fetch all the teams and store them in the TeamStore cache
+			// Teams are stored by their transformed name (as returned by the backend)
+			// During reconciliation, if a team is not found in GroupStore, it will
+			// fallback to TeamStore and migrate the data to GroupStore
 			teams, err := backendClient.FetchAllTeams(ctx)
 			if err != nil {
 				log.WithError(err).Error("failed to fetch teams from backend")
