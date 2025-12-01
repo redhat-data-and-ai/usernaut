@@ -8,7 +8,11 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 )
 
-// TeamStore handles all team-related cache operations with "team:" prefix
+// TeamStore handles team-related cache operations with "team:" prefix
+// Key format: "team:<transformedTeamName>"
+// Value: JSON map of {"backend_name_type": "backend_team_id"}
+// This store is used for preloading team data from backends where teams
+// are identified by their transformed names.
 // NOTE: This store does NOT handle locking - callers must ensure proper synchronization
 type TeamStore struct {
 	cache cache.Cache
@@ -22,16 +26,16 @@ func newTeamStore(c cache.Cache) *TeamStore {
 }
 
 // teamKey returns the prefixed cache key for a team
-func (s *TeamStore) teamKey(name string) string {
-	return "team:" + name
+func (s *TeamStore) teamKey(teamName string) string {
+	return "team:" + teamName
 }
 
 // GetBackends returns a map of backend IDs for a team
 // Returns an empty map if the team is not found in cache
 // Map format: {"backend_name_type": "backend_team_id"}
 // NOTE: Caller must hold appropriate lock if concurrent access is possible
-func (s *TeamStore) GetBackends(ctx context.Context, name string) (map[string]string, error) {
-	key := s.teamKey(name)
+func (s *TeamStore) GetBackends(ctx context.Context, teamName string) (map[string]string, error) {
+	key := s.teamKey(teamName)
 	val, err := s.cache.Get(ctx, key)
 	if err != nil {
 		// Team not found, return empty map (not an error condition)
@@ -50,8 +54,8 @@ func (s *TeamStore) GetBackends(ctx context.Context, name string) (map[string]st
 // If the team doesn't exist, it will be created
 // If the team exists, the backend ID will be added/updated in the map
 // NOTE: Caller must hold appropriate lock if concurrent access is possible
-func (s *TeamStore) SetBackend(ctx context.Context, name, backendKey, backendID string) error {
-	key := s.teamKey(name)
+func (s *TeamStore) SetBackend(ctx context.Context, teamName, backendKey, teamID string) error {
+	key := s.teamKey(teamName)
 
 	// Get existing backends or create new map
 	backends := make(map[string]string)
@@ -64,7 +68,7 @@ func (s *TeamStore) SetBackend(ctx context.Context, name, backendKey, backendID 
 	}
 
 	// Update the backend ID
-	backends[backendKey] = backendID
+	backends[backendKey] = teamID
 
 	// Marshal and store back
 	data, err := json.Marshal(backends)
@@ -82,22 +86,22 @@ func (s *TeamStore) SetBackend(ctx context.Context, name, backendKey, backendID 
 // DeleteBackend removes a specific backend ID from a team's record
 // If this was the last backend, the entire team entry is deleted
 // NOTE: Caller must hold appropriate lock if concurrent access is possible
-func (s *TeamStore) DeleteBackend(ctx context.Context, name, backendKey string) error {
-	key := s.teamKey(name)
+func (s *TeamStore) DeleteBackend(ctx context.Context, teamName, backendKey string) error {
+	key := s.teamKey(teamName)
 	return deleteBackendHelper(ctx, s.cache, key, backendKey, "team")
 }
 
 // Delete removes a team entirely from cache
 // NOTE: Caller must hold appropriate lock if concurrent access is possible
-func (s *TeamStore) Delete(ctx context.Context, name string) error {
-	key := s.teamKey(name)
+func (s *TeamStore) Delete(ctx context.Context, teamName string) error {
+	key := s.teamKey(teamName)
 	return s.cache.Delete(ctx, key)
 }
 
 // Exists checks if a team exists in cache
 // NOTE: Caller must hold appropriate lock if concurrent access is possible
-func (s *TeamStore) Exists(ctx context.Context, name string) (bool, error) {
-	key := s.teamKey(name)
+func (s *TeamStore) Exists(ctx context.Context, teamName string) (bool, error) {
+	key := s.teamKey(teamName)
 	_, err := s.cache.Get(ctx, key)
 	if err != nil {
 		return false, nil
