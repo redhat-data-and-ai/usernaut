@@ -247,7 +247,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiServer := server.NewAPIServer(appConf)
+	apiServer := server.NewAPIServer(appConf, dataStore)
 	go func() {
 		if err := apiServer.Start(); err != nil {
 			setupLog.Error(err, "failed to start HTTP API server")
