@@ -1229,7 +1229,7 @@ type JiraServiceProperties struct {
 	Username                     string   `json:"username" `
 	Password                     string   `json:"password" `
 	Active                       bool     `json:"active"`
-	JiraAuthType                 int      `json:"jira_auth_type"`
+	JiraAuthType                 int64    `json:"jira_auth_type"`
 	JiraIssuePrefix              string   `json:"jira_issue_prefix"`
 	JiraIssueRegex               string   `json:"jira_issue_regex"`
 	JiraIssueTransitionAutomatic bool     `json:"jira_issue_transition_automatic"`
@@ -1264,7 +1264,7 @@ func (p *JiraServiceProperties) UnmarshalJSON(b []byte) error {
 	case string:
 		p.JiraIssueTransitionID = id
 	case float64:
-		p.JiraIssueTransitionID = strconv.Itoa(int(id))
+		p.JiraIssueTransitionID = strconv.FormatInt(int64(id), 10)
 	default:
 		return fmt.Errorf("failed to unmarshal JiraTransitionID of type: %T", id)
 	}
@@ -1308,7 +1308,7 @@ type SetJiraServiceOptions struct {
 	Username                     *string   `url:"username,omitempty" json:"username,omitempty" `
 	Password                     *string   `url:"password,omitempty" json:"password,omitempty" `
 	Active                       *bool     `url:"active,omitempty" json:"active,omitempty"`
-	JiraAuthType                 *int      `url:"jira_auth_type,omitempty" json:"jira_auth_type,omitempty"`
+	JiraAuthType                 *int64    `url:"jira_auth_type,omitempty" json:"jira_auth_type,omitempty"`
 	JiraIssuePrefix              *string   `url:"jira_issue_prefix,omitempty" json:"jira_issue_prefix,omitempty"`
 	JiraIssueRegex               *string   `url:"jira_issue_regex,omitempty" json:"jira_issue_regex,omitempty"`
 	JiraIssueTransitionAutomatic *bool     `url:"jira_issue_transition_automatic,omitempty" json:"jira_issue_transition_automatic,omitempty"`
@@ -2149,7 +2149,7 @@ func (s *ServicesService) DeleteSlackSlashCommandsService(pid any, options ...Re
 
 // TelegramService represents Telegram service settings.
 //
-// Gitlab API docs:
+// GitLab API docs:
 // https://docs.gitlab.com/api/project_integrations/#telegram
 type TelegramService struct {
 	Service
