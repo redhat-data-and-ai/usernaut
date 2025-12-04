@@ -1,103 +1,67 @@
 # Usernaut
 
-Usernaut is an Operator that manages user accounts and teams across
-various SaaS platforms, leveraging Kubernetes for orchestration and management.
+Usernaut, a Kubernetes Operator based Application that manages user accounts and teams across multiple SaaS platforms, providing a unified, declarative approach to user lifecycle management.
 
-## Description
+## Why Usernaut?
 
-Usernaut is designed to simplify the management of user accounts and teams across multiple SaaS platforms by leveraging Kubernetes as the underlying orchestration engine. It provides a unified interface for creating, updating, and deleting user accounts and teams, ensuring consistency and compliance across different services.
-Usernaut uses Custom Resource Definitions (CRDs) to define user accounts and teams, allowing users to manage these resources declaratively. The operator watches for changes in the CRDs and applies the necessary actions to the underlying SaaS platforms.
+Managing user access across multiple SaaS platforms is challenging:
 
-## Getting Started
+- **Manual Provisioning is Slow**: Onboarding users to Fivetran, GitLab, Snowflake, and other platforms requires repetitive manual work
+- **Offboarding is Error-Prone**: When employees leave, their access often lingers across systems, creating security risks
+- **Inconsistent Access Control**: Without a single source of truth, team memberships drift out of sync across platforms
+- **Compliance Burden**: Auditing who has access to what requires checking multiple systems
 
-### Prerequisites
+**Usernaut solves these problems** by using Kubernetes Custom Resources to declaratively define user groups and automatically synchronizing them to all your SaaS backends.
 
-- go version v1.24.2+
-- operator sdk version v1.39.2+
+## Key Features
 
-### To Deploy on the cluster
+- **Declarative User Management**: Define groups as Kubernetes CRs; Usernaut handles the rest
+- **Multi-Backend Sync**: Simultaneously manage users across Fivetran, GitLab, Snowflake, and Rover
+- **LDAP Integration**: Automatically fetches user details from your corporate directory
+- **Nested Groups**: Groups can include other groups for flexible team structures
+- **Automatic Offboarding**: Daily job removes users no longer in LDAP from all backends
+- **REST API**: Query user group memberships programmatically
 
-**Build and push your image to the location specified by `IMG`:**
+## Supported Backends
 
-```sh
-make docker-build docker-push IMG=<some-registry>/usernaut:tag
+| Backend           | Type        | Description                                     |
+| ----------------- | ----------- | ----------------------------------------------- |
+| **Fivetran**      | `fivetran`  | Data pipeline platform                          |
+| **GitLab**        | `gitlab`    | Git repository hosting (with LDAP sync support) |
+| **Snowflake**     | `snowflake` | Cloud data warehouse                            |
+| **Red Hat Rover** | `rover`     | Red Hat internal user directory                 |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Kubernetes Cluster                          │
+│                                                                     │
+│  ┌──────────────┐      ┌─────────────────┐      ┌───────────────┐  │
+│  │  Group CRD   │─────▶│  Usernaut       │─────▶│   Backends    │  │
+│  │              │      │  Controller     │      │               │  │
+│  │ - group_name │      │                 │      │ • Fivetran    │  │
+│  │ - members    │      │ • Sync users    │      │ • GitLab      │  │
+│  │ - backends   │      │ • Manage teams  │      │ • Snowflake   │  │
+│  └──────────────┘      │ • Auto-offboard │      │ • Rover       │  │
+│                        └────────┬────────┘      └───────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│                        ┌─────────────────┐      ┌───────────────┐  │
+│                        │  Cache Layer    │      │  LDAP Server  │  │
+│                        │  (Redis)        │      │  (User Data)  │  │
+│                        └─────────────────┘      └───────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+## Documentation
 
-**Install the CRDs into the cluster:**
+| Document                             | Description                                                  |
+| ------------------------------------ | ------------------------------------------------------------ |
+| [DEVELOPMENT.md](./DEVELOPMENT.md)   | Architecture deep-dive, core components, and developer setup |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute to Usernaut                                |
+| [Deployment.md](./Deployment.md)     | Detailed deployment instructions                             |
 
-```sh
-make install
-```
+## License
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
-
-```sh
-make deploy IMG=<some-registry>/usernaut:tag
-```
-
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-> privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
-```
-
-> **NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following are the steps to build the installer and distribute this project to users.
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/usernaut:tag
-```
-
-NOTE: The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without
-its dependencies.
-
-1. Using the installer
-
-Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/usernaut/<tag or branch>/dist/install.yaml
-```
-
-## Contributing
-
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+This project is licensed under the Apache License 2.0 - see the [LICENSE](./LICENSE) file for details.
