@@ -327,13 +327,50 @@ func (r *GroupReconciler) processAllBackends(
 	uniqueMembers []string,
 ) map[string]map[string]string {
 	backendErrors := make(map[string]map[string]string, 0)
+
+	// Create a map of valid backends for validation
+	validBackends := make(map[string]bool)
+	for _, backend := range groupCR.Spec.Backends {
+		validBackends[backend.Name+"_"+backend.Type] = true
+	}
+
+	// Group Params by backend name for direct lookup.
+	groupParamsByBackend := make(map[string]structs.TeamParams)
+	for _, param := range groupCR.Spec.GroupParams {
+		backendKey := param.Name + "_" + param.Backend
+		if !validBackends[backendKey] {
+			if _, ok := backendErrors[param.Backend]; !ok {
+				backendErrors[param.Backend] = make(map[string]string)
+			}
+			backendErrors[param.Backend][param.Name] = fmt.Errorf(
+				"group param refers to non-existent backend: %s/%s",
+				param.Backend, param.Name).Error()
+			continue
+		}
+		if param.Property == "" {
+			if _, ok := backendErrors[param.Backend]; !ok {
+				backendErrors[param.Backend] = make(map[string]string)
+			}
+			backendErrors[param.Backend][param.Name] = fmt.Errorf(
+				"group param property is empty for backend: %s/%s",
+				param.Backend, param.Name).Error()
+			continue
+		} else {
+			groupParamsByBackend[backendKey] = structs.TeamParams{
+				Property: param.Property,
+				Value:    param.Value,
+			}
+		}
+	}
+
 	for _, backend := range groupCR.Spec.Backends {
 		r.backendLogger = r.log.WithFields(logrus.Fields{
 			"backend":      backend.Name,
 			"backend_type": backend.Type,
 		})
-
-		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers); err != nil {
+		backendKey := backend.Name + "_" + backend.Type
+		backendGroupParams := groupParamsByBackend[backendKey]
+		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers, backendGroupParams); err != nil {
 			r.backendLogger.WithError(err).Error("error processing backend")
 			if _, ok := backendErrors[backend.Type]; !ok {
 				backendErrors[backend.Type] = make(map[string]string)
@@ -350,6 +387,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	backend usernautdevv1alpha1.Backend,
 	uniqueMembers []string,
+	backendGroupParams structs.TeamParams,
 ) error {
 	// Create backend client
 	backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
@@ -371,7 +409,12 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	}
 
 	// Fetch or create team
-	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backend.Name, backend.Type, backendClient)
+	backendParams := &structs.BackendParams{
+		Name:        backend.Name,
+		Type:        backend.Type,
+		GroupParams: backendGroupParams,
+	}
+	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching or creating team")
 		return err
@@ -697,11 +740,11 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 }
 
 func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
-	groupName string,
-	backendName, backendType string,
-	backendClient clients.Client) (string, error) {
+	groupName string, backendClient clients.Client,
+	backendParams *structs.BackendParams) (string, error) {
 
-	// NOTE: CacheMutex is already held by caller (Reconcile)
+	backendName := backendParams.GetName()
+	backendType := backendParams.GetType()
 
 	// Get transformed group name for backend API calls (team name in backend system)
 	transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backendType, groupName)
@@ -751,6 +794,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		Name:        transformedGroupName, // Use transformed name for backend API
 		Description: "team for " + groupName,
 		Role:        fivetran.AccountReviewerRole,
+		TeamParams:  backendParams.GetGroupParams(),
 	})
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error creating team in backend")

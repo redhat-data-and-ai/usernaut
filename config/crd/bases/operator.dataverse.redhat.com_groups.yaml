@@ -60,6 +60,27 @@ spec:
                 type: array
               group_name:
                 type: string
+              group_params:
+                items:
+                  properties:
+                    backend:
+                      type: string
+                    name:
+                      type: string
+                    property:
+                      type: string
+                    value:
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                  required:
+                  - backend
+                  - name
+                  - property
+                  - value
+                  type: object
+                type: array
               members:
                 properties:
                   groups:

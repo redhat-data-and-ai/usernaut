@@ -38,14 +38,23 @@ type Backend struct {
 
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
-	GroupName string    `json:"group_name"`
-	Members   Members   `json:"members"`
-	Backends  []Backend `json:"backends"`
+	GroupName   string       `json:"group_name"`
+	Members     Members      `json:"members"`
+	GroupParams []GroupParam `json:"group_params,omitempty"`
+	Backends    []Backend    `json:"backends"`
 }
 
 type Members struct {
 	Groups []string `json:"groups,omitempty"`
 	Users  []string `json:"users"`
+}
+
+type GroupParam struct {
+	Backend  string `json:"backend"`
+	Name     string `json:"name"`
+	Property string `json:"property"`
+	// +kubebuilder:validation:MinItems=1
+	Value []string `json:"value"`
 }
 
 // GroupStatus defines the observed state of Group
