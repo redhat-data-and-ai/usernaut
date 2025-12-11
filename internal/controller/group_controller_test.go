@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/golang/mock/gomock"
@@ -35,6 +37,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
 
 const (
@@ -42,9 +45,87 @@ const (
 	GroupControllerName = "group-controller"
 	keyApiKey           = "apiKey"
 	keyApiSecret        = "apiSecret"
+	keyUrl              = "url"
+	keyParentGroupId    = "parent_group_id"
 )
 
 var _ = Describe("Group Controller", func() {
+
+	setupTestReconciler := func(backends []config.Backend) (*GroupReconciler, *mocks.MockLDAPClient) {
+		backendMap := make(map[string]map[string]config.Backend)
+		for _, backend := range backends {
+			if _, ok := backendMap[backend.Type]; !ok {
+				backendMap[backend.Type] = make(map[string]config.Backend)
+			}
+			backendMap[backend.Type][backend.Name] = backend
+		}
+
+		appConfig := &config.AppConfig{
+			App: config.App{
+				Name:        "usernaut-test",
+				Version:     "v0.0.1",
+				Environment: "test",
+			},
+			LDAP: ldap.LDAP{
+				Server:           "ldap://ldap.test.com:389",
+				BaseDN:           "ou=adhoc,ou=managedGroups,dc=org,dc=com",
+				UserDN:           "uid=%s,ou=users,dc=org,dc=com",
+				UserSearchFilter: "(objectClass=filteClass)",
+				Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
+			},
+			Backends:   backends,
+			BackendMap: backendMap,
+			Cache: cache.Config{
+				Driver: "memory",
+				InMemory: &inmemory.Config{
+					DefaultExpiration: int32(-1),
+					CleanupInterval:   int32(-1),
+				},
+			},
+		}
+
+		Cache, err := cache.New(&appConfig.Cache)
+		Expect(err).NotTo(HaveOccurred())
+
+		ctrl := gomock.NewController(GinkgoT())
+		ldapClient := mocks.NewMockLDAPClient(ctrl)
+
+		return &GroupReconciler{
+			Client:     k8sClient,
+			Scheme:     k8sClient.Scheme(),
+			AppConfig:  appConfig,
+			Store:      store.New(Cache),
+			LdapConn:   ldapClient,
+			CacheMutex: &sync.RWMutex{},
+		}, ldapClient
+	}
+
+	setupSafeTestConfig := func() func() {
+		tempDir, err := os.MkdirTemp("", "usernaut-test")
+		Expect(err).NotTo(HaveOccurred())
+
+		configDir := filepath.Join(tempDir, "appconfig")
+		err = os.MkdirAll(configDir, 0755)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create a temp default config
+		configContent := ``
+		err = os.WriteFile(filepath.Join(configDir, "default.yaml"), []byte(configContent), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = os.Setenv("WORKDIR", tempDir)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Force reload of config to pick up the safe test config
+		_, err = config.LoadConfig("default")
+		Expect(err).NotTo(HaveOccurred())
+
+		return func() {
+			_ = os.Unsetenv("WORKDIR")
+			_ = os.RemoveAll(tempDir)
+		}
+	}
+
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource-group"
 
@@ -103,42 +184,7 @@ var _ = Describe("Group Controller", func() {
 					keyApiKey: "testKey",
 				},
 			}
-
-			backendMap := make(map[string]map[string]config.Backend)
-			backendMap[fivetranBackend.Type] = make(map[string]config.Backend)
-			backendMap[fivetranBackend.Type][fivetranBackend.Name] = fivetranBackend
-
-			appConfig := config.AppConfig{
-				App: config.App{
-					Name:        "usernaut-test",
-					Version:     "v0.0.1",
-					Environment: "test",
-				},
-				LDAP: ldap.LDAP{
-					Server:           "ldap://ldap.test.com:389",
-					BaseDN:           "ou=adhoc,ou=managedGroups,dc=org,dc=com",
-					UserDN:           "uid=%s,ou=users,dc=org,dc=com",
-					UserSearchFilter: "(objectClass=filteClass)",
-					Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
-				},
-				Backends: []config.Backend{
-					fivetranBackend,
-				},
-				BackendMap: backendMap,
-				Cache: cache.Config{
-					Driver: "memory",
-					InMemory: &inmemory.Config{
-						DefaultExpiration: int32(-1),
-						CleanupInterval:   int32(-1),
-					},
-				},
-			}
-
-			cache, err := cache.New(&appConfig.Cache)
-			Expect(err).NotTo(HaveOccurred())
-
-			ctrl := gomock.NewController(GinkgoT())
-			ldapClient := mocks.NewMockLDAPClient(ctrl)
+			controllerReconciler, ldapClient := setupTestReconciler([]config.Backend{fivetranBackend})
 
 			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
 				"cn":          "Test",
@@ -148,16 +194,7 @@ var _ = Describe("Group Controller", func() {
 				"uid":         "testuser",
 			}, nil).Times(2)
 
-			controllerReconciler := &GroupReconciler{
-				Client:     k8sClient,
-				Scheme:     k8sClient.Scheme(),
-				AppConfig:  &appConfig,
-				Cache:      cache,
-				LdapConn:   ldapClient,
-				CacheMutex: &sync.RWMutex{},
-			}
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			// TODO: ideally err should be nil if the reconciliation is successful,
@@ -211,41 +248,7 @@ var _ = Describe("Group Controller", func() {
 					// Intentionally omit apiSecret to force client creation error
 				},
 			}
-
-			backendMap := make(map[string]map[string]config.Backend)
-			backendMap[fivetranA.Type] = make(map[string]config.Backend)
-			backendMap[fivetranA.Type][fivetranA.Name] = fivetranA
-			backendMap[fivetranB.Type][fivetranB.Name] = fivetranB
-
-			appConfig := config.AppConfig{
-				App: config.App{
-					Name:        "usernaut-test",
-					Version:     "v0.0.1",
-					Environment: "test",
-				},
-				LDAP: ldap.LDAP{
-					Server:           "ldap://ldap.test.com:389",
-					BaseDN:           "ou=adhoc,ou=managedGroups,dc=org,dc=com",
-					UserDN:           "uid=%s,ou=users,dc=org,dc=com",
-					UserSearchFilter: "(objectClass=filteClass)",
-					Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
-				},
-				Backends:   []config.Backend{fivetranA, fivetranB},
-				BackendMap: backendMap,
-				Cache: cache.Config{
-					Driver: "memory",
-					InMemory: &inmemory.Config{
-						DefaultExpiration: int32(-1),
-						CleanupInterval:   int32(-1),
-					},
-				},
-			}
-
-			Cache, err := cache.New(&appConfig.Cache)
-			Expect(err).NotTo(HaveOccurred())
-
-			ctrl := gomock.NewController(GinkgoT())
-			ldapClient := mocks.NewMockLDAPClient(ctrl)
+			reconciler, ldapClient := setupTestReconciler([]config.Backend{fivetranA, fivetranB})
 
 			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
 				"cn":          "Test",
@@ -255,16 +258,7 @@ var _ = Describe("Group Controller", func() {
 				"uid":         "testuser",
 			}, nil).Times(2)
 
-			reconciler := &GroupReconciler{
-				Client:     k8sClient,
-				Scheme:     k8sClient.Scheme(),
-				AppConfig:  &appConfig,
-				Cache:      Cache,
-				LdapConn:   ldapClient,
-				CacheMutex: &sync.RWMutex{},
-			}
-
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: multiNN})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: multiNN})
 			Expect(err).To(HaveOccurred())
 
 			// Reload the resource to inspect status
@@ -283,6 +277,79 @@ var _ = Describe("Group Controller", func() {
 			Expect(statuses["fivetran-b"].Status).To(BeFalse())
 			Expect(statuses["fivetran-a"].Message).To(ContainSubstring("missing required connection parameters"))
 			Expect(statuses["fivetran-b"].Message).To(ContainSubstring("missing required connection parameters"))
+		})
+
+		It("should handle gitlab backend", func() {
+			By("creating a resource with gitlab backend and group params")
+
+			// Setup a temporary valid configuration to avoid panic in loader.go
+			// when initializing backend clients which call config.GetConfig()
+			cleanup := setupSafeTestConfig()
+			defer cleanup()
+
+			const gitlabResourceName = "test-resource-gitlab"
+			gitlabNN := types.NamespacedName{Name: gitlabResourceName, Namespace: "default"}
+
+			gitlabResource := &usernautdevv1alpha1.Group{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      gitlabResourceName,
+					Namespace: "default",
+				},
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: gitlabResourceName,
+					Members: usernautdevv1alpha1.Members{
+						Users: []string{"test-user-1", "test-user-2"},
+					},
+					Backends: []usernautdevv1alpha1.Backend{
+						{
+							Name: "gitlab-main",
+							Type: "gitlab",
+						},
+					},
+					GroupParams: []usernautdevv1alpha1.GroupParam{
+						{
+							Backend:  "gitlab",
+							Name:     "gitlab-main",
+							Property: "projects",
+							Value:    []string{"my-group/my-project"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, gitlabResource)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, gitlabResource) }()
+
+			gitlabBackend := config.Backend{
+				Name:    "gitlab-main",
+				Type:    "gitlab",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyUrl:           "https://gitlab.com",
+					keyParentGroupId: 123456,
+				},
+			}
+			reconciler, ldapClient := setupTestReconciler([]config.Backend{gitlabBackend})
+
+			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
+				"cn":          "CN-test",
+				"sn":          "SN-test",
+				"displayName": "Open Source",
+				"mail":        "opensource@email.com",
+				"uid":         "uid-test",
+			}, nil).Times(2)
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: gitlabNN})
+			Expect(err).To(HaveOccurred())
+
+			// Reload the resource to inspect status
+			fresh := &usernautdevv1alpha1.Group{}
+			Expect(k8sClient.Get(ctx, gitlabNN, fresh)).To(Succeed())
+			Expect(fresh.Status.BackendsStatus).To(HaveLen(1))
+
+			status := fresh.Status.BackendsStatus[0]
+			Expect(status.Name).To(Equal("gitlab-main"))
+			Expect(status.Status).To(BeFalse())
+			Expect(status.Message).To(ContainSubstring("missing required connection parameters"))
 		})
 	})
 })

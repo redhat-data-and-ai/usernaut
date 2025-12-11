@@ -48,14 +48,12 @@ func (c *SnowflakeClient) FetchAllTeams(ctx context.Context) (map[string]structs
 	return teams, nil
 }
 
-// processTeamsPage processes a page of teams and adds them to the result map
 func (c *SnowflakeClient) processTeamsPage(resp []byte, teams map[string]structs.Team) error {
 	var roles []SnowflakeRole
 	if err := json.Unmarshal(resp, &roles); err != nil {
 		return fmt.Errorf("failed to parse roles response: %w", err)
 	}
 
-	// Extract roles from the response
 	for _, role := range roles {
 		team := structs.Team{
 			ID:   strings.ToLower(role.Name),
@@ -74,24 +72,25 @@ func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 	log.Info("creating team")
 	endpoint := "/api/v2/roles"
 
-	// Create payload for role creation
 	payload := map[string]interface{}{
 		"name": team.Name,
 	}
 
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodPost, payload)
+	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodPost, payload)
 	if err != nil {
 		log.WithError(err).Error("error creating team")
 		return nil, err
 	}
 
-	// Check for successful creation
+	if status == http.StatusConflict {
+		log.WithField("status", status).Info("team already exists, fetching team details")
+		return c.FetchTeamDetails(ctx, team.Name)
+	}
+
 	if status != http.StatusOK && status != http.StatusCreated {
 		return nil, fmt.Errorf("failed to create role, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
 
-	// Return the created team using the request data since Snowflake API
-	// returns minimal information in create response
 	createdTeam := &structs.Team{
 		ID:   strings.ToLower(team.Name),
 		Name: strings.ToLower(team.Name),
@@ -130,13 +129,12 @@ func (c *SnowflakeClient) DeleteTeamByID(ctx context.Context, teamID string) err
 	log.Info("deleting team")
 	endpoint := fmt.Sprintf("/api/v2/roles/%s", teamID)
 
-	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodDelete, nil)
+	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodDelete, nil)
 	if err != nil {
 		log.WithError(err).Error("error deleting team")
 		return fmt.Errorf("failed to delete role: %w", err)
 	}
 
-	// Check for successful deletion
 	if status != http.StatusOK && status != http.StatusNoContent {
 		return fmt.Errorf("failed to delete role, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
