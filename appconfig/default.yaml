@@ -70,34 +70,46 @@ httpClient:
 backends:
   - name: fivetran
     type: "fivetran"
-    enabled: true
+    enabled: false
     connection:
-      apiKey: file|/path/to/fivetran_key
-      apiSecret: file|/path/to/fivetran_secret
+      apiKey: /path/to/fivetran_key
+      apiSecret: /path/to/fivetran_secret
   - name: rover
     type: "rover"
     enabled: true
     connection:
       url: "https://rover.test.com"
-      cert_path: "file|/path/to/usernaut.crt"
-      private_key_path: "file|/path/to/usernaut.pem"
+      cert_path: "/path/to/usernaut.crt"
+      private_key_path: "/path/to/usernaut.pem"
       service_account_name: test-service-account
   - name: test
     type: "snowflake"
-    enabled: true
+    enabled: false
     connection: 
-      pat: file|/path/to/SNOWFLAKE_PAT
+      pat: /path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
   - name: gitlab
     type: "gitlab"
-    enabled: true
+    enabled: false
     depends_on: 
       name: "rover"
       type: "rover"
     connection:
       url: "https://gitlab.test.com"
-      token: file|/path/to/gitlab_token
+      token: /path/to/gitlab_token
       parent_group_id: 111111
+  - name: atlan
+    type: "atlan"
+    enabled: true
+    depends_on: 
+      name: "rover"
+      type: "rover"
+    sso_sync: true
+    connection:
+      url: "https://yourcompany.atlan.com"
+      api_token: file|path/to/api_token
+      identity_provider_alias: {saml|azure}
+      default_owner_username: "{service_account}"
 
 apiServer:
   address: "0.0.0.0:8080"

@@ -1,0 +1,25 @@
+linters:
+  disable-all: true
+  enable:
+    - gosec         # Detects security problems.
+    - gofmt
+    - goimports
+    - gocritic      # Metalinter; detects bugs, performance, and styling issues.
+    - gofumpt       # Detects whether code was gofumpt-ed.
+    - nilerr        # Detects code that returns nil even if it checks that the error is not nil.
+    - tparallel     # Detects inappropriate usage of t.Parallel().
+    - bodyclose     # Detects missing body close.
+    - sloglint      # Detects common mistakes in using the log package.
+    - testifylint   # Detects common mistakes in using the testify package.
+    - whitespace
+    - lll
+    - gosimple      # Linter for Go source code that specializes in simplifying code.
+    - govet         # Vet examines Go source code and reports suspicious constructs.
+    - staticcheck
+
+linters-settings:
+  lll:
+    line-length: 200
+  govet:
+    disable:
+      - structtag

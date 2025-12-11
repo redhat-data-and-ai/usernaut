@@ -7,12 +7,16 @@ metadata:
   name: dataverse-aggregate-mygroup
   namespace: usernaut
 spec:
-  group_name: dataverse-aggregate-mygroup
+  # This is the LDAP group name that will be synced
+  group_name: dataverse-platform-atlan-test
   members:
-   users:
-    - subhatta
-    - vinod
+    users:
+      - pthacker
   backends:
-  - name: fivetran
-    type: fivetran
+    - name: rover
+      type: rover
+    - name: atlan
+      type: atlan
+
+
   
