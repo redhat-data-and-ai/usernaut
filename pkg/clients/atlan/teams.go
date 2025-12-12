@@ -18,13 +18,9 @@ func (ac *AtlanClient) FetchAllTeams(ctx context.Context) (map[string]structs.Te
 	log.Info("fetching all teams from Atlan")
 
 	url := fmt.Sprintf("%s/api/service/v2/groups?columns=name", ac.url)
-	response, statusCode, err := ac.sendRequest(ctx, url, http.MethodGet, nil, nil, "FetchAllTeams")
+	response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchAllTeams")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch teams from Atlan: %w", err)
-	}
-
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d when fetching teams from Atlan", statusCode)
 	}
 
 	var apiResponse AtlanGroupsResponse
@@ -66,13 +62,9 @@ func (ac *AtlanClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 		},
 	}
 
-	response, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, nil, "CreateTeam")
+	response, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, "CreateTeam")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create team in Atlan: %w", err)
-	}
-
-	if statusCode != http.StatusCreated && statusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d when creating team in Atlan", statusCode)
 	}
 
 	// Parse response - Atlan returns {"group": "<id>", "users": null}
@@ -117,6 +109,7 @@ func (ac *AtlanClient) CreateSSOMapping(ctx context.Context, teamID, teamName, s
 		"team_name": teamName,
 		"sso_group": ssoGroupName,
 	})
+	log.Info("creating SSO group mapping")
 
 	provider := ac.identityProviderAlias
 	if provider == "" {
@@ -138,16 +131,12 @@ func (ac *AtlanClient) CreateSSOMapping(ctx context.Context, teamID, teamName, s
 	}
 
 	url := fmt.Sprintf("%s/api/service/idp/%s/mappers", ac.url, provider)
-	response, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, groupMapping, nil, "CreateSSOMapping")
+	_, err := ac.sendRequest(ctx, url, http.MethodPost, groupMapping, "CreateSSOMapping")
 	if err != nil {
 		return fmt.Errorf("failed to create SSO group mapping: %w", err)
 	}
 
-	if statusCode != http.StatusCreated && statusCode != http.StatusOK {
-		log.WithFields(logrus.Fields{"status_code": statusCode, "response": string(response)}).Error("SSO mapping creation failed")
-		return fmt.Errorf("unexpected status code %d when creating SSO group mapping", statusCode)
-	}
-
+	log.Info("successfully created SSO group mapping")
 	return nil
 }
 
@@ -159,24 +148,21 @@ func (ac *AtlanClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 	log.Info("deleting team from Atlan")
 
 	url := fmt.Sprintf("%s/api/service/groups/%s/delete", ac.url, teamID)
-	_, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, nil, nil, "DeleteTeamByID")
+	_, err := ac.sendRequest(ctx, url, http.MethodPost, nil, "DeleteTeamByID")
 	if err != nil {
-		// If team doesn't exist (404 or 400 with "not found"), consider it success
-		if statusCode == http.StatusNotFound || statusCode == http.StatusBadRequest {
+		// If error contains 404 or "not found", team is already deleted
+		if strings.Contains(err.Error(), "404") || strings.Contains(strings.ToLower(err.Error()), "not found") {
 			log.Info("team does not exist in Atlan, nothing to delete")
 			return nil
 		}
 		return fmt.Errorf("failed to delete team from Atlan: %w", err)
 	}
 
-	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status code %d when deleting team from Atlan", statusCode)
-	}
-
 	log.Info("successfully deleted team from Atlan")
 	return nil
 }
 
+// TODO: Implement FetchTeamDetails when needed - currently returns error as it's not used
 func (ac *AtlanClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
-	return nil, fmt.Errorf("FetchTeamDetails is currently not implemented for Atlan")
+	return nil, fmt.Errorf("FetchTeamDetails is not implemented for Atlan")
 }

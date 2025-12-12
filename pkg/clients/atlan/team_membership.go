@@ -43,13 +43,9 @@ func (ac *AtlanClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 	teamMembers := make(map[string]*structs.User)
 
 	url := fmt.Sprintf("%s/api/service/groups/%s/members", ac.url, teamID)
-	response, statusCode, err := ac.sendRequest(ctx, url, http.MethodGet, nil, nil, "FetchTeamMembersByTeamID")
+	response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchTeamMembersByTeamID")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch team members from Atlan: %w", err)
-	}
-
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d when fetching team members from Atlan", statusCode)
 	}
 
 	var apiResponse AtlanGroupMembersResponse
@@ -91,13 +87,9 @@ func (ac *AtlanClient) AddUserToTeam(ctx context.Context, teamID string, userIDs
 			"groups": []string{teamID},
 		}
 
-		_, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, nil, "AddUserToTeam")
+		_, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, "AddUserToTeam")
 		if err != nil {
 			return fmt.Errorf("failed to add user %s to team in Atlan: %w", userID, err)
-		}
-
-		if statusCode != http.StatusOK && statusCode != http.StatusCreated && statusCode != http.StatusNoContent {
-			return fmt.Errorf("unexpected status code %d when adding user to team in Atlan", statusCode)
 		}
 	}
 
@@ -126,13 +118,9 @@ func (ac *AtlanClient) RemoveUserFromTeam(ctx context.Context, teamID string, us
 		"users": userIDs,
 	}
 
-	_, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, nil, "RemoveUserFromTeam")
+	_, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, "RemoveUserFromTeam")
 	if err != nil {
 		return fmt.Errorf("failed to remove users from team in Atlan: %w", err)
-	}
-
-	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status code %d when removing users from team in Atlan", statusCode)
 	}
 
 	log.Info("removed users from team in Atlan")

@@ -70,33 +70,33 @@ httpClient:
 backends:
   - name: fivetran
     type: "fivetran"
-    enabled: false
+    enabled: true
     connection:
-      apiKey: /path/to/fivetran_key
-      apiSecret: /path/to/fivetran_secret
+      apiKey: file|/path/to/fivetran_key
+      apiSecret: file|/path/to/fivetran_secret
   - name: rover
     type: "rover"
     enabled: true
     connection:
       url: "https://rover.test.com"
-      cert_path: "/path/to/usernaut.crt"
-      private_key_path: "/path/to/usernaut.pem"
+      cert_path: "file|/path/to/usernaut.crt"
+      private_key_path: "file|/path/to/usernaut.pem"
       service_account_name: test-service-account
   - name: test
     type: "snowflake"
-    enabled: false
+    enabled: true
     connection: 
-      pat: /path/to/SNOWFLAKE_PAT
+      pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
   - name: gitlab
     type: "gitlab"
-    enabled: false
+    enabled: true
     depends_on: 
       name: "rover"
       type: "rover"
     connection:
       url: "https://gitlab.test.com"
-      token: /path/to/gitlab_token
+      token: file|/path/to/gitlab_token
       parent_group_id: 111111
   - name: atlan
     type: "atlan"
@@ -104,12 +104,15 @@ backends:
     depends_on: 
       name: "rover"
       type: "rover"
+    # sso_sync: Set to true if users are auto-created via SSO login
     sso_sync: true
     connection:
       url: "https://yourcompany.atlan.com"
-      api_token: file|path/to/api_token
-      identity_provider_alias: {saml|azure}
-      default_owner_username: "{service_account}"
+      api_token: file|path/to/atlan_api_token
+      # Alias given during setting up identity_provider in the application
+      identity_provider_alias: "saml|azure"
+      # Required for user deletion - Username to transfer assets when deleting users 
+      default_owner_username: "service-account-username"
 
 apiServer:
   address: "0.0.0.0:8080"

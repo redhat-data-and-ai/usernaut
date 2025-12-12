@@ -79,36 +79,34 @@ func NewClient(atlanAppConfig map[string]interface{},
 
 // sendRequest makes an HTTP request to the Atlan API with proper authentication
 func (aC *AtlanClient) sendRequest(ctx context.Context, url string, method string, body interface{},
-	headers map[string]string, methodName string) ([]byte, int, error) {
+	methodName string) ([]byte, error) {
 	requestBody, err := json.Marshal(body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to marshal request body: %w", err)
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	req, err := request.NewRequest(ctx, method, url, requestBody)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if headers == nil {
-		headers = make(map[string]string)
+	headers := map[string]string{
+		"Authorization": "Bearer " + aC.apiToken,
+		"Content-Type":  "application/json",
+		"Accept":        "application/json",
 	}
-	headers["Authorization"] = "Bearer " + aC.apiToken
-	headers["Content-Type"] = "application/json"
-	headers["Accept"] = "application/json"
-
 	req.SetHeaders(headers)
 
 	response, statusCode, err := req.MakeRequest(aC.client, methodName, "atlan")
 	if err != nil {
-		return nil, statusCode, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if !slices.Contains([]int{http.StatusOK, http.StatusCreated, http.StatusNoContent}, statusCode) {
-		return response, statusCode, fmt.Errorf("unexpected status code: %d, response: %s", statusCode, string(response))
+		return response, fmt.Errorf("unexpected status code: %d, response: %s", statusCode, string(response))
 	}
 
-	return response, statusCode, nil
+	return response, nil
 }
 
 // SetSSOSync sets the SSO sync flag for the Atlan client

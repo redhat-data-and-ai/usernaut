@@ -27,6 +27,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	// paginationLimit is the number of records to fetch per API request
+	paginationLimit = 100
+)
+
 // FetchAllUsers retrieves all users from Atlan with pagination
 // This function fetches users regardless of SSO sync status
 func (ac *AtlanClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
@@ -36,18 +41,13 @@ func (ac *AtlanClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 	userEmailMap := make(map[string]*structs.User)
 	userIDMap := make(map[string]*structs.User)
 
-	limit := 100
 	offset := 0
 
 	for {
-		url := fmt.Sprintf("%s/api/service/users?limit=%d&offset=%d", ac.url, limit, offset)
-		response, statusCode, err := ac.sendRequest(ctx, url, http.MethodGet, nil, nil, "FetchAllUsers")
+		url := fmt.Sprintf("%s/api/service/users?limit=%d&offset=%d", ac.url, paginationLimit, offset)
+		response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchAllUsers")
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to fetch users from Atlan: %w", err)
-		}
-
-		if statusCode != http.StatusOK {
-			return nil, nil, fmt.Errorf("unexpected status code %d when fetching users from Atlan", statusCode)
 		}
 
 		var apiResponse AtlanUsersResponse
@@ -63,10 +63,10 @@ func (ac *AtlanClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 			userIDMap[user.ID] = userStruct
 		}
 
-		if len(apiResponse.Records) < limit {
+		if len(apiResponse.Records) < paginationLimit {
 			break
 		}
-		offset += limit
+		offset += paginationLimit
 	}
 
 	log.WithField("total_user_count", len(userIDMap)).Info("successfully fetched users from Atlan")
@@ -83,13 +83,9 @@ func (ac *AtlanClient) FetchUserDetails(ctx context.Context, userID string) (*st
 	log.Info("fetching user details from Atlan")
 
 	url := fmt.Sprintf("%s/api/service/users/%s", ac.url, userID)
-	response, statusCode, err := ac.sendRequest(ctx, url, http.MethodGet, nil, nil, "FetchUserDetails")
+	response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchUserDetails")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch user details from Atlan: %w", err)
-	}
-
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d when fetching user details from Atlan", statusCode)
 	}
 
 	var user AtlanUser
@@ -134,13 +130,9 @@ func (ac *AtlanClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 		"roleName":  "$guest",
 	}
 
-	response, statusCode, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, nil, "CreateUser")
+	response, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, "CreateUser")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user in Atlan: %w", err)
-	}
-
-	if statusCode != http.StatusCreated && statusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d when creating user in Atlan", statusCode)
 	}
 
 	var createdUser AtlanUser

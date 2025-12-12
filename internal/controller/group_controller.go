@@ -1003,7 +1003,7 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 			return false, errors.New("backend client is not a GitlabClient")
 		}
 		gitlabClient.SetLdapSync(true, groupName)
-		r.backendLogger.Infof(" setup successfully for %s", backendType)
+		r.backendLogger.Infof("setup successfully for %s", backendType)
 		return true, nil
 
 	case "atlan":
