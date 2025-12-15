@@ -20,11 +20,13 @@ func (ac *AtlanClient) FetchAllTeams(ctx context.Context) (map[string]structs.Te
 	url := fmt.Sprintf("%s/api/service/v2/groups?columns=name", ac.url)
 	response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchAllTeams")
 	if err != nil {
+		log.WithError(err).Error("failed to fetch teams from Atlan")
 		return nil, fmt.Errorf("failed to fetch teams from Atlan: %w", err)
 	}
 
 	var apiResponse AtlanGroupsResponse
 	if err := json.Unmarshal(response, &apiResponse); err != nil {
+		log.WithError(err).Error("failed to parse teams response from Atlan")
 		return nil, fmt.Errorf("failed to parse response from Atlan: %w", err)
 	}
 
@@ -64,6 +66,7 @@ func (ac *AtlanClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 
 	response, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, "CreateTeam")
 	if err != nil {
+		log.WithError(err).Error("failed to create team in Atlan")
 		return nil, fmt.Errorf("failed to create team in Atlan: %w", err)
 	}
 
@@ -72,6 +75,7 @@ func (ac *AtlanClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 		Group string `json:"group"`
 	}
 	if err := json.Unmarshal(response, &createResponse); err != nil {
+		log.WithError(err).Error("failed to parse created team response from Atlan")
 		return nil, fmt.Errorf("failed to parse created team response from Atlan: %w", err)
 	}
 
@@ -133,6 +137,7 @@ func (ac *AtlanClient) CreateSSOMapping(ctx context.Context, teamID, teamName, s
 	url := fmt.Sprintf("%s/api/service/idp/%s/mappers", ac.url, provider)
 	_, err := ac.sendRequest(ctx, url, http.MethodPost, groupMapping, "CreateSSOMapping")
 	if err != nil {
+		log.WithError(err).Error("failed to create SSO group mapping")
 		return fmt.Errorf("failed to create SSO group mapping: %w", err)
 	}
 
@@ -155,6 +160,7 @@ func (ac *AtlanClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 			log.Info("team does not exist in Atlan, nothing to delete")
 			return nil
 		}
+		log.WithError(err).Error("failed to delete team from Atlan")
 		return fmt.Errorf("failed to delete team from Atlan: %w", err)
 	}
 

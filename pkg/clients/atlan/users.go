@@ -47,11 +47,13 @@ func (ac *AtlanClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 		url := fmt.Sprintf("%s/api/service/users?limit=%d&offset=%d", ac.url, paginationLimit, offset)
 		response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchAllUsers")
 		if err != nil {
+			log.WithError(err).Error("failed to fetch users from Atlan")
 			return nil, nil, fmt.Errorf("failed to fetch users from Atlan: %w", err)
 		}
 
 		var apiResponse AtlanUsersResponse
 		if err := json.Unmarshal(response, &apiResponse); err != nil {
+			log.WithError(err).Error("failed to parse users response from Atlan")
 			return nil, nil, fmt.Errorf("failed to parse users response from Atlan: %w", err)
 		}
 
@@ -85,11 +87,13 @@ func (ac *AtlanClient) FetchUserDetails(ctx context.Context, userID string) (*st
 	url := fmt.Sprintf("%s/api/service/users/%s", ac.url, userID)
 	response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchUserDetails")
 	if err != nil {
+		log.WithError(err).Error("failed to fetch user details from Atlan")
 		return nil, fmt.Errorf("failed to fetch user details from Atlan: %w", err)
 	}
 
 	var user AtlanUser
 	if err := json.Unmarshal(response, &user); err != nil {
+		log.WithError(err).Error("failed to parse user details response from Atlan")
 		return nil, fmt.Errorf("failed to parse user details response from Atlan: %w", err)
 	}
 
@@ -132,11 +136,13 @@ func (ac *AtlanClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 
 	response, err := ac.sendRequest(ctx, url, http.MethodPost, requestBody, "CreateUser")
 	if err != nil {
+		log.WithError(err).Error("failed to create user in Atlan")
 		return nil, fmt.Errorf("failed to create user in Atlan: %w", err)
 	}
 
 	var createdUser AtlanUser
 	if err := json.Unmarshal(response, &createdUser); err != nil {
+		log.WithError(err).Error("failed to parse created user response from Atlan")
 		return nil, fmt.Errorf("failed to parse created user response from Atlan: %w", err)
 	}
 
@@ -151,8 +157,8 @@ func (ac *AtlanClient) DeleteUser(ctx context.Context, userID string) error {
 	})
 	log.Info("deleting user from Atlan")
 
-	if ac.defaultOwnerUserName == "" {
-		return fmt.Errorf("default_owner_username is required in atlan config for user deletion")
+	if ac.assetTransferUsername == "" {
+		return fmt.Errorf("asset_transfer_username is required in atlan config for user deletion")
 	}
 
 	if ac.sdkClient == nil {
@@ -163,6 +169,7 @@ func (ac *AtlanClient) DeleteUser(ctx context.Context, userID string) error {
 	// First, fetch the user details to get the username
 	userDetails, err := ac.FetchUserDetails(ctx, userID)
 	if err != nil {
+		log.WithError(err).Error("failed to fetch user details for deletion")
 		return fmt.Errorf("failed to fetch user details for deletion: %w", err)
 	}
 
@@ -171,10 +178,11 @@ func (ac *AtlanClient) DeleteUser(ctx context.Context, userID string) error {
 	// Use the SDK to delete the user - it creates a workflow internally
 	_, sdkErr := ac.sdkClient.UserClient.RemoveUser(
 		userDetails.UserName,
-		ac.defaultOwnerUserName,
+		ac.assetTransferUsername,
 		nil, // wfCreatorUserName defaults to transferToUserName
 	)
 	if sdkErr != nil {
+		log.WithError(sdkErr).Error("failed to delete user from Atlan")
 		return fmt.Errorf("failed to delete user from atlan: %w", sdkErr)
 	}
 

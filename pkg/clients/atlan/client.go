@@ -73,7 +73,7 @@ func NewClient(atlanAppConfig map[string]interface{},
 		url:                   atlanConfig.URL,
 		apiToken:              atlanConfig.APIToken,
 		identityProviderAlias: atlanConfig.IdentityProviderAlias,
-		defaultOwnerUserName:  atlanConfig.DefaultOwnerUserName,
+		assetTransferUsername: atlanConfig.AssetTransferUsername,
 	}, nil
 }
 

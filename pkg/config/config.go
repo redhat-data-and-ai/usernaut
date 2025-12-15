@@ -79,7 +79,6 @@ type Backend struct {
 	Type       string                 `yaml:"type"`
 	Enabled    bool                   `yaml:"enabled"`
 	DependsOn  Dependant              `yaml:"depends_on,omitempty" mapstructure:"depends_on,omitempty"`
-	SSOSync    bool                   `yaml:"sso_sync,omitempty" mapstructure:"sso_sync,omitempty"`
 	Connection map[string]interface{} `yaml:"connection"`
 }
 

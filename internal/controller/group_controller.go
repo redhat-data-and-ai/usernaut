@@ -1013,8 +1013,8 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 			return false, errors.New("backend client is not an AtlanClient")
 		}
 
-		// Set SSO sync from config (for user creation)
-		if backendConfig.SSOSync {
+		// Set SSO sync from connection config (for user creation)
+		if ssoSync, ok := backendConfig.Connection["sso_sync"].(bool); ok && ssoSync {
 			atlanClient.SetSSOSync(true)
 			r.backendLogger.Info("sso sync enabled for atlan backend")
 		}

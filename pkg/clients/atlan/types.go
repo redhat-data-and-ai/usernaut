@@ -28,7 +28,9 @@ type AtlanClient struct {
 	url                   string
 	apiToken              string
 	identityProviderAlias string
-	defaultOwnerUserName  string
+	// assetTransferUsername is the username to transfer asset ownership to when deleting a user.
+	// Atlan requires ownership transfer before user deletion.
+	assetTransferUsername string
 	ssoSync               bool
 	ldapSync              bool
 	ssoGroupName          string
@@ -39,7 +41,8 @@ type AtlanConfig struct {
 	URL                   string `json:"url"`
 	APIToken              string `json:"api_token"`
 	IdentityProviderAlias string `json:"identity_provider_alias"`
-	DefaultOwnerUserName  string `json:"default_owner_username"`
+	// AssetTransferUsername is the username to transfer asset ownership to when deleting a user
+	AssetTransferUsername string `json:"asset_transfer_username"`
 }
 
 // AtlanUser represents a user in Atlan's API response

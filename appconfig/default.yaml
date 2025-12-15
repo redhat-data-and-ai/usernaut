@@ -104,15 +104,15 @@ backends:
     depends_on: 
       name: "rover"
       type: "rover"
-    # sso_sync: Set to true if users are auto-created via SSO login
-    sso_sync: true
     connection:
       url: "https://yourcompany.atlan.com"
       api_token: file|path/to/atlan_api_token
       # Alias given during setting up identity_provider in the application
       identity_provider_alias: "saml|azure"
-      # Required for user deletion - Username to transfer assets when deleting users 
-      default_owner_username: "service-account-username"
+      # Username to transfer asset ownership to when deleting a user (required for user deletion)
+      asset_transfer_username: "service-account-username"
+      # Set to true if users are auto-created via SSO login (skip manual user creation)
+      sso_sync: true
 
 apiServer:
   address: "0.0.0.0:8080"
