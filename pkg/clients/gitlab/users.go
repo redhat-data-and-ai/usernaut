@@ -18,6 +18,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -85,17 +86,52 @@ func (g *GitlabClient) FetchUserDetails(ctx context.Context, userID string) (*st
 		"userID":  userID,
 	})
 	log.Info("fetching user details")
+	var user *gitlab.User
 
 	userIDInt, err := strconv.Atoi(userID)
 	if err != nil {
-		return nil, err
+		var numErr *strconv.NumError
+		// If the error is a syntax error, it's not a number, so we assume it's a username.
+		// Other errors, like a range error for a number that's too large, are treated as invalid input.
+		if errors.As(err, &numErr) && numErr.Err == strconv.ErrSyntax {
+			log.Info("userID is not an integer, assuming it is a username")
+			users, resp, listErr := g.gitlabClient.Users.ListUsers(&gitlab.ListUsersOptions{
+				Username: &userID,
+			})
+			if listErr != nil {
+				if resp != nil && resp.StatusCode == http.StatusNotFound {
+					return nil, fmt.Errorf("user %s not found in gitlab (404)", userID)
+				}
+				log.WithError(listErr).Error("Failed to fetch existing user")
+				return nil, listErr
+			}
+			if len(users) > 0 && resp.StatusCode == http.StatusOK {
+				log.Infof("found user %s details in gitlab backend", userID)
+				return userDetails(users[0]), nil
+			} else {
+				// this handles the case where user never logged in to gitlab
+				// so user details like userID is not found in gitlab
+				// TODO: need to handle the case when the user login in gitlab
+				log.Warnf("unable to find user %s details in gitlab backend", userID)
+				return &structs.User{
+					ID:       userID,
+					UserName: userID,
+				}, nil
+			}
+		} else {
+			// The userID is not a valid username-like string or is a number out of range.
+			return nil, fmt.Errorf("invalid userID format: %w", err)
+		}
+	} else {
+		// If userID is an integer, fetch user by ID
+		var getErr error
+		user, _, getErr = g.gitlabClient.Users.GetUser(userIDInt, gitlab.GetUsersOptions{})
+		if getErr != nil {
+			return nil, getErr
+		}
+		log.Info("found user details")
+		return userDetails(user), nil
 	}
-	user, _, err := g.gitlabClient.Users.GetUser(userIDInt, gitlab.GetUsersOptions{})
-	if err != nil {
-		return nil, err
-	}
-	log.Info("found user details")
-	return userDetails(user), nil
 }
 
 func (g *GitlabClient) CreateUser(ctx context.Context, u *structs.User) (*structs.User, error) {
@@ -106,17 +142,15 @@ func (g *GitlabClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 	log.Info("creating user")
 
 	if g.ldapSync {
-		users, _, fetchErr := g.gitlabClient.Users.ListUsers(&gitlab.ListUsersOptions{
-			Username: &u.UserName,
-		})
-		if fetchErr != nil {
-			log.WithError(fetchErr).Error("Failed to fetch existing user")
-			return nil, fetchErr
+		user, err := g.FetchUserDetails(ctx, u.UserName)
+		if err != nil {
+			log.WithError(err).Error("Failed to fetch user details")
+			return nil, err
 		}
-		if len(users) > 0 {
-			return userDetails(users[0]), nil
+		if user.Email == "" {
+			user.Email = u.Email
 		}
-		return nil, fmt.Errorf("user %s not found", u.UserName)
+		return user, nil
 	}
 
 	// Use Gitlab SDK to create a user
