@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	"github.com/redhat-data-and-ai/usernaut/internal/controller/controllerutils"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
@@ -167,7 +168,13 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.log.Warn("Backend errors detected, skipping cache index updates (all-or-nothing)")
 	}
 
-	// Step 4: Update status and handle errors
+	// Step 4: Remove force reconcile label if present
+	if removeErr := controllerutils.RemoveForceReconcileLabel(ctx, r.Client, groupCR); removeErr != nil {
+		r.log.WithError(removeErr).Error("Failed to remove force reconcile label")
+		return ctrl.Result{}, removeErr
+	}
+
+	// Step 5: Update status and handle errors
 	return ctrl.Result{}, r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
 }
 
@@ -853,9 +860,11 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	}
 
+	// force reconcile flag
+	labelPredicate := controllerutils.ForceReconcilePredicate()
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&usernautdevv1alpha1.Group{}).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, labelPredicate)).
 		Watches(
 			client.Object(&usernautdevv1alpha1.Group{}),
 			handler.EnqueueRequestsFromMapFunc(mapFunc),
