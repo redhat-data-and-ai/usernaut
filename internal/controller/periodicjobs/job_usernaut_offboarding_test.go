@@ -55,10 +55,6 @@ func TestUserOffboardingJob(t *testing.T) {
 	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_fivetran", testUser.ID)
 	require.NoError(t, err)
 
-	// Add user to user_list using store layer
-	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
-	require.NoError(t, err)
-
 	// Create backend clients map
 	backendClients := map[string]clients.Client{
 		"fivetran_fivetran": mockBackendClient,
@@ -75,8 +71,9 @@ func TestUserOffboardingJob(t *testing.T) {
 
 	t.Run("User_Not_In_LDAP_Should_Be_Offboarded", func(t *testing.T) {
 		// Setup: LDAP returns ErrNoUserFound (user not found)
+		// Note: getUserListFromCache returns emails, so LDAP is called with email using GetUserLDAPDataByEmail
 		mockLDAPClient.EXPECT().
-			GetUserLDAPData(gomock.Any(), testUser.UserName).
+			GetUserLDAPDataByEmail(gomock.Any(), testUser.Email).
 			Return(nil, ldap.ErrNoUserFound).
 			Times(1)
 
@@ -94,26 +91,20 @@ func TestUserOffboardingJob(t *testing.T) {
 		exists, err := dataStore.User.Exists(ctx, testUser.Email)
 		require.NoError(t, err)
 		assert.False(t, exists, "User should be removed from cache")
-
-		// Verify user is removed from user_list using store layer
-		updatedUserList, err := dataStore.Meta.GetUserList(ctx)
-		require.NoError(t, err)
-		assert.NotContains(t, updatedUserList, testUser.UserName, "User should be removed from user list")
 	})
 
 	// Reset cache for next test using store layer
 	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_fivetran", testUser.ID)
 	require.NoError(t, err)
-	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
-	require.NoError(t, err)
 
 	t.Run("User_In_LDAP_Should_Not_Be_Offboarded", func(t *testing.T) {
 		// Setup: LDAP returns user data (user found)
+		// Note: getUserListFromCache returns emails, so LDAP is called with email using GetUserLDAPDataByEmail
 		ldapData := map[string]interface{}{
 			"mail": testUser.Email,
 		}
 		mockLDAPClient.EXPECT().
-			GetUserLDAPData(gomock.Any(), testUser.UserName).
+			GetUserLDAPDataByEmail(gomock.Any(), testUser.Email).
 			Return(ldapData, nil).
 			Times(1)
 
@@ -128,11 +119,6 @@ func TestUserOffboardingJob(t *testing.T) {
 		exists, err := dataStore.User.Exists(ctx, testUser.Email)
 		require.NoError(t, err)
 		assert.True(t, exists, "User should remain in cache")
-
-		// Verify user is still in user_list using store layer
-		updatedUserList, err := dataStore.Meta.GetUserList(ctx)
-		require.NoError(t, err)
-		assert.Contains(t, updatedUserList, testUser.UserName, "User should remain in user list")
 	})
 }
 
@@ -165,9 +151,6 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_fivetran", testUser.ID)
 	require.NoError(t, err)
 
-	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
-	require.NoError(t, err)
-
 	backendClients := map[string]clients.Client{
 		"fivetran_fivetran": mockBackendClient,
 	}
@@ -182,8 +165,9 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 
 	t.Run("Backend_Delete_Error_Should_Be_Logged", func(t *testing.T) {
 		// LDAP says user doesn't exist
+		// Note: getUserListFromCache returns emails, so LDAP is called with email using GetUserLDAPDataByEmail
 		mockLDAPClient.EXPECT().
-			GetUserLDAPData(gomock.Any(), testUser.UserName).
+			GetUserLDAPDataByEmail(gomock.Any(), testUser.Email).
 			Return(nil, ldap.ErrNoUserFound).
 			Times(1)
 
@@ -219,10 +203,6 @@ func TestUserOffboardingJobEmptyUserList(t *testing.T) {
 	dataStore := store.New(inMemCache)
 
 	ctx := context.Background()
-
-	// Setup empty user list using store layer
-	err = dataStore.Meta.SetUserList(ctx, []string{})
-	require.NoError(t, err)
 
 	backendClients := map[string]clients.Client{}
 
@@ -271,9 +251,6 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 	err = dataStore.User.SetBackend(ctx, testUser.Email, "snowflake_prod", "snowflake_id_456")
 	require.NoError(t, err)
 
-	err = dataStore.Meta.SetUserList(ctx, []string{testUser.UserName})
-	require.NoError(t, err)
-
 	backendClients := map[string]clients.Client{
 		"fivetran_prod":  mockFivetranClient,
 		"snowflake_prod": mockSnowflakeClient,
@@ -288,8 +265,9 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 	)
 
 	// User not in LDAP
+	// Note: getUserListFromCache returns emails, so LDAP is called with email using GetUserLDAPDataByEmail
 	mockLDAPClient.EXPECT().
-		GetUserLDAPData(gomock.Any(), testUser.UserName).
+		GetUserLDAPDataByEmail(gomock.Any(), testUser.Email).
 		Return(nil, ldap.ErrNoUserFound).
 		Times(1)
 
