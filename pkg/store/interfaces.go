@@ -108,16 +108,6 @@ type GroupStoreInterface interface {
 	BackendExists(ctx context.Context, groupName, backendName, backendType string) (bool, error)
 }
 
-// MetaStoreInterface defines operations for metadata cache operations
-type MetaStoreInterface interface {
-	// GetUserList retrieves the list of user IDs from cache
-	// Returns empty slice if not found
-	GetUserList(ctx context.Context) ([]string, error)
-
-	// SetUserList stores the list of user IDs in cache
-	SetUserList(ctx context.Context, users []string) error
-}
-
 // UserGroupsStoreInterface defines operations for user-to-groups reverse index
 // Key format: "user:groups:<email>"
 type UserGroupsStoreInterface interface {
@@ -154,9 +144,6 @@ type StoreInterface interface {
 
 	// GetGroupStore returns the group store operations (for reconciliation with original names)
 	GetGroupStore() GroupStoreInterface
-
-	// GetMetaStore returns the metadata store operations
-	GetMetaStore() MetaStoreInterface
 
 	// GetUserGroupsStore returns the user groups store operations
 	GetUserGroupsStore() UserGroupsStoreInterface

@@ -161,7 +161,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.log.Info("All backends succeeded, updating cache indexes")
 		if err := r.updateCacheIndexes(ctx, groupCR.Spec.GroupName, ldapResult); err != nil {
 			r.log.WithError(err).Error("error updating cache indexes")
-			// Continue to update status - cache index errors are not fatal
+			// Continue to update status - cache index errors are logged but not fatal
 		}
 	} else {
 		r.log.Warn("Backend errors detected, skipping cache index updates (all-or-nothing)")
@@ -187,14 +187,8 @@ func (r *GroupReconciler) fetchLDAPData(
 	// Initialize LDAP user data map
 	r.allLdapUserData = make(map[string]*structs.LDAPUser, len(uniqueMembers))
 
-	// Get current user list from cache
-	userList := r.getUserListFromCache(ctx)
-
 	// Use a map to track unique UIDs to avoid duplicates
 	uniqueUIDs := make(map[string]bool)
-	for _, uid := range userList {
-		uniqueUIDs[uid] = true
-	}
 
 	// Track current valid members (users with valid LDAP data)
 	currentMembers := make([]string, 0, len(uniqueMembers))
@@ -244,11 +238,14 @@ func (r *GroupReconciler) fetchLDAPData(
 // updateCacheIndexes updates all cache indexes after successful backend reconciliation
 // This includes: user:groups reverse index, group members, and user list
 // NOTE: This function assumes CacheMutex is already held by the caller
+// Returns an error if critical cache updates fail
 func (r *GroupReconciler) updateCacheIndexes(
 	ctx context.Context,
 	groupName string,
 	ldapResult *LDAPFetchResult,
 ) error {
+	var errors []error
+
 	// Get previous members of this group (for removal detection)
 	previousMembers, err := r.Store.Group.GetMembers(ctx, groupName)
 	if err != nil {
@@ -270,7 +267,7 @@ func (r *GroupReconciler) updateCacheIndexes(
 	for _, email := range ldapResult.CurrentMembers {
 		if err := r.Store.UserGroups.AddGroup(ctx, email, groupName); err != nil {
 			r.log.WithError(err).WithField("user", email).Error("error updating user groups index")
-			// Continue processing - this is not a fatal error
+			errors = append(errors, fmt.Errorf("failed to add group %s to user %s: %w", groupName, email, err))
 		}
 	}
 
@@ -281,40 +278,20 @@ func (r *GroupReconciler) updateCacheIndexes(
 			r.log.WithField("user", email).WithField("group", groupName).Info("removing group from user's group list")
 			if err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName); err != nil {
 				r.log.WithError(err).WithField("user", email).Error("error removing group from user's groups index")
-				// Continue processing - this is not a fatal error
+				errors = append(errors, fmt.Errorf("failed to remove group %s from user %s: %w", groupName, email, err))
 			}
 		}
 	}
 
-	// Update group members in consolidated store
+	// Update group members in consolidated store - this is critical
 	if err := r.Store.Group.SetMembers(ctx, groupName, ldapResult.CurrentMembers); err != nil {
 		r.log.WithError(err).Error("error updating group members")
-		// Continue processing - this is not a fatal error
+		return fmt.Errorf("failed to update group members for %s: %w", groupName, err)
 	}
 
-	// Update cache with new user list
-	return r.updateUserListInCache(ctx, ldapResult.ActiveUserList)
-}
-
-// getUserListFromCache retrieves the user list from cache
-// NOTE: Caller must hold CacheMutex lock
-func (r *GroupReconciler) getUserListFromCache(ctx context.Context) []string {
-	userList, err := r.Store.Meta.GetUserList(ctx)
-	if err != nil {
-		r.log.WithError(err).Warn("user list not found in cache, will start with empty list")
-		return []string{}
-	}
-
-	r.log.WithField("user_list_count", len(userList)).Info("user list retrieved from cache successfully")
-	return userList
-}
-
-// updateUserListInCache stores the user list in cache
-// NOTE: Caller must hold CacheMutex lock
-func (r *GroupReconciler) updateUserListInCache(ctx context.Context, userList []string) error {
-	if err := r.Store.Meta.SetUserList(ctx, userList); err != nil {
-		r.log.WithError(err).Error("error updating user list in cache")
-		return err
+	// Return combined errors if any user group index updates failed
+	if len(errors) > 0 {
+		return fmt.Errorf("cache index update completed with %d errors: %v", len(errors), errors)
 	}
 
 	return nil

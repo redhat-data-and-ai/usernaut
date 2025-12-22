@@ -28,7 +28,6 @@ func TestNew(t *testing.T) {
 	assert.NotNil(t, store.User)
 	assert.NotNil(t, store.Team)
 	assert.NotNil(t, store.Group)
-	assert.NotNil(t, store.Meta)
 	assert.NotNil(t, store.UserGroups)
 }
 
@@ -54,15 +53,12 @@ func TestStore_InterfaceCompliance(t *testing.T) {
 	// Verify Group implements GroupStoreInterface
 	var _ GroupStoreInterface = store.Group
 
-	// Verify Meta implements MetaStoreInterface
-	var _ MetaStoreInterface = store.Meta
-
 	// Verify UserGroups implements UserGroupsStoreInterface
 	var _ UserGroupsStoreInterface = store.UserGroups
 }
 
 func TestStore_IndependentOperations(t *testing.T) {
-	// Test that User, Group, Meta, and UserGroups operations don't interfere with each other
+	// Test that User, Group, and UserGroups operations don't interfere with each other
 	c, err := inmemory.NewCache(&inmemory.Config{
 		DefaultExpiration: 300,
 		CleanupInterval:   600,
@@ -80,10 +76,6 @@ func TestStore_IndependentOperations(t *testing.T) {
 	err = store.Group.SetBackend(ctx, "data-team", "fivetran", "fivetran", "team_456")
 	require.NoError(t, err)
 
-	// Create meta
-	err = store.Meta.SetUserList(ctx, []string{"user1", "user2"})
-	require.NoError(t, err)
-
 	// Create user groups
 	err = store.UserGroups.AddGroup(ctx, "user@example.com", "data-team")
 	require.NoError(t, err)
@@ -96,10 +88,6 @@ func TestStore_IndependentOperations(t *testing.T) {
 	groupBackends, err := store.Group.GetBackends(ctx, "data-team")
 	require.NoError(t, err)
 	assert.Equal(t, "team_456", groupBackends["fivetran_fivetran"].ID)
-
-	userList, err := store.Meta.GetUserList(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"user1", "user2"}, userList)
 
 	userGroups, err := store.UserGroups.GetGroups(ctx, "user@example.com")
 	require.NoError(t, err)

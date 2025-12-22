@@ -11,7 +11,6 @@ type Store struct {
 	User       UserStoreInterface
 	Team       TeamStoreInterface  // For preload with transformed team names
 	Group      GroupStoreInterface // For reconciliation with original group names
-	Meta       MetaStoreInterface
 	UserGroups UserGroupsStoreInterface
 }
 
@@ -21,7 +20,6 @@ func New(cache cache.Cache) *Store {
 		User:       newUserStore(cache),
 		Team:       newTeamStore(cache),
 		Group:      newGroupStore(cache),
-		Meta:       newMetaStore(cache),
 		UserGroups: newUserGroupsStore(cache),
 	}
 }
@@ -31,6 +29,5 @@ var (
 	_ UserStoreInterface       = (*UserStore)(nil)
 	_ TeamStoreInterface       = (*TeamStore)(nil)
 	_ GroupStoreInterface      = (*GroupStore)(nil)
-	_ MetaStoreInterface       = (*MetaStore)(nil)
 	_ UserGroupsStoreInterface = (*UserGroupsStore)(nil)
 )
