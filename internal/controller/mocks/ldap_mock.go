@@ -64,6 +64,20 @@ func (mr *MockLDAPConnClientMockRecorder) Search(arg0 interface{}) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Search", reflect.TypeOf((*MockLDAPConnClient)(nil).Search), arg0)
 }
 
+// UnauthenticatedBind mocks base method.
+func (m *MockLDAPConnClient) UnauthenticatedBind(username string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UnauthenticatedBind", username)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UnauthenticatedBind indicates an expected call of UnauthenticatedBind.
+func (mr *MockLDAPConnClientMockRecorder) UnauthenticatedBind(username interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnauthenticatedBind", reflect.TypeOf((*MockLDAPConnClient)(nil).UnauthenticatedBind), username)
+}
+
 // MockLDAPClient is a mock of LDAPClient interface.
 type MockLDAPClient struct {
 	ctrl     *gomock.Controller
@@ -100,4 +114,19 @@ func (m *MockLDAPClient) GetUserLDAPData(ctx context.Context, userID string) (ma
 func (mr *MockLDAPClientMockRecorder) GetUserLDAPData(ctx, userID interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserLDAPData", reflect.TypeOf((*MockLDAPClient)(nil).GetUserLDAPData), ctx, userID)
+}
+
+// GetUserLDAPDataByEmail mocks base method.
+func (m *MockLDAPClient) GetUserLDAPDataByEmail(ctx context.Context, email string) (map[string]interface{}, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUserLDAPDataByEmail", ctx, email)
+	ret0, _ := ret[0].(map[string]interface{})
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetUserLDAPDataByEmail indicates an expected call of GetUserLDAPDataByEmail.
+func (mr *MockLDAPClientMockRecorder) GetUserLDAPDataByEmail(ctx, email interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserLDAPDataByEmail", reflect.TypeOf((*MockLDAPClient)(nil).GetUserLDAPDataByEmail), ctx, email)
 }
