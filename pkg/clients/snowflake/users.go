@@ -186,6 +186,6 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 		return fmt.Errorf("failed to delete user, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
 
-	log.Info("user deleted successfully")
+	log.Info("user deleted successfully", "userID", userID)
 	return nil
 }
