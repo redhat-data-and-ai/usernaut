@@ -1,0 +1,33 @@
+---
+description: Error handling and propagation patterns in Go
+globs: ["**/*.go"]
+alwaysApply: false
+---
+# Cursor Rule: Go Error Handling
+
+# Rule ID: GO-ERR-001
+# Description: Explicit Error Handling
+# Recommendation:
+# Handle errors explicitly where they occur. Avoid ignoring errors returned by function calls (`_ = someFunc()`). Check `if err != nil` and take appropriate action (return, log, wrap, etc.).
+
+# Rule ID: GO-ERR-002
+# Description: Error Wrapping
+# Recommendation:
+# Use error wrapping (standard library `fmt.Errorf("... %w", err)` since Go 1.13, or `github.com/pkg/errors`) to add context to errors as they propagate up the call stack without losing the original error information. This aids debugging.
+# Example: `return fmt.Errorf("failed to create user %s: %w", userID, err)`
+
+# Rule ID: GO-ERR-003
+# Description: Sentinel Errors vs. Error Types
+# Recommendation:
+# - Use sentinel errors (e.g., `var ErrNotFound = errors.New("not found")`) for simple, fixed error conditions checked using `errors.Is()`.
+# - Define custom error types (`type MyError struct { ... }`) when errors need to carry additional contextual data. Check for these using `errors.As()`.
+
+# Rule ID: GO-ERR-004
+# Description: Error Mapping at Boundaries
+# Recommendation:
+# At application boundaries (e.g., API handlers), map internal application errors to appropriate user-facing representations (e.g., specific gRPC status codes, HTTP status codes, standardized error responses). Avoid leaking internal error details.
+
+# Rule ID: GO-ERR-005
+# Description: Log Errors Appropriately
+# Recommendation:
+# Log errors with sufficient context (request ID, relevant parameters) at the point where they are handled (often near the application boundary or where recovery occurs), typically at the ERROR level. Avoid logging the same error multiple times as it propagates. Include stack traces for unexpected errors.
