@@ -290,13 +290,6 @@ func (uoj *UserOffboardingJob) offboardUser(ctx context.Context, userKey string)
 		return fmt.Errorf("failed to remove user %s from cache: %v", userKey, err)
 	}
 
-	// Remove user from the user_list cache
-	err = uoj.removeUserFromUserList(ctx, userKey)
-	if err != nil {
-		logger.Error(err, "Failed to remove user from user list cache", "userID", userKey)
-		// Don't fail the operation, just log the error since the user is already offboarded
-	}
-
 	logger.Info("Successfully offboarded user", "userID", userKey)
 	return nil
 }
@@ -320,9 +313,16 @@ func (uoj *UserOffboardingJob) getUserListFromCache(ctx context.Context) ([]stri
 	uoj.cacheMutex.RLock()
 	defer uoj.cacheMutex.RUnlock()
 
-	userKeys, err := uoj.store.Meta.GetUserList(ctx)
+	userMap, err := uoj.store.User.GetByPattern(ctx, "*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user list from cache: %w", err)
+	}
+
+	userKeys := make([]string, 0, len(userMap))
+	for user := range userMap {
+		if !strings.HasPrefix(user, "groups:") {
+			userKeys = append(userKeys, user)
+		}
 	}
 
 	return userKeys, nil
@@ -375,13 +375,15 @@ func (uoj *UserOffboardingJob) getUserDataFromCache(
 //
 // Parameters:
 //   - ctx: Context for cancellation and logging
-//   - userID: The user identifier to check in LDAP
+//   - userEmail: The user identifier to check in LDAP
 //
 // Returns:
 //   - bool: true if user is active in LDAP, false if inactive
 //   - error: Any LDAP query error (excluding ErrNoUserFound which indicates inactivity)
-func (uoj *UserOffboardingJob) isUserActiveInLDAP(ctx context.Context, userID string) (bool, error) {
-	_, err := uoj.ldapClient.GetUserLDAPData(ctx, userID)
+func (uoj *UserOffboardingJob) isUserActiveInLDAP(ctx context.Context, userEmail string) (bool, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Checking if user is active in LDAP", "userEmail", userEmail)
+	userData, err := uoj.ldapClient.GetUserLDAPDataByEmail(ctx, userEmail)
 	if err != nil {
 		if err == ldap.ErrNoUserFound {
 			// User not found in LDAP means they're inactive
@@ -395,7 +397,13 @@ func (uoj *UserOffboardingJob) isUserActiveInLDAP(ctx context.Context, userID st
 		return false, err
 	}
 
-	// User found in LDAP means they're active
+	// Check if userData is empty - treat as inactive user
+	if len(userData) == 0 {
+		logger.Info("User data is empty, treating as inactive", "userEmail", userEmail)
+		return false, nil
+	}
+
+	// User found in LDAP with valid data means they're active
 	return true, nil
 }
 
@@ -472,50 +480,6 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 	if len(errors) > 0 {
 		return fmt.Errorf("failed to remove user from some backends: %v", errors)
 	}
-
-	return nil
-}
-
-// removeUserFromUserList removes the specified user from the user_list cache.
-//
-// This method retrieves the current user list from cache, removes the specified user,
-// and updates the cache with the modified list. This ensures that offboarded users
-// are not processed again in subsequent offboarding job runs.
-//
-// Parameters:
-//   - ctx: Context for cancellation and logging
-//   - userID: The ID of the user to remove from the list
-//
-// Returns:
-//   - error: Any error encountered during the removal operation
-func (uoj *UserOffboardingJob) removeUserFromUserList(ctx context.Context, userID string) error {
-	logger := log.FromContext(ctx)
-	logger.Info("Removing user from user list cache", "userID", userID)
-
-	// Note: This method assumes the caller has already acquired the necessary mutex lock
-	// Get current user list
-	userList, err := uoj.store.Meta.GetUserList(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get user list from cache: %w", err)
-	}
-
-	updatedUserList := make([]string, 0, len(userList))
-	for _, user := range userList {
-		if user != userID {
-			updatedUserList = append(updatedUserList, user)
-		}
-	}
-
-	// Update the cache with the modified list
-	err = uoj.store.Meta.SetUserList(ctx, updatedUserList)
-	if err != nil {
-		return fmt.Errorf("failed to update user list in cache: %w", err)
-	}
-
-	logger.Info("Successfully removed user from user list cache",
-		"userID", userID,
-		"previousCount", len(userList),
-		"newCount", len(updatedUserList))
 
 	return nil
 }
