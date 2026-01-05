@@ -20,7 +20,13 @@ spec:
         - dataverse/datavers-config/dataproduct-config
         - dataverse/astro/astro-toolkit
         - dataverse/platform-tooling/fivetran_terraform
+    - backend: atlan
+      name: atlan
+      property: persona
+      value:
+        - NonProd
   backends:
   - name: fivetran
     type: fivetran
-  
+  - name: atlan
+    type: atlan
