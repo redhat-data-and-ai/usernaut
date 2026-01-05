@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9/internal"
 	"github.com/redis/go-redis/v9/internal/maintnotifications/logs"
+	"github.com/redis/go-redis/v9/internal/util"
 )
 
 // Mode represents the maintenance notifications mode
@@ -260,10 +261,10 @@ func (c *Config) ApplyDefaultsWithPoolConfig(poolSize int, maxActiveConns int) *
 	// Default: max(20x workers, PoolSize), capped by maxActiveConns or 5x pool size
 	workerBasedSize := result.MaxWorkers * 20
 	poolBasedSize := poolSize
-	result.HandoffQueueSize = max(workerBasedSize, poolBasedSize)
+	result.HandoffQueueSize = util.Max(workerBasedSize, poolBasedSize)
 	if c.HandoffQueueSize > 0 {
 		// When explicitly set: enforce minimum of 200
-		result.HandoffQueueSize = max(200, c.HandoffQueueSize)
+		result.HandoffQueueSize = util.Max(200, c.HandoffQueueSize)
 	}
 
 	// Cap queue size: use maxActiveConns+1 if set, otherwise 5x pool size
@@ -277,7 +278,7 @@ func (c *Config) ApplyDefaultsWithPoolConfig(poolSize int, maxActiveConns int) *
 	} else {
 		queueCap = poolSize * 5
 	}
-	result.HandoffQueueSize = min(result.HandoffQueueSize, queueCap)
+	result.HandoffQueueSize = util.Min(result.HandoffQueueSize, queueCap)
 
 	// Ensure minimum queue size of 2 (fallback for very small pools)
 	if result.HandoffQueueSize < 2 {
@@ -352,10 +353,10 @@ func (c *Config) applyWorkerDefaults(poolSize int) {
 
 	// When not set: min(poolSize/2, max(10, poolSize/3)) - balanced scaling approach
 	originalMaxWorkers := c.MaxWorkers
-	c.MaxWorkers = min(poolSize/2, max(10, poolSize/3))
+	c.MaxWorkers = util.Min(poolSize/2, util.Max(10, poolSize/3))
 	if originalMaxWorkers != 0 {
 		// When explicitly set: max(poolSize/2, set_value) - ensure at least poolSize/2 workers
-		c.MaxWorkers = max(poolSize/2, originalMaxWorkers)
+		c.MaxWorkers = util.Max(poolSize/2, originalMaxWorkers)
 	}
 
 	// Ensure minimum of 1 worker (fallback for very small pools)

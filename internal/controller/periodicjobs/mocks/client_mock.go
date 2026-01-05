@@ -184,17 +184,17 @@ func (mr *MockClientMockRecorder) FetchUserDetails(ctx, userID interface{}) *gom
 }
 
 // ReconcileGroupParams mocks base method.
-func (m *MockClient) ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error {
+func (m *MockClient) ReconcileGroupParams(ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReconcileGroupParams", ctx, teamID, groupParams)
+	ret := m.ctrl.Call(m, "ReconcileGroupParams", ctx, teamID, teamName, groupParams)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ReconcileGroupParams indicates an expected call of ReconcileGroupParams.
-func (mr *MockClientMockRecorder) ReconcileGroupParams(ctx, teamID, groupParams interface{}) *gomock.Call {
+func (mr *MockClientMockRecorder) ReconcileGroupParams(ctx, teamID, teamName, groupParams interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconcileGroupParams", reflect.TypeOf((*MockClient)(nil).ReconcileGroupParams), ctx, teamID, groupParams)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconcileGroupParams", reflect.TypeOf((*MockClient)(nil).ReconcileGroupParams), ctx, teamID, teamName, groupParams)
 }
 
 // RemoveUserFromTeam mocks base method.

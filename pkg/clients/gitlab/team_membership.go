@@ -111,7 +111,7 @@ func (g *GitlabClient) RemoveUserFromTeam(ctx context.Context, teamID string, us
 	return nil
 }
 
-func (g *GitlabClient) ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error {
+func (g *GitlabClient) ReconcileGroupParams(ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service":     "gitlab",
 		"teamID":      teamID,

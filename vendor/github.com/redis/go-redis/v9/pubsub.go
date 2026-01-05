@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9/internal"
-	"github.com/redis/go-redis/v9/internal/otel"
 	"github.com/redis/go-redis/v9/internal/pool"
 	"github.com/redis/go-redis/v9/internal/proto"
 	"github.com/redis/go-redis/v9/push"
@@ -404,7 +403,7 @@ func (p *Pong) String() string {
 	return "Pong"
 }
 
-func (c *PubSub) newMessage(ctx context.Context, cn *pool.Conn, reply interface{}) (interface{}, error) {
+func (c *PubSub) newMessage(reply interface{}) (interface{}, error) {
 	switch reply := reply.(type) {
 	case string:
 		return &Pong{
@@ -421,42 +420,30 @@ func (c *PubSub) newMessage(ctx context.Context, cn *pool.Conn, reply interface{
 				Count:   int(reply[2].(int64)),
 			}, nil
 		case "message", "smessage":
-			channel := reply[1].(string)
-			sharded := kind == "smessage"
 			switch payload := reply[2].(type) {
 			case string:
-				msg := &Message{
-					Channel: channel,
+				return &Message{
+					Channel: reply[1].(string),
 					Payload: payload,
-				}
-				// Record PubSub message received
-				otel.RecordPubSubMessage(ctx, cn, "received", channel, sharded)
-				return msg, nil
+				}, nil
 			case []interface{}:
 				ss := make([]string, len(payload))
 				for i, s := range payload {
 					ss[i] = s.(string)
 				}
-				msg := &Message{
-					Channel:      channel,
+				return &Message{
+					Channel:      reply[1].(string),
 					PayloadSlice: ss,
-				}
-				// Record PubSub message received
-				otel.RecordPubSubMessage(ctx, cn, "received", channel, sharded)
-				return msg, nil
+				}, nil
 			default:
 				return nil, fmt.Errorf("redis: unsupported pubsub message payload: %T", payload)
 			}
 		case "pmessage":
-			channel := reply[2].(string)
-			msg := &Message{
+			return &Message{
 				Pattern: reply[1].(string),
-				Channel: channel,
+				Channel: reply[2].(string),
 				Payload: reply[3].(string),
-			}
-			// Record PubSub message received (pattern message, not sharded)
-			otel.RecordPubSubMessage(ctx, cn, "received", channel, false)
-			return msg, nil
+			}, nil
 		case "pong":
 			return &Pong{
 				Payload: reply[1].(string),
@@ -498,7 +485,7 @@ func (c *PubSub) ReceiveTimeout(ctx context.Context, timeout time.Duration) (int
 		return nil, err
 	}
 
-	return c.newMessage(ctx, cn, c.cmd.Val())
+	return c.newMessage(c.cmd.Val())
 }
 
 // Receive returns a message as a Subscription, Message, Pong or error.
@@ -747,7 +734,7 @@ func (c *channel) initMsgChan() {
 					}
 				case <-timer.C:
 					internal.Logger.Printf(
-						ctx, "redis: %v channel is full for %s (message is dropped)",
+						ctx, "redis: %s channel is full for %s (message is dropped)",
 						c, c.chanSendTimeout)
 				}
 			default:
@@ -801,7 +788,7 @@ func (c *channel) initAllChan() {
 					}
 				case <-timer.C:
 					internal.Logger.Printf(
-						ctx, "redis: %v channel is full for %s (message is dropped)",
+						ctx, "redis: %s channel is full for %s (message is dropped)",
 						c, c.chanSendTimeout)
 				}
 			default:

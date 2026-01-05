@@ -156,16 +156,18 @@ Capped by: min(MaxActiveConns + 1, 5 × PoolSize)
 
 ### Client Support
 #### Currently Supported
-- **Standalone Client** (`redis.NewClient`) - Full support for MOVING, MIGRATING, MIGRATED, FAILING_OVER, FAILED_OVER notifications
-- **Cluster Client** (`redis.NewClusterClient`) - Support for SMIGRATING and SMIGRATED notifications for hitless slot migrations
+- **Standalone Client** (`redis.NewClient`)
 
+#### Planned Support
+- **Cluster Client** (not yet supported)
+ 
 #### Will Not Support
 - **Failover Client** (no planned support)
 - **Ring Client** (no planned support)
 
 ## Migration Guide
 
-### Enabling Maintenance Notifications (Standalone Client)
+### Enabling Maintenance Notifications
 
 **Before:**
 ```go
@@ -186,26 +188,6 @@ client := redis.NewClient(&redis.Options{
 })
 ```
 
-### Enabling Hitless Upgrades (Cluster Client)
-
-For Redis Cluster with hitless slot migration support:
-
-```go
-client := redis.NewClusterClient(&redis.ClusterOptions{
-    Addrs:    []string{"localhost:7000", "localhost:7001", "localhost:7002"},
-    Protocol: 3, // RESP3 required for push notifications
-    MaintNotificationsConfig: &maintnotifications.Config{
-        Mode:           maintnotifications.ModeAuto,
-        RelaxedTimeout: 10 * time.Second, // Extended timeout during slot migrations
-    },
-})
-```
-
-The cluster client automatically handles:
-- **SMIGRATING**: Relaxes timeouts when slots are being migrated
-- **SMIGRATED**: Triggers lazy cluster state reload when migration completes
-- **SeqID Deduplication**: Same notification from multiple nodes triggers only one reload
-
 ### Adding Monitoring
 
 ```go
@@ -224,12 +206,13 @@ if manager != nil {
 
 ## Known Limitations
 
-1. **RESP3 Required**: Push notifications require RESP3 protocol
-2. **Server Support**: Requires Redis Enterprise or compatible Redis with maintenance notifications
-3. **Single Connection Commands**: Some commands (MULTI/EXEC, WATCH) may need special handling
-4. **No Failover/Ring Client Support**: Failover and Ring clients are not supported and there are no plans to add support
+1. **Standalone Only**: Currently only supported in standalone Redis clients
+2. **RESP3 Required**: Push notifications require RESP3 protocol
+3. **Server Support**: Requires Redis Enterprise or compatible Redis with maintenance notifications
+4. **Single Connection Commands**: Some commands (MULTI/EXEC, WATCH) may need special handling
+5. **No Failover/Ring Client Support**: Failover and Ring clients are not supported and there are no plans to add support
 
 ## Future Enhancements
 
+- Cluster client support
 - Enhanced metrics and observability
-- TTL-based cleanup for SeqID deduplication map
