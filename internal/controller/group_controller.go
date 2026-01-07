@@ -47,12 +47,14 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
+	"github.com/redhat-data-and-ai/usernaut/pkg/telemetry"
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
 const (
 	groupFinalizer = "operator.dataverse.redhat.com/finalizer"
+	controllerName = "group"
 )
 
 // GroupReconciler reconciles a Group object
@@ -78,7 +80,18 @@ type GroupReconciler struct {
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/finalizers,verbs=update
 
-func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
+	// reconciliation metrics recording using opentelemetry
+	reconciliationMetrics := telemetry.GetReconciliationMetrics()
+	if reconciliationMetrics != nil {
+		reconciliationMetrics.RecordReconciliationStart(ctx, controllerName)
+		defer func() {
+			if err != nil {
+				reconciliationMetrics.RecordReconciliationError(ctx, controllerName)
+			}
+		}()
+	}
+
 	ctx = logger.WithRequestId(ctx, controller.ReconcileIDFromContext(ctx))
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
 		"request": req.NamespacedName.String(),

@@ -109,3 +109,11 @@ apiServer:
 
   cors:
     allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
+
+telemetry:
+  enabled: false
+  insecure: false
+  # note: otlp_endpoint must be configured in the env-specific yaml (e.g local.yaml)
+
+
+
