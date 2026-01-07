@@ -35,7 +35,8 @@ type AppConfig struct {
 		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
 		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
 	} `yaml:"httpClient"`
-	APIServer  APIServerConfig               `yaml:"apiServer"`
+	APIServer  APIServerConfig               `yaml:"apiServer" mapstructure:"apiServer"`
+	Telemetry  TelemetryConfig               `yaml:"telemetry" mapstructure:"telemetry"`
 	BackendMap map[string]map[string]Backend `yaml:"-"`
 }
 

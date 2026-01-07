@@ -48,6 +48,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
+	"github.com/redhat-data-and-ai/usernaut/pkg/telemetry"
 	"github.com/sirupsen/logrus"
 
 	// +kubebuilder:scaffold:imports
@@ -176,6 +177,47 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "unable to create config")
 		os.Exit(1)
+	}
+
+	// initialize telemetry
+	ctx := context.Background()
+	telemetryConfig := telemetry.Config{
+		ServiceName:    appConf.App.Name,
+		ServiceVersion: appConf.App.Version,
+		OTLPEndpoint:   appConf.Telemetry.OTLPEndpoint,
+		Insecure:       appConf.Telemetry.Insecure,
+		Enabled:        appConf.Telemetry.Enabled,
+	}
+
+	setupLog.Info("telemetry configuration", "enabled", telemetryConfig.Enabled, "endpoint", telemetryConfig.OTLPEndpoint)
+
+	// Validate telemetry configuration
+	if telemetryConfig.Enabled && telemetryConfig.OTLPEndpoint == "" {
+		setupLog.Error(fmt.Errorf("telemetry enabled but no endpoint configured"),
+			"Please set telemetry.otlp_endpoint in appconfig/local.yaml or via environment variable")
+		os.Exit(1)
+	}
+
+	if err := telemetry.Init(ctx, telemetryConfig); err != nil {
+		setupLog.Error(err, "failed to initialize telemetry")
+		// we need to continue without telemetry so that reconciliation doesn't stop
+	} else {
+		if telemetryConfig.Enabled {
+			setupLog.Info("telemetry initialized successfully")
+			meter := telemetry.GetMeter("usernaut")
+			if err := telemetry.InitReconciliationMetrics(meter); err != nil {
+				setupLog.Error(err, "failed to initialize reconciliation metrics")
+			} else {
+				setupLog.Info("reconciliation metrics initialized successfully")
+			}
+			defer func() {
+				if err := telemetry.Shutdown(ctx); err != nil {
+					setupLog.Error(err, "failed to shutdown telemetry")
+				}
+			}()
+		} else {
+			setupLog.Info("telemetry is disabled, skipping initialization")
+		}
 	}
 
 	ldapConn, err := ldap.InitLdap(appConf.LDAP)
