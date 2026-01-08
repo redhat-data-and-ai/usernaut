@@ -12,7 +12,7 @@ require (
 	github.com/golang/mock v1.6.0
 	github.com/onsi/ginkgo/v2 v2.27.4
 	github.com/onsi/gomega v1.38.3
-	github.com/opentracing-contrib/go-stdlib v1.1.0
+	github.com/opentracing-contrib/go-stdlib v1.1.1
 	github.com/opentracing-contrib/goredis v0.1.0
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
