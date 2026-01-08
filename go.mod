@@ -10,7 +10,7 @@ require (
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/gojek/heimdall/v7 v7.0.3
 	github.com/golang/mock v1.6.0
-	github.com/onsi/ginkgo/v2 v2.27.3
+	github.com/onsi/ginkgo/v2 v2.27.4
 	github.com/onsi/gomega v1.38.3
 	github.com/opentracing-contrib/go-stdlib v1.1.0
 	github.com/opentracing-contrib/goredis v0.1.0
