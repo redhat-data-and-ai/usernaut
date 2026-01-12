@@ -45,6 +45,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/snowflake"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
@@ -262,6 +263,13 @@ func main() {
 	}
 }
 
+// snowflakeAsyncState holds state needed for async continuation after preload
+type snowflakeAsyncState struct {
+	client     *snowflake.SnowflakeClient
+	lastUser   string
+	backendKey string
+}
+
 // Preload the cache with all the users and teams from the backends
 // This is done to avoid hitting the backend for every request
 // and to improve the performance of the application
@@ -274,6 +282,10 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 
 	// Use errgroup for concurrent processing with proper error handling
 	g, ctx := errgroup.WithContext(ctx)
+
+	// State for Snowflake async continuation (protected by mutex for goroutine safety)
+	var snowflakeState *snowflakeAsyncState
+	var snowflakeStateMutex sync.Mutex
 
 	// Process each backend concurrently
 	for _, backendObj := range appConfig.Backends {
@@ -310,25 +322,59 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 				return err
 			}
 
-			// Fetch all the users and store them in the cache
-			users, _, err := backendClient.FetchAllUsers(ctx)
-			if err != nil {
-				log.WithError(err).Error("failed to fetch users from backend")
-				return err
-			}
-
 			backendKey := backend.Name + "_" + backend.Type
-			for _, user := range users {
-				// Lock for read-modify-write operation
-				// Multiple backends might update the same user concurrently
-				cacheMutex.Lock()
-				err := dataStore.User.SetBackend(ctx, user.GetEmail(), backendKey, user.ID)
-				cacheMutex.Unlock()
 
+			// Handle Snowflake specially to capture last user for async continuation
+			if backend.Type == "snowflake" {
+				sfClient := backendClient.(*snowflake.SnowflakeClient)
+				users, _, lastUser, err := sfClient.FetchAllUsersWithCursor(ctx)
 				if err != nil {
-					log.WithError(err).Error("failed to store user in cache")
+					log.WithError(err).Error("failed to fetch users from Snowflake")
 					return err
 				}
+
+				for _, user := range users {
+					cacheMutex.Lock()
+					err := dataStore.User.SetBackend(ctx, user.GetEmail(), backendKey, user.ID)
+					cacheMutex.Unlock()
+					if err != nil {
+						log.WithError(err).Error("failed to store user in cache")
+						return err
+					}
+				}
+
+				// Save state for async continuation
+				snowflakeStateMutex.Lock()
+				snowflakeState = &snowflakeAsyncState{
+					client:     sfClient,
+					lastUser:   lastUser,
+					backendKey: backendKey,
+				}
+				snowflakeStateMutex.Unlock()
+
+				log.WithFields(logrus.Fields{
+					"users":     len(users),
+					"last_user": lastUser,
+				}).Info("Snowflake preload complete, will continue async")
+			} else {
+				// Other backends: existing flow
+				users, _, err := backendClient.FetchAllUsers(ctx)
+				if err != nil {
+					log.WithError(err).Error("failed to fetch users from backend")
+					return err
+				}
+
+				for _, user := range users {
+					cacheMutex.Lock()
+					err := dataStore.User.SetBackend(ctx, user.GetEmail(), backendKey, user.ID)
+					cacheMutex.Unlock()
+					if err != nil {
+						log.WithError(err).Error("failed to store user in cache")
+						return err
+					}
+				}
+
+				log.WithField("users", len(users)).Info("preloaded users from backend")
 			}
 
 			// Fetch all the teams and store them in the TeamStore cache
@@ -342,22 +388,16 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 			}
 
 			for _, team := range teams {
-				// Lock for read-modify-write operation
-				// Multiple backends might update the same team concurrently
 				cacheMutex.Lock()
 				err := dataStore.Team.SetBackend(ctx, team.GetName(), backendKey, team.ID)
 				cacheMutex.Unlock()
-
 				if err != nil {
 					log.WithError(err).Error("failed to store team in cache")
 					return err
 				}
 			}
 
-			log.WithFields(logrus.Fields{
-				"users": len(users),
-				"teams": len(teams),
-			}).Info("successfully preloaded cache from backend")
+			log.WithField("teams", len(teams)).Info("successfully preloaded teams from backend")
 
 			return nil
 		})
@@ -369,5 +409,38 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 	}
 
 	setupLog.Info("cache preload completed for all backends")
+
+	// Start async continuation for Snowflake (after all preloads done)
+	// Note: Use a fresh context here since the errgroup context (ctx) is canceled after g.Wait() returns
+	if snowflakeState != nil && snowflakeState.lastUser != "" {
+		userChan, errChan := snowflakeState.client.FetchRemainingUsersAsync(context.Background(), snowflakeState.lastUser)
+		backendKey := snowflakeState.backendKey
+
+		// Consumer goroutine - writes to cache
+		go func() {
+			log := logger.Logger(context.Background()).WithField("component", "snowflake-async")
+			count := 0
+
+			for user := range userChan {
+				cacheMutex.Lock()
+				_ = dataStore.User.SetBackend(context.Background(), user.GetEmail(), backendKey, user.ID)
+				cacheMutex.Unlock()
+				count++
+
+				if count%1000 == 0 {
+					log.WithField("users_loaded", count).Info("Snowflake async progress")
+				}
+			}
+
+			if err := <-errChan; err != nil {
+				log.WithError(err).Error("Snowflake async fetch failed")
+			} else {
+				log.WithField("additional_users", count).Info("Snowflake async fetch complete")
+			}
+		}()
+
+		setupLog.Info("Snowflake async continuation started")
+	}
+
 	return nil
 }
