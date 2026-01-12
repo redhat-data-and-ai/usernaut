@@ -187,6 +187,7 @@ func main() {
 	cache, err := cache.New(&appConf.Cache)
 	if err != nil {
 		setupLog.Error(err, "failed to initialize cache")
+		os.Exit(1)
 	}
 
 	// Create shared cache mutex to prevent race conditions between GroupReconciler and UserOffboardingJob
