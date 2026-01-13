@@ -1,9 +1,8 @@
 package structs
 
 type BackendParams struct {
-	Name        string     `json:"name"`
-	Type        string     `json:"type"`
-	GroupParams TeamParams `json:"group_params,omitempty"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 func (b *BackendParams) GetName() string {
@@ -12,8 +11,4 @@ func (b *BackendParams) GetName() string {
 
 func (b *BackendParams) GetType() string {
 	return b.Type
-}
-
-func (b *BackendParams) GetGroupParams() TeamParams {
-	return b.GroupParams
 }

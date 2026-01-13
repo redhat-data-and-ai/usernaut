@@ -417,9 +417,8 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 
 	// Fetch or create team
 	backendParams := &structs.BackendParams{
-		Name:        backend.Name,
-		Type:        backend.Type,
-		GroupParams: backendGroupParams,
+		Name: backend.Name,
+		Type: backend.Type,
 	}
 	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
 	if err != nil {
@@ -427,6 +426,14 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 		return err
 	}
 	r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
+
+	// Independent reconciliation of Group Params for each backend
+	err = backendClient.ReconcileGroupParams(ctx, teamID, backendGroupParams)
+	if err != nil {
+		r.backendLogger.WithError(err).Error("error reconciling group params")
+		return err
+	}
+	r.backendLogger.Info("successfully reconciled group params")
 
 	// Create users in backend and cache
 	if err := r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient); err != nil {
@@ -801,7 +808,6 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		Name:        transformedGroupName, // Use transformed name for backend API
 		Description: "team for " + groupName,
 		Role:        fivetran.AccountReviewerRole,
-		TeamParams:  backendParams.GetGroupParams(),
 	})
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error creating team in backend")

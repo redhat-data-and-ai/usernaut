@@ -120,19 +120,6 @@ func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 		log.Infof("ldap sync initiated successfully with status: %d", statusCode)
 	}
 
-	// Add group as project developer if team params are present
-	if team.TeamParams.Property == "project_access_paths" {
-		for _, value := range team.TeamParams.Value {
-			statusCode, err := g.addGroupAsProjectDeveloper(group.ID, value)
-			if err != nil || statusCode != http.StatusCreated {
-				return nil, fmt.Errorf("failed to add group as project developer: %v, status code: %d", err, statusCode)
-			}
-			log.Infof("group %s added as project developer with status: %d", group.Name, statusCode)
-		}
-	} else {
-		log.Infof("Property type for gitlab is invalid: %s, skipping project access paths addition", team.TeamParams.Property)
-	}
-
 	return &structs.Team{
 		ID:   fmt.Sprintf("%d", group.ID),
 		Name: group.Name,
