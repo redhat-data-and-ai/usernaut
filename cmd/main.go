@@ -46,6 +46,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/snowflake"
+	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
@@ -263,11 +264,19 @@ func main() {
 	}
 }
 
-// snowflakeAsyncState holds state needed for async continuation after preload
-type snowflakeAsyncState struct {
-	client     *snowflake.SnowflakeClient
-	lastUser   string
-	backendKey string
+// storeUsersInCache stores users in the cache and returns an error if any user fails to be stored
+func storeUsersInCache(ctx context.Context, users map[string]*structs.User, dataStore *store.Store,
+	cacheMutex *sync.RWMutex, backendKey string, log *logrus.Entry) error {
+	for _, user := range users {
+		cacheMutex.Lock()
+		err := dataStore.User.SetBackend(ctx, user.GetEmail(), backendKey, user.ID)
+		cacheMutex.Unlock()
+		if err != nil {
+			log.WithError(err).Error("failed to store user in cache")
+			return err
+		}
+	}
+	return nil
 }
 
 // Preload the cache with all the users and teams from the backends
@@ -277,6 +286,12 @@ type snowflakeAsyncState struct {
 // and the cache is flushed when the application is restarted
 // Optimized to use goroutines for parallel processing of backends
 func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex *sync.RWMutex) error {
+	// snowflakeAsyncState holds state needed for async continuation after preload
+	type snowflakeAsyncState struct {
+		client     *snowflake.SnowflakeClient
+		lastUser   string
+		backendKey string
+	}
 
 	ctx := context.Background()
 
@@ -333,14 +348,8 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 					return err
 				}
 
-				for _, user := range users {
-					cacheMutex.Lock()
-					err := dataStore.User.SetBackend(ctx, user.GetEmail(), backendKey, user.ID)
-					cacheMutex.Unlock()
-					if err != nil {
-						log.WithError(err).Error("failed to store user in cache")
-						return err
-					}
+				if err := storeUsersInCache(ctx, users, dataStore, cacheMutex, backendKey, log); err != nil {
+					return err
 				}
 
 				// Save state for async continuation
@@ -364,14 +373,8 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 					return err
 				}
 
-				for _, user := range users {
-					cacheMutex.Lock()
-					err := dataStore.User.SetBackend(ctx, user.GetEmail(), backendKey, user.ID)
-					cacheMutex.Unlock()
-					if err != nil {
-						log.WithError(err).Error("failed to store user in cache")
-						return err
-					}
+				if err := storeUsersInCache(ctx, users, dataStore, cacheMutex, backendKey, log); err != nil {
+					return err
 				}
 
 				log.WithField("users", len(users)).Info("preloaded users from backend")
@@ -420,11 +423,18 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 		go func() {
 			log := logger.Logger(context.Background()).WithField("component", "snowflake-async")
 			count := 0
+			failedCount := 0
 
 			for user := range userChan {
 				cacheMutex.Lock()
-				_ = dataStore.User.SetBackend(context.Background(), user.GetEmail(), backendKey, user.ID)
+				err := dataStore.User.SetBackend(context.Background(), user.GetEmail(), backendKey, user.ID)
 				cacheMutex.Unlock()
+
+				if err != nil {
+					failedCount++
+					log.WithError(err).WithField("email", user.GetEmail()).Warn("failed to store user in cache")
+					continue
+				}
 				count++
 
 				if count%1000 == 0 {
@@ -435,7 +445,10 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 			if err := <-errChan; err != nil {
 				log.WithError(err).Error("Snowflake async fetch failed")
 			} else {
-				log.WithField("additional_users", count).Info("Snowflake async fetch complete")
+				log.WithFields(logrus.Fields{
+					"users_cached":       count,
+					"users_failed_cache": failedCount,
+				}).Info("Snowflake async fetch complete")
 			}
 		}()
 
