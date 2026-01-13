@@ -28,6 +28,19 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// snowflakeUsersPageLimit is the maximum number of users returned per API call by Snowflake
+const snowflakeUsersPageLimit = 10000
+
+// snowflakeUserToStruct converts a SnowflakeUser to a structs.User
+func snowflakeUserToStruct(user SnowflakeUser) *structs.User {
+	return &structs.User{
+		ID:          strings.ToLower(user.Name),
+		UserName:    strings.ToLower(user.Name),
+		Email:       strings.ToLower(user.Email),
+		DisplayName: user.DisplayName,
+	}
+}
+
 // FetchAllUsers fetches all users from Snowflake using REST API with proper pagination
 // Snowflake pagination works as follows:
 // 1. First call /api/v2/users - returns first page + Link header with result ID
@@ -58,15 +71,10 @@ func (c *SnowflakeClient) FetchAllUsersWithCursor(ctx context.Context) (
 		}
 
 		for _, user := range users {
-			structUser := &structs.User{
-				ID:          strings.ToLower(user.Name),
-				UserName:    strings.ToLower(user.Name),
-				Email:       strings.ToLower(user.Email),
-				DisplayName: user.DisplayName,
-			}
-			resultByID[strings.ToLower(user.Name)] = structUser
-			if user.Email != "" {
-				resultByEmail[strings.ToLower(user.Email)] = structUser
+			structUser := snowflakeUserToStruct(user)
+			resultByID[structUser.ID] = structUser
+			if structUser.Email != "" {
+				resultByEmail[structUser.Email] = structUser
 			}
 			lastUserName = user.Name // Track last user for cursor
 		}
@@ -90,7 +98,8 @@ func (c *SnowflakeClient) FetchAllUsersWithCursor(ctx context.Context) (
 // It uses the fromName cursor to resume pagination and sends users to the returned channel.
 // The channel is closed when all users are fetched or on error.
 // This reuses the existing fetchAllWithPagination for each batch.
-func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context, fromName string) (<-chan *structs.User, <-chan error) {
+func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context,
+	fromName string) (<-chan *structs.User, <-chan error) {
 	userChan := make(chan *structs.User, 1000)
 	errChan := make(chan error, 1)
 
@@ -103,7 +112,7 @@ func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context, fromName
 
 		for {
 			// Build endpoint with cursor to get next batch
-			endpoint := fmt.Sprintf("/api/v2/users?showLimit=10000&fromName=%s", cursor)
+			endpoint := fmt.Sprintf("/api/v2/users?showLimit=%d&fromName=%s", snowflakeUsersPageLimit, cursor)
 			log.WithField("endpoint", endpoint).Info("fetching next user batch")
 
 			var batchCount int
@@ -118,12 +127,7 @@ func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context, fromName
 
 				for _, user := range users {
 					select {
-					case userChan <- &structs.User{
-						ID:          strings.ToLower(user.Name),
-						UserName:    strings.ToLower(user.Name),
-						Email:       strings.ToLower(user.Email),
-						DisplayName: user.DisplayName,
-					}:
+					case userChan <- snowflakeUserToStruct(user):
 						batchCount++
 						newCursor = user.Name
 					case <-ctx.Done():
@@ -144,8 +148,8 @@ func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context, fromName
 				"new_cursor":  newCursor,
 			}).Info("processed user batch")
 
-			// If fewer than 10000 users, we've reached the end
-			if batchCount < 10000 {
+			// If fewer than page limit users, we've reached the end
+			if batchCount < snowflakeUsersPageLimit {
 				log.Info("all remaining users fetched")
 				return
 			}
@@ -200,12 +204,7 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 		return nil, fmt.Errorf("failed to parse create user response: %w", err)
 	}
 
-	return &structs.User{
-		ID:          strings.ToLower(createdUserResponse.Name),
-		UserName:    strings.ToLower(createdUserResponse.Name),
-		Email:       strings.ToLower(createdUserResponse.Email),
-		DisplayName: createdUserResponse.DisplayName,
-	}, nil
+	return snowflakeUserToStruct(createdUserResponse), nil
 }
 
 // FetchUserDetails fetches details for a specific user using REST API
@@ -232,14 +231,7 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 	}
 
 	log.Info("found user details")
-	user := &structs.User{
-		ID:          strings.ToLower(userID),
-		UserName:    strings.ToLower(userID),
-		Email:       strings.ToLower(userResponse.Email),
-		DisplayName: userResponse.DisplayName,
-	}
-
-	return user, nil
+	return snowflakeUserToStruct(userResponse), nil
 }
 
 // DeleteUser deletes a user from Snowflake using REST API
