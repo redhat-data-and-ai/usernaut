@@ -125,22 +125,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"groups":  groupCR.Spec.Members.Groups,
 	})
 
-	r.log.WithField("query", groupCR.Spec.Query).Info("fetching query members")
-	queryMembers, err := r.fetchQueryMembers(ctx, groupCR.Spec.Query)
-	if err != nil {
-		r.log.WithError(err).Error("error fetching query members")
-		return ctrl.Result{}, err
+	var err error
+	queryMembers := []string{}
+	if groupCR.Spec.Query != "" {
+		r.log.WithField("query", groupCR.Spec.Query).Info("fetching query members")
+		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Query)
+		if err != nil {
+			r.log.WithError(err).Error("error fetching query members")
+			return ctrl.Result{}, err
+		}
 	}
 
 	visitedGroups := make(map[string]struct{})
-	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, groupCR.Spec.GroupName, groupCR.Namespace, visitedGroups)
+	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups)
 	if err != nil {
 		r.log.WithError(err).Error("error fetching unique group members")
 		return ctrl.Result{}, err
 	}
 
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
-	uniqueMembers = append(uniqueMembers, groupCR.Spec.Members.Users...)
 
 	r.log.WithField("unique_members", uniqueMembers).Info("unique members")
 	groupCR.Status.ReconciledUsers = uniqueMembers

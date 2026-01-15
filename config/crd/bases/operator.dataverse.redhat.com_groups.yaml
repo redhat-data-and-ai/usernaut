@@ -100,7 +100,6 @@ spec:
             - backends
             - group_name
             - members
-            - query
             type: object
           status:
             description: GroupStatus defines the observed state of Group

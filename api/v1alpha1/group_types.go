@@ -39,7 +39,7 @@ type Backend struct {
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
 	GroupName   string       `json:"group_name"`
-	Query       string       `json:"query"`
+	Query       string       `json:"query,omitempty"`
 	Members     Members      `json:"members"`
 	GroupParams []GroupParam `json:"group_params,omitempty"`
 	Backends    []Backend    `json:"backends"`
