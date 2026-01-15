@@ -80,10 +80,21 @@ func NewConfig(opts Options) *Config {
 // Load reads environment specific configurations and along with the defaults
 // unmarshalls into config.
 func (c *Config) Load(env string, config interface{}) error {
-	if err := c.loadByConfigName(c.opts.defaultConfigFileName, config); err != nil {
+	// Configure viper settings ONCE upfront
+	c.viper.SetConfigType(c.opts.configType)
+	c.viper.AddConfigPath(c.opts.configPath)
+	// Load default config first
+	c.viper.SetConfigName(c.opts.defaultConfigFileName)
+	if err := c.viper.ReadInConfig(); err != nil {
 		return err
 	}
-	if err := c.loadByConfigName(env, config); err != nil {
+	// Merge environment-specific config
+	c.viper.SetConfigName(env)
+	if err := c.viper.MergeInConfig(); err != nil {
+		return err
+	}
+	// Unmarshal once after both files are loaded/merged
+	if err := c.viper.Unmarshal(config); err != nil {
 		return err
 	}
 	SubstituteConfigValues(reflect.ValueOf(config))
@@ -163,20 +174,4 @@ func substituteString(s string) string {
 		return strings.TrimSpace(string(b))
 	}
 	return s
-}
-
-// loadByConfigName reads configuration from file and unmarshalls into config.
-func (c *Config) loadByConfigName(configName string, config interface{}) error {
-	c.viper.SetConfigName(configName)
-	c.viper.SetConfigType(c.opts.configType)
-	c.viper.AddConfigPath(c.opts.configPath)
-	c.viper.AutomaticEnv()
-	c.viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	if err := c.viper.ReadInConfig(); err != nil {
-		return err
-	}
-	if err := c.viper.Unmarshal(config); err != nil {
-		return err
-	}
-	return nil
 }
