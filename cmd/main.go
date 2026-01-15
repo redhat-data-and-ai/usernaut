@@ -29,7 +29,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -278,6 +280,13 @@ func storeUsersInCache(ctx context.Context, users map[string]*structs.User, data
 	return nil
 }
 
+// snowflakeAsyncState holds state needed for Snowflake async continuation after preload
+type snowflakeAsyncState struct {
+	client     *snowflake.SnowflakeClient
+	lastUser   string
+	backendKey string
+}
+
 // Preload the cache with all the users and teams from the backends
 // This is done to avoid hitting the backend for every request
 // and to improve the performance of the application
@@ -285,14 +294,10 @@ func storeUsersInCache(ctx context.Context, users map[string]*structs.User, data
 // and the cache is flushed when the application is restarted
 // Optimized to use goroutines for parallel processing of backends
 func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex *sync.RWMutex) error {
-	// snowflakeAsyncState holds state needed for async continuation after preload
-	type snowflakeAsyncState struct {
-		client     *snowflake.SnowflakeClient
-		lastUser   string
-		backendKey string
-	}
-
 	ctx := context.Background()
+
+	// Add request ID for tracking this cache preload operation in logs
+	ctx = logger.WithRequestId(ctx, types.UID(uuid.New().String()))
 
 	// Use errgroup for concurrent processing with proper error handling
 	g, ctx := errgroup.WithContext(ctx)
@@ -413,46 +418,56 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 	setupLog.Info("cache preload completed for all backends")
 
 	// Start async continuation for Snowflake (after all preloads done)
-	// Note: Use a fresh context here since the errgroup context (ctx) is canceled after g.Wait() returns
 	if snowflakeState != nil && snowflakeState.lastUser != "" {
-		userChan, errChan := snowflakeState.client.FetchRemainingUsersAsync(context.Background(), snowflakeState.lastUser)
-		backendKey := snowflakeState.backendKey
-
-		// Consumer goroutine - writes to cache
-		go func() {
-			log := logger.Logger(context.Background()).WithField("component", "snowflake-async")
-			count := 0
-			failedCount := 0
-
-			for user := range userChan {
-				cacheMutex.Lock()
-				err := dataStore.User.SetBackend(context.Background(), user.GetEmail(), backendKey, user.ID)
-				cacheMutex.Unlock()
-
-				if err != nil {
-					failedCount++
-					log.WithError(err).WithField("email", user.GetEmail()).Warn("failed to store user in cache")
-					continue
-				}
-				count++
-
-				if count%1000 == 0 {
-					log.WithField("users_loaded", count).Info("Snowflake async progress")
-				}
-			}
-
-			if err := <-errChan; err != nil {
-				log.WithError(err).Error("Snowflake async fetch failed")
-			} else {
-				log.WithFields(logrus.Fields{
-					"users_cached":       count,
-					"users_failed_cache": failedCount,
-				}).Info("Snowflake async fetch complete")
-			}
-		}()
-
-		setupLog.Info("Snowflake async continuation started")
+		startSnowflakeAsyncContinuation(snowflakeState, dataStore, cacheMutex)
 	}
 
 	return nil
+}
+
+// startSnowflakeAsyncContinuation starts a background goroutine to fetch remaining Snowflake users
+// and write them to cache. This function returns immediately after starting the goroutine.
+func startSnowflakeAsyncContinuation(
+	state *snowflakeAsyncState,
+	dataStore *store.Store,
+	cacheMutex *sync.RWMutex,
+) {
+	// Use a fresh context since the errgroup context is canceled after g.Wait() returns
+	asyncCtx := context.Background()
+	userChan, errChan := state.client.FetchRemainingUsersAsync(asyncCtx, state.lastUser)
+
+	// Consumer goroutine - writes to cache
+	go func() {
+		log := logger.Logger(asyncCtx).WithField("component", "snowflake-async")
+		count := 0
+		failedCount := 0
+
+		for user := range userChan {
+			cacheMutex.Lock()
+			err := dataStore.User.SetBackend(asyncCtx, user.GetEmail(), state.backendKey, user.ID)
+			cacheMutex.Unlock()
+
+			if err != nil {
+				failedCount++
+				log.WithError(err).WithField("email", user.GetEmail()).Warn("failed to store user in cache")
+				continue
+			}
+			count++
+
+			if count%1000 == 0 {
+				log.WithField("users_loaded", count).Info("Snowflake async progress")
+			}
+		}
+
+		if err := <-errChan; err != nil {
+			log.WithError(err).Error("Snowflake async fetch failed")
+		} else {
+			log.WithFields(logrus.Fields{
+				"users_cached":       count,
+				"users_failed_cache": failedCount,
+			}).Info("Snowflake async fetch complete")
+		}
+	}()
+
+	setupLog.Info("Snowflake async continuation started")
 }
