@@ -9,7 +9,7 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.12
 	github.com/gojek/heimdall/v7 v7.0.3
 	github.com/golang/mock v1.6.0
-	github.com/onsi/ginkgo/v2 v2.27.4
+	github.com/onsi/ginkgo/v2 v2.27.5
 	github.com/onsi/gomega v1.39.0
 	github.com/opentracing-contrib/go-stdlib v1.1.1
 	github.com/opentracing/opentracing-go v1.2.0
