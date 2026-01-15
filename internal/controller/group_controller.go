@@ -39,9 +39,9 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/internal/controller/controllerutils"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/atlan"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
-
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
@@ -1012,6 +1012,45 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 			return false, errors.New("backend client is not a GitlabClient")
 		}
 		gitlabClient.SetLdapSync(true, groupName)
+		r.backendLogger.Infof("setup successfully for %s", backendType)
+		return true, nil
+
+	case "atlan":
+		backendConfig := r.AppConfig.BackendMap["atlan"][backendName]
+		atlanClient, ok := backendClient.(*atlan.AtlanClient)
+		if !ok {
+			return false, errors.New("backend client is not an AtlanClient")
+		}
+
+		// Set SSO sync from connection config (for user creation)
+		if ssoSync, ok := backendConfig.Connection["sso_sync"].(bool); ok && ssoSync {
+			atlanClient.SetSSOSync(true)
+			r.backendLogger.Info("sso sync enabled for atlan backend")
+		}
+
+		// Check for LDAP sync (depends_on rover)
+		dependsOn := backendConfig.DependsOn
+		if dependsOn.Type == "" && dependsOn.Name == "" {
+			r.backendLogger.Infof("no ldap dependant found for %s backend", backendType)
+			return false, nil
+		}
+
+		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, dependsOn.Type, groupName)
+		if err != nil {
+			r.backendLogger.WithError(err).Error("error transforming the group Name")
+			return false, err
+		}
+		err = r.ldapDependantChecks(dependsOn, transformedGroupName)
+		if err != nil {
+			return false, err
+		}
+
+		if !isGroupCRHasDependants(backends, dependsOn) {
+			return false, fmt.Errorf("ldap dependants for %s backend doesn't exist in group CR", backendType)
+		}
+
+		// Pass original groupName for SSO mapping, not transformed name
+		atlanClient.SetLdapSync(true, groupName)
 		r.backendLogger.Infof("ldap sync setup successfully for %s", backendType)
 		return true, nil
 	}
