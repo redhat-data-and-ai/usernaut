@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -119,18 +120,29 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
 		"request": req.NamespacedName.String(),
 		"group":   groupCR.Spec.GroupName,
+		"query":   groupCR.Spec.Query,
 		"members": len(groupCR.Spec.Members.Users),
 		"groups":  groupCR.Spec.Members.Groups,
 	})
 
+	r.log.WithField("query", groupCR.Spec.Query).Info("fetching query members")
+	queryMembers, err := r.fetchQueryMembers(ctx, groupCR.Spec.Query)
+	if err != nil {
+		r.log.WithError(err).Error("error fetching query members")
+		return ctrl.Result{}, err
+	}
+
 	visitedGroups := make(map[string]struct{})
-	allMembers, err := r.fetchUniqueGroupMembers(ctx, groupCR.Spec.GroupName, groupCR.Namespace, visitedGroups)
+	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, groupCR.Spec.GroupName, groupCR.Namespace, visitedGroups)
 	if err != nil {
 		r.log.WithError(err).Error("error fetching unique group members")
 		return ctrl.Result{}, err
 	}
 
-	uniqueMembers := r.deduplicateMembers(allMembers)
+	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
+	uniqueMembers = append(uniqueMembers, groupCR.Spec.Members.Users...)
+
+	r.log.WithField("unique_members", uniqueMembers).Info("unique members")
 	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
@@ -175,13 +187,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Step 5: Update status and handle errors
-	return ctrl.Result{}, r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
+	return ctrl.Result{
+		RequeueAfter: 8 * time.Hour,
+	}, r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
 }
 
 // LDAPFetchResult contains the results of LDAP data fetching
 type LDAPFetchResult struct {
 	CurrentMembers []string // emails of users with valid LDAP data
 	ActiveUserList []string // UIDs of active users
+}
+
+func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query string) ([]string, error) {
+	// fetch users from LDAP using the query
+	queryMembers, err := r.LdapConn.GetQueryMembers(ctx, query)
+	if err != nil {
+		r.log.WithError(err).Error("error fetching users from LDAP using the query")
+		return []string{}, err
+	}
+	return queryMembers, nil
 }
 
 // fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData

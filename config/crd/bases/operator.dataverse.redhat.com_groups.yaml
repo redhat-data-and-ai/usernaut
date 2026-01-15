@@ -94,10 +94,13 @@ spec:
                 required:
                 - users
                 type: object
+              query:
+                type: string
             required:
             - backends
             - group_name
             - members
+            - query
             type: object
           status:
             description: GroupStatus defines the observed state of Group

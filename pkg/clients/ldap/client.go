@@ -12,6 +12,7 @@ import (
 type LDAP struct {
 	Server           string   `yaml:"server"`
 	BaseDN           string   `yaml:"baseDN"`
+	BaseUserDN       string   `yaml:"baseUserDN"`
 	UserDN           string   `yaml:"userDN"`
 	UserSearchFilter string   `yaml:"userSearchFilter"`
 	Attributes       []string `yaml:"attributes"`
@@ -26,6 +27,7 @@ type LDAPConn struct {
 	conn             LDAPConnClient
 	userDN           string
 	baseDN           string
+	baseUserDN       string
 	server           string
 	userSearchFilter string
 	attributes       []string
@@ -33,6 +35,7 @@ type LDAPConn struct {
 
 type LDAPClient interface {
 	GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error)
+	GetQueryMembers(ctx context.Context, query string) ([]string, error)
 }
 
 // InitLdap initializes a connection to the LDAP server using the provided configuration.
@@ -47,6 +50,7 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 		server:           ldapConfig.Server,
 		userDN:           ldapConfig.UserDN,
 		baseDN:           ldapConfig.BaseDN,
+		baseUserDN:       ldapConfig.BaseUserDN,
 		userSearchFilter: ldapConfig.UserSearchFilter,
 		attributes:       ldapConfig.Attributes,
 	}, nil

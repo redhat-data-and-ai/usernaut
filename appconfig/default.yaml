@@ -40,6 +40,7 @@ app:
 ldap:
   server: "ldap://ldap.test.com:389"
   baseDN: "ou=adhoc,ou=managedGroups,dc=org,dc=com"
+  baseUserDN: "ou=users,dc=org,dc=com"
   userDN: "uid=%s,ou=users,dc=org,dc=com"
   userSearchFilter: "(objectClass=filterClass)"
   attributes: ["mail", "uid", "cn", "sn", "displayName"]

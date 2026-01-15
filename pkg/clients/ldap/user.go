@@ -24,6 +24,7 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 		l.attributes,
 		nil,
 	)
+	log.WithField("searchRequest", searchRequest).Info("LDAP search request")
 
 	conn := l.getConn()
 	if conn == nil {

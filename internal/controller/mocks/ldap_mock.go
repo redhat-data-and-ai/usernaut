@@ -96,6 +96,15 @@ func (m *MockLDAPClient) GetUserLDAPData(ctx context.Context, userID string) (ma
 	return ret0, ret1
 }
 
+// GetQueryMembers mocks base method.
+func (m *MockLDAPClient) GetQueryMembers(ctx context.Context, query string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetQueryMembers", ctx, query)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
 // GetUserLDAPData indicates an expected call of GetUserLDAPData.
 func (mr *MockLDAPClientMockRecorder) GetUserLDAPData(ctx, userID interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
