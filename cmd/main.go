@@ -302,8 +302,9 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 	// Use errgroup for concurrent processing with proper error handling
 	g, ctx := errgroup.WithContext(ctx)
 
-	// State for Snowflake async continuation (protected by mutex for goroutine safety)
-	var snowflakeState *snowflakeAsyncState
+	// States for Snowflake async continuation (protected by mutex for goroutine safety)
+	// Using a slice to support multiple Snowflake backends (dev, pre-prod, prod, etc.)
+	var snowflakeStates []*snowflakeAsyncState
 	var snowflakeStateMutex sync.Mutex
 
 	// Process each backend concurrently
@@ -356,13 +357,13 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 					return err
 				}
 
-				// Save state for async continuation
+				// Save state for async continuation (append to slice for multiple Snowflake backends)
 				snowflakeStateMutex.Lock()
-				snowflakeState = &snowflakeAsyncState{
+				snowflakeStates = append(snowflakeStates, &snowflakeAsyncState{
 					client:     sfClient,
 					lastUser:   lastUser,
 					backendKey: backendKey,
-				}
+				})
 				snowflakeStateMutex.Unlock()
 
 				log.WithFields(logrus.Fields{
@@ -417,9 +418,11 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 
 	setupLog.Info("cache preload completed for all backends")
 
-	// Start async continuation for Snowflake (after all preloads done)
-	if snowflakeState != nil && snowflakeState.lastUser != "" {
-		startSnowflakeAsyncContinuation(snowflakeState, dataStore, cacheMutex)
+	// Start async continuation for all Snowflake backends (after all preloads done)
+	for _, state := range snowflakeStates {
+		if state.lastUser != "" {
+			startSnowflakeAsyncContinuation(ctx, state, dataStore, cacheMutex)
+		}
 	}
 
 	return nil
@@ -428,17 +431,25 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 // startSnowflakeAsyncContinuation starts a background goroutine to fetch remaining Snowflake users
 // and write them to cache. This function returns immediately after starting the goroutine.
 func startSnowflakeAsyncContinuation(
+	originalCtx context.Context,
 	state *snowflakeAsyncState,
 	dataStore *store.Store,
 	cacheMutex *sync.RWMutex,
 ) {
-	// Use a fresh context since the errgroup context is canceled after g.Wait() returns
+	// Create a fresh context since the errgroup context is canceled after g.Wait() returns
+	// Transfer the logger (with request ID) from original context for traceability
 	asyncCtx := context.Background()
+	if entry := logger.Logger(originalCtx); entry != nil {
+		asyncCtx = context.WithValue(asyncCtx, logger.RequestIdKey, entry)
+	}
 	userChan, errChan := state.client.FetchRemainingUsersAsync(asyncCtx, state.lastUser)
 
 	// Consumer goroutine - writes to cache
 	go func() {
-		log := logger.Logger(asyncCtx).WithField("component", "snowflake-async")
+		log := logger.Logger(asyncCtx).WithFields(logrus.Fields{
+			"component": "snowflake-async",
+			"backend":   state.backendKey,
+		})
 		count := 0
 		failedCount := 0
 
