@@ -1148,6 +1148,507 @@ The project includes a **user offboarding job** that runs daily:
 - Handles partial failures gracefully
 - Logs detailed progress for auditing
 
+### OpenTelemetry Metrics
+
+This project has OpenTelemetry support built-in for observability and metrics. The `pkg/metrics` package contains commented-out implementations that can be enabled when needed.
+
+#### Current State
+
+The project currently has:
+
+- OpenTelemetry dependencies in `go.mod` (v1.35.0)
+- Skeleton implementations in `pkg/metrics/otel.go` (commented out)
+- Prometheus-style metrics skeleton in `pkg/metrics/metrics.go` (commented out)
+- Support for both Prometheus and OpenTelemetry exporters
+
+#### OpenTelemetry Architecture
+
+```go
+// Meter provides metric instruments
+otelMeter := otel.Meter("usernaut/metrics")
+
+// Instruments
+counter := otelMeter.Float64Counter(...)      // Monotonically increasing value
+histogram := otelMeter.Float64Histogram(...)   // Distribution of values
+gauge := otelMeter.Float64Gauge(...)          // Current value that can go up/down
+```
+
+#### Enabling OpenTelemetry Metrics
+
+**1. Uncomment existing implementations** in `pkg/metrics/otel.go`:
+
+```go
+// Already defined metrics (uncomment to enable):
+// - ext_service_response_code (Counter)
+// - ext_service_request_duration_ms (Histogram)
+// - ext_service_hit_count (Counter)
+```
+
+**2. Initialize OpenTelemetry in `cmd/main.go`**:
+
+```go
+import (
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+    "go.opentelemetry.io/otel/sdk/resource"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+    semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+)
+
+func initOpenTelemetry(ctx context.Context) (*sdktrace.TracerProvider, error) {
+    // Create resource with service information
+    res, err := resource.Merge(
+        resource.Default(),
+        resource.NewWithAttributes(
+            semconv.SchemaURL,
+            semconv.ServiceName("usernaut"),
+            semconv.ServiceVersion(appConfig.App.Version),
+            semconv.DeploymentEnvironment(appConfig.App.Environment),
+        ),
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to create resource: %w", err)
+    }
+
+    // Create OTLP exporter
+    exporter, err := otlptracegrpc.New(ctx,
+        otlptracegrpc.WithEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
+        otlptracegrpc.WithInsecure(), // Use WithTLSCredentials for production
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to create exporter: %w", err)
+    }
+
+    // Create tracer provider
+    tp := sdktrace.NewTracerProvider(
+        sdktrace.WithBatcher(exporter),
+        sdktrace.WithResource(res),
+        sdktrace.WithSampler(sdktrace.AlwaysSample()), // Configure sampling strategy
+    )
+
+    otel.SetTracerProvider(tp)
+
+    return tp, nil
+}
+
+func main() {
+    // ... existing code ...
+
+    // Initialize OpenTelemetry
+    ctx := context.Background()
+    tp, err := initOpenTelemetry(ctx)
+    if err != nil {
+        setupLog.Error(err, "failed to initialize OpenTelemetry")
+        os.Exit(1)
+    }
+    defer func() {
+        if err := tp.Shutdown(ctx); err != nil {
+            setupLog.Error(err, "error shutting down tracer provider")
+        }
+    }()
+
+    // Initialize metrics
+    metrics.InitOtel()
+
+    // ... rest of main ...
+}
+```
+
+#### Metric Types and When to Use
+
+**Counter** - Monotonically increasing values:
+
+```go
+// Use for: Request counts, error counts, operations completed
+otelExtServiceHitCount.Add(ctx, 1,
+    metric.WithAttributes(
+        attribute.String("method", "CreateUser"),
+        attribute.String("service", "fivetran"),
+    ),
+)
+```
+
+**Histogram** - Distribution of values:
+
+```go
+// Use for: Request duration, response size, queue length
+otelExtServiceRequestDuration.Record(ctx, timeTaken,
+    metric.WithAttributes(
+        attribute.String("method", "CreateUser"),
+        attribute.String("service", "fivetran"),
+    ),
+)
+```
+
+**Gauge** - Current value snapshot:
+
+```go
+// Use for: Current memory usage, queue depth, active connections
+cacheSize, _ := otelMeter.Int64ObservableGauge(
+    "cache_size_bytes",
+    metric.WithDescription("Current cache size in bytes"),
+)
+```
+
+**UpDownCounter** - Value that can increase/decrease:
+
+```go
+// Use for: Active requests, items in queue, concurrent operations
+activeRequests, _ := otelMeter.Int64UpDownCounter(
+    "active_requests",
+    metric.WithDescription("Number of active requests"),
+)
+```
+
+#### Adding New Metrics
+
+**1. Define metric in `pkg/metrics/otel.go`**:
+
+```go
+var (
+    otelReconciliationCount    metric.Int64Counter
+    otelReconciliationDuration metric.Float64Histogram
+    otelCacheHitRate          metric.Float64Counter
+)
+
+func initOtelMeter() {
+    otelOnce.Do(func() {
+        otelMeter = otel.Meter("usernaut/metrics")
+
+        var err error
+
+        // Counter for reconciliation attempts
+        otelReconciliationCount, err = otelMeter.Int64Counter(
+            "usernaut.reconciliation.count",
+            metric.WithDescription("Number of reconciliation attempts"),
+            metric.WithUnit("{reconciliation}"),
+        )
+        if err != nil {
+            panic(err)
+        }
+
+        // Histogram for reconciliation duration
+        otelReconciliationDuration, err = otelMeter.Float64Histogram(
+            "usernaut.reconciliation.duration",
+            metric.WithDescription("Duration of reconciliation operations"),
+            metric.WithUnit("ms"),
+            metric.WithExplicitBucketBoundaries(10, 50, 100, 250, 500, 1000, 2500, 5000, 10000),
+        )
+        if err != nil {
+            panic(err)
+        }
+
+        // Counter for cache operations
+        otelCacheHitRate, err = otelMeter.Float64Counter(
+            "usernaut.cache.operations",
+            metric.WithDescription("Cache operations (hits/misses)"),
+        )
+        if err != nil {
+            panic(err)
+        }
+    })
+}
+```
+
+**2. Create helper functions**:
+
+```go
+func RecordReconciliation(ctx context.Context, groupName, status string, duration float64) {
+    initOtelMeter()
+
+    otelReconciliationCount.Add(ctx, 1,
+        metric.WithAttributes(
+            attribute.String("group", groupName),
+            attribute.String("status", status),
+        ),
+    )
+
+    otelReconciliationDuration.Record(ctx, duration,
+        metric.WithAttributes(
+            attribute.String("group", groupName),
+            attribute.String("status", status),
+        ),
+    )
+}
+
+func RecordCacheOperation(ctx context.Context, operation, result string) {
+    initOtelMeter()
+
+    otelCacheHitRate.Add(ctx, 1,
+        metric.WithAttributes(
+            attribute.String("operation", operation), // "get", "set", "delete"
+            attribute.String("result", result),       // "hit", "miss", "success", "error"
+        ),
+    )
+}
+```
+
+**3. Use metrics in controllers**:
+
+```go
+func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+    startTime := time.Now()
+
+    // ... reconciliation logic ...
+
+    // Record metrics
+    duration := float64(time.Since(startTime).Milliseconds())
+    status := "success"
+    if err != nil {
+        status = "error"
+    }
+
+    metrics.RecordReconciliation(ctx, groupCR.Spec.GroupName, status, duration)
+
+    return ctrl.Result{}, err
+}
+```
+
+#### Metric Naming Conventions
+
+Follow OpenTelemetry semantic conventions:
+
+**Format**: `<namespace>.<component>.<metric_name>`
+
+**Examples**:
+
+```go
+// Good
+"usernaut.reconciliation.count"
+"usernaut.reconciliation.duration"
+"usernaut.cache.operations"
+"usernaut.backend.requests"
+"usernaut.ldap.queries"
+
+// Bad
+"ReconciliationCount"        // Not namespaced
+"cache_operations"           // Wrong separator
+"UsernautCacheOps"          // Not semantic
+```
+
+#### Attribute Best Practices
+
+**Use semantic attribute keys**:
+
+```go
+// Good
+attribute.String("backend.name", "fivetran")
+attribute.String("backend.type", "fivetran")
+attribute.String("operation", "CreateUser")
+attribute.String("status", "success")
+attribute.String("group.name", groupName)
+
+// Bad
+attribute.String("backend", "fivetran")  // Not specific
+attribute.String("op", "CreateUser")     // Abbreviated
+attribute.String("result", "ok")         // Not semantic
+```
+
+**Limit cardinality** - Avoid high-cardinality attributes:
+
+```go
+// Good - Low cardinality
+attribute.String("backend.type", "fivetran")  // ~5-10 values
+attribute.String("operation", "CreateUser")   // ~20-30 values
+attribute.String("status", "success")         // 2-3 values
+
+// Bad - High cardinality
+attribute.String("user.email", email)         // Thousands of values
+attribute.String("timestamp", timestamp)      // Infinite values
+attribute.String("request.id", requestID)     // Unique per request
+```
+
+**Use consistent attribute names** across metrics:
+
+```go
+const (
+    AttrBackendName = "backend.name"
+    AttrBackendType = "backend.type"
+    AttrOperation   = "operation"
+    AttrStatus      = "status"
+    AttrGroupName   = "group.name"
+)
+```
+
+#### Configuration
+
+**Environment Variables**:
+
+```bash
+# OTLP endpoint
+export OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317"
+
+# Service information
+export OTEL_SERVICE_NAME="usernaut"
+export OTEL_SERVICE_VERSION="0.0.1"
+
+# Sampling rate (0.0 to 1.0)
+export OTEL_TRACES_SAMPLER="traceidratio"
+export OTEL_TRACES_SAMPLER_ARG="0.1"  # 10% sampling
+
+# Export protocol
+export OTEL_EXPORTER_OTLP_PROTOCOL="grpc"  # or "http/protobuf"
+
+# TLS configuration (production)
+export OTEL_EXPORTER_OTLP_CERTIFICATE="/path/to/cert.pem"
+```
+
+**YAML Configuration** (add to `appconfig/`):
+
+```yaml
+opentelemetry:
+  enabled: true
+  endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+  insecure: false # Set to true for development
+  sampling_rate: 0.1 # 10% of traces
+  export_interval: 30 # seconds
+  batch_size: 512
+  metrics:
+    - name: "reconciliation"
+      enabled: true
+    - name: "cache"
+      enabled: true
+    - name: "backend_requests"
+      enabled: true
+```
+
+#### Integrating with Existing Cache
+
+**Add metrics to cache operations** in `pkg/cache/redis/cache.go`:
+
+```go
+func (c *RedisCache) Get(ctx context.Context, key string) (interface{}, error) {
+    startTime := time.Now()
+    val, err := c.client.Get(ctx, key).Result()
+
+    // Record metrics
+    duration := float64(time.Since(startTime).Microseconds())
+    result := "hit"
+    if err == redis.Nil {
+        result = "miss"
+    } else if err != nil {
+        result = "error"
+    }
+
+    metrics.RecordCacheOperation(ctx, "get", result)
+    metrics.RecordCacheDuration(ctx, "get", duration)
+
+    if err == redis.Nil {
+        return nil, ErrCacheMiss
+    }
+    return val, err
+}
+```
+
+#### Recommended Metrics for Usernaut
+
+**Controller Metrics**:
+
+```go
+usernaut.reconciliation.count          // Counter: Reconciliation attempts
+usernaut.reconciliation.duration       // Histogram: Reconciliation time
+usernaut.reconciliation.errors         // Counter: Reconciliation errors
+usernaut.group.members.count           // Gauge: Members per group
+usernaut.finalizer.duration            // Histogram: Cleanup time
+```
+
+**Cache Metrics**:
+
+```go
+usernaut.cache.operations              // Counter: Cache ops (hit/miss/error)
+usernaut.cache.duration                // Histogram: Cache operation latency
+usernaut.cache.size                    // Gauge: Cache size in bytes
+usernaut.cache.evictions               // Counter: Cache evictions
+```
+
+**Backend Metrics**:
+
+```go
+usernaut.backend.requests              // Counter: Backend API requests
+usernaut.backend.duration              // Histogram: Backend request latency
+usernaut.backend.errors                // Counter: Backend errors
+usernaut.backend.users.count           // Gauge: Users per backend
+usernaut.backend.teams.count           // Gauge: Teams per backend
+```
+
+**LDAP Metrics**:
+
+```go
+usernaut.ldap.queries                  // Counter: LDAP queries
+usernaut.ldap.duration                 // Histogram: LDAP query latency
+usernaut.ldap.errors                   // Counter: LDAP errors
+usernaut.ldap.users.active             // Gauge: Active users
+```
+
+#### Testing OpenTelemetry Metrics
+
+**Unit tests with mock meter**:
+
+```go
+func TestReconciliationMetrics(t *testing.T) {
+    // Create mock meter provider
+    reader := metric.NewManualReader()
+    provider := metric.NewMeterProvider(metric.WithReader(reader))
+    otel.SetMeterProvider(provider)
+
+    // Record metric
+    metrics.RecordReconciliation(context.Background(), "test-group", "success", 100.0)
+
+    // Collect metrics
+    rm := metricdata.ResourceMetrics{}
+    err := reader.Collect(context.Background(), &rm)
+    require.NoError(t, err)
+
+    // Verify metrics
+    require.Len(t, rm.ScopeMetrics, 1)
+    // Assert metric values...
+}
+```
+
+**Integration tests**:
+
+```go
+func TestOpenTelemetryExport(t *testing.T) {
+    // Start local OTLP collector
+    collector := startTestCollector(t)
+    defer collector.Stop()
+
+    // Configure exporter
+    exporter, err := otlptracegrpc.New(
+        context.Background(),
+        otlptracegrpc.WithEndpoint(collector.Endpoint()),
+        otlptracegrpc.WithInsecure(),
+    )
+    require.NoError(t, err)
+
+    // Record metrics and verify export
+    // ...
+}
+```
+
+#### Troubleshooting
+
+**Metrics not appearing**:
+
+- Verify OTLP endpoint is reachable
+- Check if metrics are initialized (`metrics.InitOtel()`)
+- Verify meter provider is set (`otel.SetMeterProvider()`)
+- Check sampling configuration (may be dropping metrics)
+
+**High memory usage**:
+
+- Reduce batch size
+- Increase export interval
+- Check for high-cardinality attributes
+- Review metric retention policies
+
+**Performance impact**:
+
+- Use delta temporality for counters
+- Batch metric exports
+- Reduce sampling rate for traces
+- Use asynchronous instruments for expensive operations
+
 ### Make Targets
 
 Use the provided Makefile targets:
@@ -1689,6 +2190,58 @@ func (c *GitLabClient) FetchAllTeams(ctx context.Context) (map[string]structs.Te
 - [ ] Partial failures are handled gracefully
 - [ ] Detailed logging for auditing
 
+### OpenTelemetry Metrics Review
+
+#### Metric Instrumentation
+
+- [ ] Appropriate metric type used (Counter/Histogram/Gauge/UpDownCounter)
+- [ ] Metric follows naming convention: `usernaut.<component>.<metric_name>`
+- [ ] Metric has clear description and appropriate unit
+- [ ] Histogram buckets are appropriate for the measured values
+- [ ] Metrics are initialized in `initOtelMeter()` function
+- [ ] `sync.Once` used to ensure single initialization
+
+#### Metric Recording
+
+- [ ] Context is passed to metric recording functions
+- [ ] Attributes use semantic keys (e.g., `backend.name`, not `backend`)
+- [ ] Attribute cardinality is low (avoid user emails, request IDs, timestamps)
+- [ ] Consistent attribute names used across related metrics
+- [ ] Attribute constants defined for reuse
+- [ ] Metrics recorded at appropriate points (start/end of operation)
+
+#### Configuration and Setup
+
+- [ ] OpenTelemetry initialization in `cmd/main.go`
+- [ ] Resource attributes include service name, version, environment
+- [ ] OTLP exporter configured with endpoint from environment
+- [ ] TLS configured for production environments
+- [ ] Tracer provider properly shut down on application exit
+- [ ] Sampling strategy configured appropriately
+- [ ] Export interval and batch size are reasonable
+
+#### Testing
+
+- [ ] Unit tests use mock meter provider
+- [ ] Metrics collection verified in tests
+- [ ] Integration tests validate metric export
+- [ ] Test fixtures clean up meter provider
+
+#### Performance and Production
+
+- [ ] High-cardinality attributes avoided
+- [ ] Delta temporality used for counters
+- [ ] Asynchronous instruments used for expensive operations
+- [ ] Metrics don't impact critical path performance
+- [ ] Memory usage monitored with metric overhead
+
+#### Documentation
+
+- [ ] New metrics documented in code comments
+- [ ] Metric purpose and usage explained
+- [ ] Attribute meanings documented
+- [ ] Configuration environment variables documented
+
 ## Summary and Quick Reference
 
 ### Common Patterns
@@ -1744,9 +2297,42 @@ for _, tt := range tests {
 }
 ```
 
+**OpenTelemetry Metrics**:
+
+```go
+// Initialize meter
+otelMeter = otel.Meter("usernaut/metrics")
+
+// Define counter
+counter, _ := otelMeter.Int64Counter(
+    "usernaut.reconciliation.count",
+    metric.WithDescription("Reconciliation attempts"),
+)
+
+// Record metric
+counter.Add(ctx, 1,
+    metric.WithAttributes(
+        attribute.String("status", "success"),
+    ),
+)
+```
+
+**OpenTelemetry Setup**:
+
+```go
+// In main.go
+tp, err := initOpenTelemetry(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+defer tp.Shutdown(ctx)
+
+metrics.InitOtel()
+```
+
 ### Key Files and Their Purposes
 
-- `cmd/main.go` - Application entry point, controller setup, cache preload
+- `cmd/main.go` - Application entry point, controller setup, cache preload, OpenTelemetry initialization
 - `internal/controller/group_controller.go` - Main reconciliation logic
 - `internal/controller/periodic_tasks_controller.go` - Periodic job orchestration
 - `pkg/store/` - Cache store layer with prefixed keys
@@ -1754,6 +2340,7 @@ for _, tt := range tests {
 - `pkg/clients/` - Backend client implementations
 - `pkg/config/` - Configuration management
 - `pkg/logger/` - Context-aware logging
+- `pkg/metrics/` - OpenTelemetry metrics instrumentation
 - `api/v1alpha1/` - Kubernetes CRD types
 
 ### Anti-Patterns to Avoid
@@ -1811,10 +2398,38 @@ type Service struct {
 ### Troubleshooting
 
 **Linter errors**: Run `make lint-fix` to auto-fix, or check `.golangci.yml` for configuration
+
 **Test failures**: Check mock generation with `make mockgen`, verify envtest setup
+
 **Cache issues**: Check Redis connection, verify store layer usage, check lock acquisition
+
 **Controller not reconciling**: Check predicates, verify namespace scope, check leader election
+
 **Backend errors**: Check circuit breaker status, verify HTTP client configuration, check API credentials
+
+**OpenTelemetry metrics not appearing**:
+
+- Verify OTLP endpoint: `echo $OTEL_EXPORTER_OTLP_ENDPOINT`
+- Check initialization: Ensure `metrics.InitOtel()` is called
+- Verify exporter connectivity: `telnet localhost 4317`
+- Check sampling configuration (may be dropping metrics)
+- Review logs for export errors
+
+**High memory usage with metrics**:
+
+- Reduce batch size in exporter configuration
+- Increase export interval
+- Check for high-cardinality attributes (user emails, IDs, timestamps)
+- Review metric retention policies
+- Use delta temporality for counters
+
+**Metrics performance impact**:
+
+- Use asynchronous instruments for expensive operations
+- Batch metric recordings when possible
+- Reduce sampling rate if needed
+- Profile application with metrics enabled vs. disabled
+- Check metric export queue size
 
 ### Resources
 
