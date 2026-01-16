@@ -47,17 +47,7 @@ func (l *LDAPConn) GetQueryMembers(ctx context.Context, query string) ([]string,
 		if uid == "" {
 			// Fallback: parse uid from DN if attribute is not returned for some reason.
 			if dn, parseErr := ldap.ParseDN(entry.DN); parseErr == nil {
-				for _, rdn := range dn.RDNs {
-					for _, atv := range rdn.Attributes {
-						if atv.Type == "uid" && atv.Value != "" {
-							uid = atv.Value
-							break
-						}
-					}
-					if uid != "" {
-						break
-					}
-				}
+				uid = parseUIDFromDN(dn)
 			}
 		}
 		if uid != "" {
@@ -66,4 +56,15 @@ func (l *LDAPConn) GetQueryMembers(ctx context.Context, query string) ([]string,
 	}
 	log.Info("fetched query members")
 	return queryMembers, nil
+}
+
+func parseUIDFromDN(dn *ldap.DN) string {
+	for _, rdn := range dn.RDNs {
+		for _, atv := range rdn.Attributes {
+			if atv.Type == "uid" && atv.Value != "" {
+				return atv.Value
+			}
+		}
+	}
+	return ""
 }
