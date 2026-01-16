@@ -94,6 +94,8 @@ spec:
                 required:
                 - users
                 type: object
+              query:
+                type: string
             required:
             - backends
             - group_name

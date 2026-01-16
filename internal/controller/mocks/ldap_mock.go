@@ -87,6 +87,21 @@ func (m *MockLDAPClient) EXPECT() *MockLDAPClientMockRecorder {
 	return m.recorder
 }
 
+// GetQueryMembers mocks base method.
+func (m *MockLDAPClient) GetQueryMembers(ctx context.Context, query string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetQueryMembers", ctx, query)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetQueryMembers indicates an expected call of GetQueryMembers.
+func (mr *MockLDAPClientMockRecorder) GetQueryMembers(ctx, query interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetQueryMembers", reflect.TypeOf((*MockLDAPClient)(nil).GetQueryMembers), ctx, query)
+}
+
 // GetUserLDAPData mocks base method.
 func (m *MockLDAPClient) GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error) {
 	m.ctrl.T.Helper()

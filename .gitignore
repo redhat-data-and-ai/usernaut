@@ -36,3 +36,6 @@ appconfig/local.yaml
 *.crt
 *.pem
 .env
+
+# Secrets
+secrets/

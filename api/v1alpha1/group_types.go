@@ -39,6 +39,7 @@ type Backend struct {
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
 	GroupName   string       `json:"group_name"`
+	LDAPQuery   string       `json:"ldap_query,omitempty"`
 	Members     Members      `json:"members"`
 	GroupParams []GroupParam `json:"group_params,omitempty"`
 	Backends    []Backend    `json:"backends"`
