@@ -8,7 +8,7 @@ metadata:
   namespace: usernaut
 spec:
   group_name: dataverse-aggregate-mygroupquerybased
-  query: (&(manager=uid=pbhattac,ou=users,dc=redhat,dc=com)(&(title=*senior*)))
+  ldap_query: (&(manager=uid=pbhattac,ou=users,dc=redhat,dc=com)(&(title=*senior*)))
   members:
    users:
     - subhatta

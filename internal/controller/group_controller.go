@@ -118,18 +118,18 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
-		"request": req.NamespacedName.String(),
-		"group":   groupCR.Spec.GroupName,
-		"query":   groupCR.Spec.Query,
-		"members": len(groupCR.Spec.Members.Users),
-		"groups":  groupCR.Spec.Members.Groups,
+		"request":    req.NamespacedName.String(),
+		"group":      groupCR.Spec.GroupName,
+		"ldap_query": groupCR.Spec.LDAPQuery,
+		"members":    len(groupCR.Spec.Members.Users),
+		"groups":     groupCR.Spec.Members.Groups,
 	})
 
 	var err error
 	queryMembers := []string{}
-	if groupCR.Spec.Query != "" {
-		r.log.WithField("query", groupCR.Spec.Query).Info("fetching query members")
-		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Query)
+	if groupCR.Spec.LDAPQuery != "" {
+		r.log.WithField("ldap_query", groupCR.Spec.LDAPQuery).Info("fetching query members")
+		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.LDAPQuery)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching query members")
 			return ctrl.Result{}, err
