@@ -25,7 +25,7 @@ func (l *LDAPConn) GetQueryMembers(ctx context.Context, query string) ([]string,
 		[]string{"uid"},
 		nil,
 	)
-	log.WithField("searchRequest", searchRequest).Info("LDAP search request")
+
 	conn := l.getConn()
 	if conn == nil {
 		log.Error("LDAP connection is nil, cannot perform search")
@@ -41,7 +41,7 @@ func (l *LDAPConn) GetQueryMembers(ctx context.Context, query string) ([]string,
 		log.Info("no LDAP entries found for query; returning empty member list")
 		return []string{}, nil
 	}
-	queryMembers := make([]string, 0)
+	queryMembers := make([]string, 0, len(resp.Entries))
 	for _, entry := range resp.Entries {
 		uid := entry.GetAttributeValue("uid")
 		if uid == "" {

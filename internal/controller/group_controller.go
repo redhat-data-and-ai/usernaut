@@ -54,6 +54,10 @@ import (
 
 const (
 	groupFinalizer = "operator.dataverse.redhat.com/finalizer"
+
+	// requeueAfter is the duration after which the group controller will requeue the group for reconciliation
+	// this takes care of updating users in ldap query based groups
+	requeueAfter = 8 * time.Hour
 )
 
 // GroupReconciler reconciles a Group object
@@ -145,7 +149,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
-	r.log.WithField("unique_members", uniqueMembers).Info("unique members")
+	r.log.WithField("unique_members", uniqueMembers).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
@@ -191,7 +195,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Step 5: Update status and handle errors
 	return ctrl.Result{
-		RequeueAfter: 8 * time.Hour,
+		RequeueAfter: requeueAfter,
 	}, r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
 }
 
