@@ -173,7 +173,7 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 		"userID":  userID,
 	})
 
-	log.Info("deleting user")
+	log.Debug("deleting user")
 	endpoint := fmt.Sprintf("/api/v2/users/%s", userID)
 
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodDelete, nil)
@@ -186,6 +186,9 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 		return fmt.Errorf("failed to delete user, status: %s, body: %s", http.StatusText(status), string(resp))
 	}
 
-	log.Info("user deleted successfully")
+	log.WithFields(logrus.Fields{
+		"userID": userID,
+		"status": status,
+	}).Info("user deleted successfully")
 	return nil
 }
