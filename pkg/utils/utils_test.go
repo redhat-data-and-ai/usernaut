@@ -339,8 +339,8 @@ func TestGetTransformGroupName(t *testing.T) {
 			wantErr:      true,
 		},
 		{
-			name:         "assert fivetran transformation for invalid-group-name fails without pattern",
-			input:        "invalid-group-name",
+			name:         "assert fivetran transformation for hello-world-rupa fails without pattern",
+			input:        "hello-world-rupa",
 			output:       "",
 			backend_Name: "fivetran",
 			wantErr:      true,
@@ -466,6 +466,58 @@ func TestStandardizeNameForBackend(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := StandardizeNameForBackend(tt.input)
 			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestGetTransformedGroupNameOrFallback(t *testing.T) {
+	mockCfg := &config.AppConfig{
+		Pattern: map[string][]config.PatternEntry{
+			"default": {
+				{
+					Input:  `dataverse-platform-([a-z0-9]+)`,
+					Output: "$1_group",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		input        string
+		expected     string
+		backend_Name string
+	}{
+		{
+			name:         "matching pattern returns transformed name",
+			input:        "dataverse-platform-test",
+			expected:     "test_group",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "no matching pattern returns sanitized fallback",
+			input:        "hello-world-rupa",
+			expected:     "hello_world_rupa",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "no hyphens returns as-is",
+			input:        "testgroup",
+			expected:     "testgroup",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "multiple hyphens all replaced",
+			input:        "my-test-group-name",
+			expected:     "my_test_group_name",
+			backend_Name: "fivetran",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GetTransformedGroupNameOrFallback(mockCfg, tt.backend_Name, tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

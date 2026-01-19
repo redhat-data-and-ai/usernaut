@@ -322,3 +322,15 @@ func StandardizeNameForBackend(name string) string {
 	// Collapse multiple spaces and trim
 	return strings.Join(strings.Fields(s), " ")
 }
+
+// GetTransformedGroupNameOrFallback attempts to transform a group name using configured patterns.
+// If no pattern matches, it returns a sanitized version (hyphens replaced with underscores).
+// This is useful for cleanup/deletion operations where we want to be graceful.
+func GetTransformedGroupNameOrFallback(cfg *config.AppConfig, typeName, inputStr string) string {
+	transformedName, err := GetTransformedGroupName(cfg, typeName, inputStr)
+	if err != nil {
+		// No pattern matched, use sanitized fallback
+		return strings.ReplaceAll(inputStr, "-", "_")
+	}
+	return transformedName
+}
