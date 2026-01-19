@@ -120,9 +120,9 @@ mockgen: ## Generate mocks.
 		go install github.com/golang/mock/mockgen@latest; \
 	fi
 	@echo "Generating mocks"
-	@mockgen -source=pkg/clients/ldap/client.go -destination=pkg/clients/ldap/mocks/ldap_mock.go -package=mocks LDAPConnClient
-	@mockgen -source=pkg/clients/ldap/client.go -destination=internal/controller/mocks/ldap_mock.go -package=mocks LDAPClient
-	@mockgen -source=pkg/clients/client.go -destination=internal/controller/periodicjobs/mocks/client_mock.go -package=mocks Client
+	@$(GOBIN)/mockgen -source=pkg/clients/ldap/client.go -destination=pkg/clients/ldap/mocks/ldap_mock.go -package=mocks LDAPConnClient
+	@$(GOBIN)/mockgen -source=pkg/clients/ldap/client.go -destination=internal/controller/mocks/ldap_mock.go -package=mocks LDAPClient
+	@$(GOBIN)/mockgen -source=pkg/clients/client.go -destination=internal/controller/periodicjobs/mocks/client_mock.go -package=mocks Client
 
 .PHONY: test
 test: mockgen manifests generate fmt vet envtest ## Run tests.

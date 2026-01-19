@@ -1,0 +1,19 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: Group
+metadata:
+  labels:
+    app.kubernetes.io/name: usernaut
+    app.kubernetes.io/managed-by: kustomize
+  name: dataverse-source-cleanup-test
+  namespace: usernaut
+spec:
+  group_name: dataverse-source-cleanup-test
+  members:
+   users:
+    - ruagrawa
+    - rmandal
+    - subhatta
+  backends:
+  - name: fivetran
+    type: fivetran
+  
