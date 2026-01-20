@@ -18,11 +18,14 @@ output:
 linters:
   enable:
     - asciicheck
+    - canonicalheader
     - dogsled
     - dupword
     - errorlint
     - goconst
+    - godoclint
     - misspell
+    - modernize
     - nakedret
     - nolintlint
     - revive
@@ -30,7 +33,10 @@ linters:
     - testifylint
     - unconvert
     - usestdlibvars
+    - usetesting
     - whitespace
+    - tparallel
+    - paralleltest
   disable:
     - errcheck
   settings:
@@ -38,13 +44,19 @@ linters:
       locale: US
       ignore-rules:
         - noteable
+    modernize:
+      disable:
+        - omitzero
     revive:
       enable-all-rules: false
       rules:
         - name: deep-exit
         - name: get-return
         - name: redundant-import-alias
+        - name: struct-tag
         - name: time-date
+        - name: unused-parameter
+        - name: use-errors-new
         - name: var-naming
     staticcheck:
       checks:
@@ -65,6 +77,7 @@ linters:
         - error-nil
         - expected-actual
         - formatter
+        - go-require
         - len
         - negative-positive
         - nil-compare
@@ -74,6 +87,10 @@ linters:
       http-method: false
       http-status-code: false
       time-date-month: true
+    usetesting:
+      context-background: true
+      context-todo: true
+      os-temp-dir: true
 
   # List of regexps of issue texts to exclude.
   exclusions:
@@ -91,28 +108,8 @@ linters:
       - source: "// GitLab API docs:"
         linters:
           - staticcheck
-      - text: "var-naming: struct field PipelineId should be PipelineID"
-        path: commits\.go
-        linters:
-          - revive
-      - text: "var-naming: struct field SelectiveSyncNamespaceIds should be SelectiveSyncNamespaceIDs"
-        path: geo_nodes\.go
-        linters:
-          - revive
-      - text: "var-naming: struct field RefsUrl should be RefsURL"
-        path: import\.go
-        linters:
-          - revive
-      - text: "var-naming: struct field BitbucketServerUrl should be BitbucketServerURL"
-        path: import\.go
-        linters:
-          - revive
-      - text: "var-naming: struct field CrlUrl should be CrlURL"
-        path: tags\.go
-        linters:
-          - revive
-      - text: "var-naming: type ServicePingNonSqlMetrics should be ServicePingNonSQLMetrics"
-        path: usage_data\.go
+      - path: _test\.go$
+        text: unused-parameter
         linters:
           - revive
     paths:
