@@ -694,7 +694,29 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 
 		// Check if user already has ID for this backend
 		if userID, exists := userBackends[backendKey]; exists && userID != "" {
-			r.backendLogger.WithField("user", user).Debug("user already exists in cache")
+			/*
+			   It handles the case if the userID gets updated in the backend due to unknown
+			   factors like gitlab user logged in,
+			   so Cache gets updated with the new userID.
+			*/
+			if backendType == "gitlab" {
+				userFetched, err := backendClient.FetchUserDetails(ctx, userID)
+				if err != nil {
+					r.backendLogger.WithField("user", user).WithError(err).Error("error fetching user details")
+					return err
+				}
+				if userFetched.ID == userID {
+					r.backendLogger.WithField("user", user).Info("user already exists in cache")
+				} else {
+					r.backendLogger.WithField("user", user).Info("user has logged in, updating cache with new userID")
+					if err := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, userFetched.ID); err != nil {
+						r.backendLogger.WithField("user", user).WithError(err).Error("error updating user details in cache")
+						return err
+					}
+				}
+			} else {
+				r.backendLogger.WithField("user", user).Info("user already exists in cache")
+			}
 			continue
 		}
 

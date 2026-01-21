@@ -18,6 +18,10 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -80,6 +84,14 @@ var _ = Describe("Group Controller", func() {
 				InMemory: &inmemory.Config{
 					DefaultExpiration: int32(-1),
 					CleanupInterval:   int32(-1),
+				},
+			},
+			Pattern: map[string][]config.PatternEntry{
+				"default": {
+					{
+						Input:  "(.*)",
+						Output: "$1",
+					},
 				},
 			},
 		}
@@ -350,6 +362,128 @@ var _ = Describe("Group Controller", func() {
 			Expect(status.Name).To(Equal("gitlab-main"))
 			Expect(status.Status).To(BeFalse())
 			Expect(status.Message).To(ContainSubstring("missing required connection parameters"))
+		})
+
+		It("should update user ID in cache when gitlab backend returns a different ID", func() {
+			By("simulating a user login scenario where cache has old ID (username) but backend has new ID (integer)")
+
+			cleanup := setupSafeTestConfig()
+			defer cleanup()
+
+			userEmail := "usernauttestuser@example.com"
+			oldID := "usernauttestuser" // to be stored in cache (username)
+			newID := 737373             // to be returned by backend (as userID as integer)
+
+			// Setup Mock Server
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+
+				// Mock User Details Fetch via Username (GET /api/v4/users?username=usernauttestuser)
+				// This happens because "usernauttestuser" is not an integer, so the client falls back to username search
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v4/users" && r.URL.Query().Get("username") == oldID {
+					// Return the user with the NEW numeric ID
+					json.NewEncoder(w).Encode([]map[string]interface{}{{
+						"id":       newID,
+						"username": oldID,
+						"name":     "Usernaut Test User",
+						"email":    userEmail,
+						"state":    "active",
+					}})
+					return
+				}
+
+				// Mock Team Creation/Fetch (needed so the flow reaches user processing)
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v4/groups/test-group-gitlab" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if r.Method == http.MethodPost && r.URL.Path == "/api/v4/groups" {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"id":   1628041,
+						"name": "test-group-gitlab",
+						"path": "test-group-gitlab",
+					})
+					return
+				}
+				// Mock Team Members Fetch
+				if r.Method == http.MethodGet &&
+					(r.URL.Path == "/api/v4/groups/1628041/members" || r.URL.Path == "/api/v4/groups/1628041/members/all") {
+					json.NewEncoder(w).Encode([]interface{}{})
+					return
+				}
+
+				// Mock Add Member
+				if r.Method == http.MethodPost && r.URL.Path == "/api/v4/groups/1628041/members" {
+					w.WriteHeader(http.StatusCreated)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"id":       newID,
+						"username": "usernaut-test-user",
+						"name":     "Test User",
+						"state":    "active",
+					})
+					return
+				}
+
+				// Default fallback
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer ts.Close()
+
+			gitlabBackend := config.Backend{
+				Name:    "gitlab",
+				Type:    "gitlab",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyUrl:           ts.URL,
+					keyParentGroupId: 123456,
+					"token":          "mock-token",
+				},
+			}
+			reconciler, ldapClient := setupTestReconciler([]config.Backend{gitlabBackend})
+
+			// Set initial cache state
+			backendKey := "gitlab_gitlab"
+			err := reconciler.Store.User.SetBackend(ctx, userEmail, backendKey, oldID)
+			Expect(err).NotTo(HaveOccurred())
+
+			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
+				"cn":          "CN-test",
+				"sn":          "SN-test",
+				"displayName": "Usernaut Test User",
+				"mail":        userEmail,
+				"uid":         "uid-test",
+			}, nil).AnyTimes()
+
+			groupName := "test-group-github"
+			group := &usernautdevv1alpha1.Group{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      groupName,
+					Namespace: "default",
+				},
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: groupName,
+					Members: usernautdevv1alpha1.Members{
+						Users: []string{"testuser"},
+					},
+					Backends: []usernautdevv1alpha1.Backend{
+						{Name: "gitlab", Type: "gitlab"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, group)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, group) }()
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: groupName, Namespace: "default"},
+			})
+			// Expect no error if the mock server handles everything correctly
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify Cache Update
+			backends, err := reconciler.Store.User.GetBackends(ctx, userEmail)
+			Expect(err).NotTo(HaveOccurred())
+			// The ID should be updated to the new one (737373)
+			Expect(backends[backendKey]).To(Equal(fmt.Sprintf("%d", newID)))
 		})
 	})
 })
