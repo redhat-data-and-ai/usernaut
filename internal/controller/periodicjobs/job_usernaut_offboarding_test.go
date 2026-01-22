@@ -3,8 +3,11 @@ package periodicjobs
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -16,11 +19,58 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
 
+// setupTestConfig creates a minimal test config environment to avoid file read panics
+// Returns a cleanup function that should be called with defer
+func setupTestConfig(t *testing.T) func() {
+	tempDir, err := os.MkdirTemp("", "usernaut-test")
+	require.NoError(t, err)
+
+	configDir := filepath.Join(tempDir, "appconfig")
+	err = os.MkdirAll(configDir, 0755)
+	require.NoError(t, err)
+
+	// Create a minimal test config without file references
+	configContent := `app:
+  name: "usernaut-test"
+  version: "0.0.1"
+  environment: "test"
+cache:
+  driver: "memory"
+  inmemory:
+    defaultExpiration: -1
+    cleanupInterval: -1
+usernaut_user_offboarding_job_interval: "24h"
+`
+	err = os.WriteFile(filepath.Join(configDir, "default.yaml"), []byte(configContent), 0644)
+	require.NoError(t, err)
+
+	// Set WORKDIR to point to our test directory
+	oldWorkdir := os.Getenv("WORKDIR")
+	err = os.Setenv("WORKDIR", tempDir)
+	require.NoError(t, err)
+
+	// Force reload of config to pick up the test config
+	_, err = config.LoadConfig("default")
+	require.NoError(t, err)
+
+	return func() {
+		if oldWorkdir != "" {
+			_ = os.Setenv("WORKDIR", oldWorkdir)
+		} else {
+			_ = os.Unsetenv("WORKDIR")
+		}
+		_ = os.RemoveAll(tempDir)
+	}
+}
+
 // TestUserOffboardingJob tests the offboarding job using mocks
 func TestUserOffboardingJob(t *testing.T) {
+	defer setupTestConfig(t)()
+
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -124,6 +174,8 @@ func TestUserOffboardingJob(t *testing.T) {
 
 // TestUserOffboardingJobBackendErrors tests error handling
 func TestUserOffboardingJobBackendErrors(t *testing.T) {
+	defer setupTestConfig(t)()
+
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -187,6 +239,8 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 
 // TestUserOffboardingJobEmptyUserList tests handling of empty user list
 func TestUserOffboardingJobEmptyUserList(t *testing.T) {
+	defer setupTestConfig(t)()
+
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -221,6 +275,8 @@ func TestUserOffboardingJobEmptyUserList(t *testing.T) {
 
 // TestUserOffboardingJobMultipleBackends tests offboarding from multiple backends
 func TestUserOffboardingJobMultipleBackends(t *testing.T) {
+	defer setupTestConfig(t)()
+
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -290,4 +346,58 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 	exists, err := dataStore.User.Exists(ctx, testUser.Email)
 	require.NoError(t, err)
 	assert.False(t, exists, "User should be removed from cache")
+}
+
+// TestUserOffboardingJobInterval tests the GetInterval and GetName methods
+func TestUserOffboardingJobInterval(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+
+	cacheConfig := &inmemory.Config{
+		DefaultExpiration: 60,
+		CleanupInterval:   120,
+	}
+	inMemCache, err := inmemory.NewCache(cacheConfig)
+	require.NoError(t, err)
+
+	dataStore := store.New(inMemCache)
+	backendClients := map[string]clients.Client{}
+	sharedCacheMutex := &sync.RWMutex{}
+
+	job := NewUserOffboardingJob(
+		sharedCacheMutex,
+		dataStore,
+		mockLDAPClient,
+		backendClients,
+	)
+
+	t.Run("GetName_Returns_Correct_Name", func(t *testing.T) {
+		name := job.GetName()
+		assert.Equal(t, UserOffboardingJobName, name, "GetName should return the correct job name")
+	})
+
+	t.Run("GetInterval_Returns_Valid_Duration", func(t *testing.T) {
+		interval := job.GetInterval()
+		// Should return at least the default interval (24 hours)
+		assert.GreaterOrEqual(t, interval, DefaultUserOffboardingJobInterval,
+			"GetInterval should return at least the default interval")
+		// Should be a positive duration
+		assert.Greater(t, interval, time.Duration(0),
+			"GetInterval should return a positive duration")
+	})
+
+	t.Run("GetInterval_Returns_Consistent_Value", func(t *testing.T) {
+		// GetInterval should return a consistent value (either default or configured)
+		interval1 := job.GetInterval()
+		interval2 := job.GetInterval()
+		assert.Equal(t, interval1, interval2,
+			"GetInterval should return a consistent value on multiple calls")
+		// Should be at least the default interval
+		assert.GreaterOrEqual(t, interval1, DefaultUserOffboardingJobInterval,
+			"GetInterval should return at least the default interval")
+	})
 }

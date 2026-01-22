@@ -67,7 +67,8 @@ httpClient:
     requestVolumeThreshold: 20
     circuitBreakerSleepWindow: 5000
     errorPercentThreshold: 50
-    circuitBreakerTimeout: 10000
+    circuitBreakerTimeout: 120000
+
 
 backends:
   - name: fivetran
@@ -111,3 +112,6 @@ apiServer:
 
   cors:
     allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
+
+usernautUserOffboardingInterval: "2h"
+

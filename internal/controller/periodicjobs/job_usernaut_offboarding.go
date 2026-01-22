@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 	"github.com/sirupsen/logrus"
@@ -41,9 +42,9 @@ const (
 	// UserOffboardingJobName is the unique identifier for the user offboarding periodic job.
 	UserOffboardingJobName = "usernaut_user_offboarding"
 
-	// UserOffboardingJobInterval defines how often the user offboarding job runs.
+	// DefaultUserOffboardingJobInterval is the default interval if not configured.
 	// Set to 24 hours to perform daily cleanup of inactive users.
-	UserOffboardingJobInterval = 24 * time.Hour
+	DefaultUserOffboardingJobInterval = 24 * time.Hour
 )
 
 // UserOffboardingJob implements a periodic job that monitors user activity and automatically
@@ -125,9 +126,29 @@ func (uoj *UserOffboardingJob) AddToPeriodicTaskManager(mgr *PeriodicTaskManager
 // the user offboarding job should be executed.
 //
 // Returns:
-//   - time.Duration: The interval between job executions (24 hours)
+//   - time.Duration: The interval between job executions
 func (uoj *UserOffboardingJob) GetInterval() time.Duration {
-	return UserOffboardingJobInterval
+	logger := logger.Logger(context.TODO()).WithFields(logrus.Fields{
+		"job": UserOffboardingJobName,
+	})
+	// Get config to read the interval
+	appConf, err := config.GetConfig()
+	if err != nil {
+		logger.WithError(err).Warn("Failed to load configuration, falling back to default user offboarding interval.")
+		return DefaultUserOffboardingJobInterval
+	}
+	if appConf.UsernautUserOffboardingInterval == "" {
+		return DefaultUserOffboardingJobInterval
+	}
+	parsedInterval, parseErr := time.ParseDuration(appConf.UsernautUserOffboardingInterval)
+	if parseErr != nil {
+		logger.
+			WithField("value", appConf.UsernautUserOffboardingInterval).
+			WithError(parseErr).
+			Warn("Invalid format for user offboarding interval, falling back to default")
+		return DefaultUserOffboardingJobInterval
+	}
+	return parsedInterval
 }
 
 // GetName returns the unique name identifier for this periodic job.
