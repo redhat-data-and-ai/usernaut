@@ -27,8 +27,6 @@ go.work
 *.swo
 *~
 
-appconfig/local.yaml
-
 # Any certificate files
 *.key
 *.csr
