@@ -373,6 +373,14 @@ func (m *Miniredis) Server() *server.Server {
 	return m.srv
 }
 
+// IsReadOnlyCommand checks if a command is marked as read-only
+func (m *Miniredis) IsReadOnlyCommand(cmd string) bool {
+	if m.srv == nil {
+		return false
+	}
+	return m.srv.IsReadOnlyCommand(cmd)
+}
+
 // Dump returns a text version of the selected DB, usable for debugging.
 //
 // Dump limits the maximum length of each key:value to "DumpMaxLineLen" characters.
@@ -404,25 +412,25 @@ func (m *Miniredis) Dump() string {
 		r += fmt.Sprintf("- %s\n", k)
 		t := db.t(k)
 		switch t {
-		case "string":
+		case keyTypeString:
 			r += fmt.Sprintf("%s%s\n", indent, v(db.stringKeys[k]))
-		case "hash":
+		case keyTypeHash:
 			for _, hk := range db.hashFields(k) {
 				r += fmt.Sprintf("%s%s: %s\n", indent, hk, v(db.hashGet(k, hk)))
 			}
-		case "list":
+		case keyTypeList:
 			for _, lk := range db.listKeys[k] {
 				r += fmt.Sprintf("%s%s\n", indent, v(lk))
 			}
-		case "set":
+		case keyTypeSet:
 			for _, mk := range db.setMembers(k) {
 				r += fmt.Sprintf("%s%s\n", indent, v(mk))
 			}
-		case "zset":
+		case keyTypeSortedSet:
 			for _, el := range db.ssetElements(k) {
 				r += fmt.Sprintf("%s%f: %s\n", indent, el.score, v(el.member))
 			}
-		case "stream":
+		case keyTypeStream:
 			for _, entry := range db.streamKeys[k].entries {
 				r += fmt.Sprintf("%s%s\n", indent, entry.ID)
 				ev := entry.Values
@@ -430,7 +438,7 @@ func (m *Miniredis) Dump() string {
 					r += fmt.Sprintf("%s%s%s: %s\n", indent, indent, v(ev[2*i]), v(ev[2*i+1]))
 				}
 			}
-		case "hll":
+		case keyTypeHll:
 			for _, entry := range db.hllKeys {
 				r += fmt.Sprintf("%s%s\n", indent, v(string(entry.Bytes())))
 			}
@@ -466,8 +474,31 @@ func (m *Miniredis) SetError(msg string) {
 	m.srv.SetPreHook(cb)
 }
 
+type argRequirements struct {
+	minimum int
+	maximum *int
+}
+
+func atLeast(n int) argRequirements {
+	return argRequirements{n, nil}
+}
+
+func between(a int, b int) argRequirements {
+	return argRequirements{a, &b}
+}
+
+func exactly(n int) argRequirements {
+	return argRequirements{n, &n}
+}
+
 // isValidCMD returns true if command is valid and can be executed.
-func (m *Miniredis) isValidCMD(c *server.Peer, cmd string) bool {
+func (m *Miniredis) isValidCMD(c *server.Peer, cmd string, args []string, argReqs argRequirements) bool {
+	if len(args) < argReqs.minimum || (argReqs.maximum != nil && len(args) > *argReqs.maximum) {
+		setDirty(c)
+		c.WriteError(errWrongNumber(cmd))
+		return false
+	}
+
 	if !m.handleAuth(c) {
 		return false
 	}
@@ -703,19 +734,19 @@ func (m *Miniredis) copy(
 	}
 
 	switch srcDB.t(src) {
-	case "string":
+	case keyTypeString:
 		destDB.stringKeys[dst] = srcDB.stringKeys[src]
-	case "hash":
+	case keyTypeHash:
 		destDB.hashKeys[dst] = copyHashKey(srcDB.hashKeys[src])
-	case "list":
+	case keyTypeList:
 		destDB.listKeys[dst] = copyListKey(srcDB.listKeys[src])
-	case "set":
+	case keyTypeSet:
 		destDB.setKeys[dst] = copySetKey(srcDB.setKeys[src])
-	case "zset":
+	case keyTypeSortedSet:
 		destDB.sortedsetKeys[dst] = copySortedSet(srcDB.sortedsetKeys[src])
-	case "stream":
+	case keyTypeStream:
 		destDB.streamKeys[dst] = srcDB.streamKeys[src].copy()
-	case "hll":
+	case keyTypeHll:
 		destDB.hllKeys[dst] = srcDB.hllKeys[src].copy()
 	default:
 		panic("missing case")
