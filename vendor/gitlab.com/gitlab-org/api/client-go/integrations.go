@@ -14,20 +14,141 @@
 package gitlab
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 )
 
 type (
 	IntegrationsServiceInterface interface {
+		// ListActiveGroupIntegrations gets a list of all active group integrations.
+		// The vulnerability_events field is only available for GitLab Enterprise Edition.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#list-all-active-integrations
 		ListActiveGroupIntegrations(gid any, opt *ListActiveIntegrationsOptions, options ...RequestOptionFunc) ([]*Integration, *Response, error)
+
+		// SetUpGroupHarbor sets up the Harbor integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#set-up-harbor
 		SetUpGroupHarbor(gid any, opt *SetUpHarborOptions, options ...RequestOptionFunc) (*Integration, *Response, error)
+
+		// DisableGroupHarbor disables the Harbor integration for a group.
+		// Integration settings are reset.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#disable-harbor
 		DisableGroupHarbor(gid any, options ...RequestOptionFunc) (*Response, error)
+
+		// GetGroupHarborSettings gets the Harbor integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#get-harbor-settings
 		GetGroupHarborSettings(gid any, options ...RequestOptionFunc) (*Integration, *Response, error)
+
+		// SetGroupMicrosoftTeamsNotifications sets up Microsoft Teams notifications for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#set-up-microsoft-teams-notifications
 		SetGroupMicrosoftTeamsNotifications(gid any, opt *SetMicrosoftTeamsNotificationsOptions, options ...RequestOptionFunc) (*Integration, *Response, error)
+
+		// DisableGroupMicrosoftTeamsNotifications disables Microsoft Teams notifications
+		// for a group. Integration settings are reset.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#disable-microsoft-teams-notifications
 		DisableGroupMicrosoftTeamsNotifications(gid any, options ...RequestOptionFunc) (*Response, error)
+
+		// GetGroupMicrosoftTeamsNotifications gets the Microsoft Teams notifications for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#get-microsoft-teams-notifications-settings
 		GetGroupMicrosoftTeamsNotifications(gid any, options ...RequestOptionFunc) (*Integration, *Response, error)
+
+		// SetUpGroupJira sets up the Jira integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#set-up-jira
+		SetUpGroupJira(gid any, opt *SetUpJiraOptions, options ...RequestOptionFunc) (*Integration, *Response, error)
+
+		// DisableGroupJira disables the Jira integration for a group.
+		// Integration settings are reset.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#disable-jira
+		DisableGroupJira(gid any, options ...RequestOptionFunc) (*Response, error)
+
+		// GetGroupJiraSettings gets the Jira integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#get-jira-settings
+		GetGroupJiraSettings(gid any, options ...RequestOptionFunc) (*Integration, *Response, error)
+
+		// GetGroupDiscordSettings gets the Discord integration settings for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#discord
+		GetGroupDiscordSettings(gid any, options ...RequestOptionFunc) (*DiscordIntegration, *Response, error)
+
+		// GetGroupTelegramSettings gets the Telegram integration settings for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#telegram
+		GetGroupTelegramSettings(gid any, options ...RequestOptionFunc) (*TelegramIntegration, *Response, error)
+
+		// GetGroupMattermostSettings gets the Mattermost integration settings for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#mattermost-notifications
+		GetGroupMattermostSettings(gid any, options ...RequestOptionFunc) (*MattermostIntegration, *Response, error)
+
+		// GetGroupMatrixSettings gets the Matrix integration settings for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#matrix-notifications
+		GetGroupMatrixSettings(gid any, options ...RequestOptionFunc) (*MatrixIntegration, *Response, error)
+
+		// GetGroupGoogleChatSettings gets the Google Chat integration settings for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#google-chat
+		GetGroupGoogleChatSettings(gid any, options ...RequestOptionFunc) (*GoogleChatIntegration, *Response, error)
+
+		// GetGroupMattermostIntegration retrieves the Mattermost integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#mattermost-notifications
+		GetGroupMattermostIntegration(gid any, options ...RequestOptionFunc) (*GroupMattermostIntegration, *Response, error)
+
+		// SetGroupMattermostIntegration creates or updates the Mattermost integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#mattermost-notifications
+		SetGroupMattermostIntegration(gid any, opt *GroupMattermostIntegrationOptions, options ...RequestOptionFunc) (*GroupMattermostIntegration, *Response, error)
+
+		// DeleteGroupMattermostIntegration removes the Mattermost integration from a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#mattermost-notifications
+		DeleteGroupMattermostIntegration(gid any, options ...RequestOptionFunc) (*Response, error)
+
+		// GetGroupMattermostSlashCommandsIntegration retrieves the Mattermost slash commands integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#mattermost-slash-commands
+		GetGroupMattermostSlashCommandsIntegration(gid any, options ...RequestOptionFunc) (*GroupMattermostSlashCommandsIntegration, *Response, error)
+
+		// SetGroupMattermostSlashCommandsIntegration creates or updates the Mattermost slash commands integration for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#mattermost-slash-commands
+		SetGroupMattermostSlashCommandsIntegration(gid any, opt *GroupMattermostSlashCommandsIntegrationOptions, options ...RequestOptionFunc) (*GroupMattermostSlashCommandsIntegration, *Response, error)
+
+		// DeleteGroupMattermostSlashCommandsIntegration removes the Mattermost slash commands integration from a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/group_integrations/#mattermost-slash-commands
+		DeleteGroupMattermostSlashCommandsIntegration(gid any, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// IntegrationsService handles communication with the group
@@ -47,7 +168,7 @@ var _ IntegrationsServiceInterface = (*IntegrationsService)(nil)
 // https://docs.gitlab.com/api/group_integrations/
 // https://docs.gitlab.com/api/project_integrations/
 type Integration struct {
-	ID                             int        `json:"id"`
+	ID                             int64      `json:"id"`
 	Title                          string     `json:"title"`
 	Slug                           string     `json:"slug"`
 	CreatedAt                      *time.Time `json:"created_at"`
@@ -74,6 +195,101 @@ type Integration struct {
 	Inherited                      bool       `json:"inherited"`
 }
 
+// DiscordIntegration represents the Discord integration settings.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/group_integrations/#discord
+type DiscordIntegration struct {
+	Integration
+	Properties DiscordIntegrationProperties `json:"properties"`
+}
+
+// DiscordIntegrationProperties represents Discord specific properties.
+type DiscordIntegrationProperties struct {
+	NotifyOnlyBrokenPipelines bool   `json:"notify_only_broken_pipelines,omitempty"`
+	BranchesToBeNotified      string `json:"branches_to_be_notified,omitempty"`
+}
+
+// TelegramIntegration represents the Telegram integration settings.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/group_integrations/#telegram
+type TelegramIntegration struct {
+	Integration
+	Properties TelegramIntegrationProperties `json:"properties"`
+}
+
+// TelegramIntegrationProperties represents Telegram specific properties.
+type TelegramIntegrationProperties struct {
+	Hostname                  string `json:"hostname,omitempty"`
+	Room                      string `json:"room,omitempty"`
+	Thread                    string `json:"thread,omitempty"`
+	NotifyOnlyBrokenPipelines bool   `json:"notify_only_broken_pipelines,omitempty"`
+	BranchesToBeNotified      string `json:"branches_to_be_notified,omitempty"`
+}
+
+// MattermostIntegration represents the Mattermost integration settings.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/group_integrations/#mattermost-notifications
+type MattermostIntegration struct {
+	Integration
+	Properties MattermostIntegrationProperties `json:"properties"`
+}
+
+// MattermostIntegrationProperties represents Mattermost specific properties.
+type MattermostIntegrationProperties struct {
+	Username                   string `json:"username,omitempty"`
+	Channel                    string `json:"channel,omitempty"`
+	NotifyOnlyBrokenPipelines  bool   `json:"notify_only_broken_pipelines,omitempty"`
+	BranchesToBeNotified       string `json:"branches_to_be_notified,omitempty"`
+	LabelsToBeNotified         string `json:"labels_to_be_notified,omitempty"`
+	LabelsToBeNotifiedBehavior string `json:"labels_to_be_notified_behavior,omitempty"`
+	PushChannel                string `json:"push_channel,omitempty"`
+	IssueChannel               string `json:"issue_channel,omitempty"`
+	ConfidentialIssueChannel   string `json:"confidential_issue_channel,omitempty"`
+	MergeRequestChannel        string `json:"merge_request_channel,omitempty"`
+	NoteChannel                string `json:"note_channel,omitempty"`
+	ConfidentialNoteChannel    string `json:"confidential_note_channel,omitempty"`
+	TagPushChannel             string `json:"tag_push_channel,omitempty"`
+	PipelineChannel            string `json:"pipeline_channel,omitempty"`
+	WikiPageChannel            string `json:"wiki_page_channel,omitempty"`
+	DeploymentChannel          string `json:"deployment_channel,omitempty"`
+	IncidentChannel            string `json:"incident_channel,omitempty"`
+}
+
+// MatrixIntegration represents the Matrix integration settings.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/group_integrations/#matrix-notifications
+type MatrixIntegration struct {
+	Integration
+	Properties MatrixIntegrationProperties `json:"properties"`
+}
+
+// MatrixIntegrationProperties represents Matrix specific properties.
+type MatrixIntegrationProperties struct {
+	Hostname                  string `json:"hostname,omitempty"`
+	Room                      string `json:"room,omitempty"`
+	NotifyOnlyBrokenPipelines bool   `json:"notify_only_broken_pipelines,omitempty"`
+	BranchesToBeNotified      string `json:"branches_to_be_notified,omitempty"`
+}
+
+// GoogleChatIntegration represents the Google Chat integration settings.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/group_integrations/#google-chat
+type GoogleChatIntegration struct {
+	Integration
+	Properties GoogleChatIntegrationProperties `json:"properties"`
+}
+
+// GoogleChatIntegrationProperties represents Google Chat specific properties.
+type GoogleChatIntegrationProperties struct {
+	NotifyOnlyBrokenPipelines bool   `json:"notify_only_broken_pipelines,omitempty"`
+	BranchesToBeNotified      string `json:"branches_to_be_notified,omitempty"`
+}
+
 // ListActiveIntegrationsOptions represents the available
 // ListActiveIntegrations() options.
 //
@@ -83,30 +299,14 @@ type ListActiveIntegrationsOptions struct {
 	ListOptions
 }
 
-// ListActiveGroupIntegrations gets a list of all active group integrations.
-// The vulnerability_events field is only available for GitLab Enterprise Edition.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_integrations/#list-all-active-integrations
 func (s *IntegrationsService) ListActiveGroupIntegrations(gid any, opt *ListActiveIntegrationsOptions, options ...RequestOptionFunc) ([]*Integration, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/integrations", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var integrations []*Integration
-	resp, err := s.client.Do(req, &integrations)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return integrations, resp, nil
+	return do[[]*Integration](
+		s.client,
+		withPath("groups/%s/integrations", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // SetUpHarborOptions represents the available SetUpGroupHarbor()
@@ -122,76 +322,33 @@ type SetUpHarborOptions struct {
 	UseInheritedSettings *bool   `url:"use_inherited_settings,omitempty" json:"use_inherited_settings,omitempty"`
 }
 
-// SetUpGroupHarbor sets up the Harbor integration for a group.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_integrations/#set-up-harbor
 func (s *IntegrationsService) SetUpGroupHarbor(gid any, opt *SetUpHarborOptions, options ...RequestOptionFunc) (*Integration, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/integrations/harbor", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	integration := new(Integration)
-	resp, err := s.client.Do(req, integration)
-	if err != nil {
-		return nil, resp, err
-	}
-	return integration, resp, nil
+	return do[*Integration](
+		s.client,
+		withPath("groups/%s/integrations/harbor", GroupID{gid}),
+		withMethod(http.MethodPut),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
-// DisableGroupHarbor disables the Harbor integration for a group.
-// Integration settings are reset.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_integrations/#disable-harbor
 func (s *IntegrationsService) DisableGroupHarbor(gid any, options ...RequestOptionFunc) (*Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, err
-	}
-	u := fmt.Sprintf("groups/%s/integrations/harbor", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := s.client.Do(req, nil)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
+	_, resp, err := do[none](
+		s.client,
+		withPath("groups/%s/integrations/harbor", GroupID{gid}),
+		withMethod(http.MethodDelete),
+		withRequestOpts(options...),
+	)
+	return resp, err
 }
 
-// GetGroupHarborSettings gets the Harbor integration for a group.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_integrations/#get-harbor-settings
 func (s *IntegrationsService) GetGroupHarborSettings(gid any, options ...RequestOptionFunc) (*Integration, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/integrations/harbor", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	integration := new(Integration)
-	resp, err := s.client.Do(req, integration)
-	if err != nil {
-		return nil, nil, err
-	}
-	return integration, resp, nil
+	return do[*Integration](
+		s.client,
+		withPath("groups/%s/integrations/harbor", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
 }
 
 // SetMicrosoftTeamsNotificationsOptions represents the available
@@ -217,74 +374,128 @@ type SetMicrosoftTeamsNotificationsOptions struct {
 	UseInheritedSettings      *bool   `url:"use_inherited_settings,omitempty"`
 }
 
-// SetGroupMicrosoftTeamsNotifications sets up Microsoft Teams notifications for a group.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_integrations/#set-up-microsoft-teams-notifications
 func (s *IntegrationsService) SetGroupMicrosoftTeamsNotifications(gid any, opt *SetMicrosoftTeamsNotificationsOptions, options ...RequestOptionFunc) (*Integration, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/integrations/microsoft_teams", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	integration := new(Integration)
-	resp, err := s.client.Do(req, integration)
-	if err != nil {
-		return nil, resp, err
-	}
-	return integration, resp, nil
+	return do[*Integration](
+		s.client,
+		withPath("groups/%s/integrations/microsoft-teams", GroupID{gid}),
+		withMethod(http.MethodPut),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
-// DisableGroupMicrosoftTeamsNotifications disables Microsoft Teams notifications
-// for a group. Integration settings are reset.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_integrations/#disable-microsoft-teams-notifications
 func (s *IntegrationsService) DisableGroupMicrosoftTeamsNotifications(gid any, options ...RequestOptionFunc) (*Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, err
-	}
-	u := fmt.Sprintf("groups/%s/integrations/microsoft_teams", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := s.client.Do(req, nil)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
+	_, resp, err := do[none](
+		s.client,
+		withPath("groups/%s/integrations/microsoft-teams", GroupID{gid}),
+		withMethod(http.MethodDelete),
+		withRequestOpts(options...),
+	)
+	return resp, err
 }
 
-// GetGroupMicrosoftTeamsNotifications gets the Microsoft Teams notifications for a group.
+func (s *IntegrationsService) GetGroupMicrosoftTeamsNotifications(gid any, options ...RequestOptionFunc) (*Integration, *Response, error) {
+	return do[*Integration](
+		s.client,
+		withPath("groups/%s/integrations/microsoft-teams", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
+}
+
+// SetUpJiraOptions represents the available SetUpJira() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/group_integrations/#get-microsoft-teams-notifications-settings
-func (s *IntegrationsService) GetGroupMicrosoftTeamsNotifications(gid any, options ...RequestOptionFunc) (*Integration, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/integrations/microsoft_teams", PathEscape(group))
+// https://docs.gitlab.com/api/group_integrations/#set-up-jira
+type SetUpJiraOptions struct {
+	URL                          *string   `url:"url,omitempty" json:"url,omitempty"`
+	APIURL                       *string   `url:"api_url,omitempty" json:"api_url,omitempty"`
+	Username                     *string   `url:"username,omitempty" json:"username,omitempty"`
+	Password                     *string   `url:"password,omitempty" json:"password,omitempty"`
+	Active                       *bool     `url:"active,omitempty" json:"active,omitempty"`
+	JiraAuthType                 *int64    `url:"jira_auth_type,omitempty" json:"jira_auth_type,omitempty"`
+	JiraIssuePrefix              *string   `url:"jira_issue_prefix,omitempty" json:"jira_issue_prefix,omitempty"`
+	JiraIssueRegex               *string   `url:"jira_issue_regex,omitempty" json:"jira_issue_regex,omitempty"`
+	JiraIssueTransitionAutomatic *bool     `url:"jira_issue_transition_automatic,omitempty" json:"jira_issue_transition_automatic,omitempty"`
+	JiraIssueTransitionID        *string   `url:"jira_issue_transition_id,omitempty" json:"jira_issue_transition_id,omitempty"`
+	CommitEvents                 *bool     `url:"commit_events,omitempty" json:"commit_events,omitempty"`
+	MergeRequestsEvents          *bool     `url:"merge_requests_events,omitempty" json:"merge_requests_events,omitempty"`
+	CommentOnEventEnabled        *bool     `url:"comment_on_event_enabled,omitempty" json:"comment_on_event_enabled,omitempty"`
+	IssuesEnabled                *bool     `url:"issues_enabled,omitempty" json:"issues_enabled,omitempty"`
+	ProjectKeys                  *[]string `url:"project_keys,omitempty" json:"project_keys,omitempty"`
+	UseInheritedSettings         *bool     `url:"use_inherited_settings,omitempty" json:"use_inherited_settings,omitempty"`
+}
 
-	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
-	if err != nil {
-		return nil, nil, err
-	}
+func (s *IntegrationsService) SetUpGroupJira(gid any, opt *SetUpJiraOptions, options ...RequestOptionFunc) (*Integration, *Response, error) {
+	return do[*Integration](
+		s.client,
+		withPath("groups/%s/integrations/jira", GroupID{gid}),
+		withMethod(http.MethodPut),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
+}
 
-	integration := new(Integration)
-	resp, err := s.client.Do(req, integration)
-	if err != nil {
-		return nil, nil, err
-	}
-	return integration, resp, nil
+func (s *IntegrationsService) DisableGroupJira(gid any, options ...RequestOptionFunc) (*Response, error) {
+	_, resp, err := do[none](
+		s.client,
+		withPath("groups/%s/integrations/jira", GroupID{gid}),
+		withMethod(http.MethodDelete),
+		withRequestOpts(options...),
+	)
+	return resp, err
+}
+
+func (s *IntegrationsService) GetGroupJiraSettings(gid any, options ...RequestOptionFunc) (*Integration, *Response, error) {
+	return do[*Integration](
+		s.client,
+		withPath("groups/%s/integrations/jira", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
+}
+
+func (s *IntegrationsService) GetGroupDiscordSettings(gid any, options ...RequestOptionFunc) (*DiscordIntegration, *Response, error) {
+	return do[*DiscordIntegration](
+		s.client,
+		withPath("groups/%s/integrations/discord", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
+}
+
+func (s *IntegrationsService) GetGroupTelegramSettings(gid any, options ...RequestOptionFunc) (*TelegramIntegration, *Response, error) {
+	return do[*TelegramIntegration](
+		s.client,
+		withPath("groups/%s/integrations/telegram", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
+}
+
+func (s *IntegrationsService) GetGroupMattermostSettings(gid any, options ...RequestOptionFunc) (*MattermostIntegration, *Response, error) {
+	return do[*MattermostIntegration](
+		s.client,
+		withPath("groups/%s/integrations/mattermost", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
+}
+
+func (s *IntegrationsService) GetGroupMatrixSettings(gid any, options ...RequestOptionFunc) (*MatrixIntegration, *Response, error) {
+	return do[*MatrixIntegration](
+		s.client,
+		withPath("groups/%s/integrations/matrix", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
+}
+
+func (s *IntegrationsService) GetGroupGoogleChatSettings(gid any, options ...RequestOptionFunc) (*GoogleChatIntegration, *Response, error) {
+	return do[*GoogleChatIntegration](
+		s.client,
+		withPath("groups/%s/integrations/hangouts-chat", GroupID{gid}),
+		withMethod(http.MethodGet),
+		withRequestOpts(options...),
+	)
 }
