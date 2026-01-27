@@ -339,8 +339,8 @@ func TestGetTransformGroupName(t *testing.T) {
 			wantErr:      true,
 		},
 		{
-			name:         "assert fivetran transformation for hello-world-rupa fails without pattern",
-			input:        "hello-world-rupa",
+			name:         "assert fivetran transformation for invalid-group-name fails without pattern",
+			input:        "invalid-group-name",
 			output:       "",
 			backend_Name: "fivetran",
 			wantErr:      true,
@@ -384,8 +384,8 @@ func TestGetTransformedGroupNameOrFallback(t *testing.T) {
 		},
 		{
 			name:         "no matching pattern returns sanitized fallback",
-			input:        "hello-world-rupa",
-			expected:     "hello_world_rupa",
+			input:        "group-name",
+			expected:     "group_name",
 			backend_Name: "fivetran",
 		},
 		{
