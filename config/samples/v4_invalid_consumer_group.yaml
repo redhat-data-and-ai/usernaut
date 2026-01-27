@@ -1,0 +1,19 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: Group
+metadata:
+  labels:
+    app.kubernetes.io/name: usernaut
+    app.kubernetes.io/managed-by: kustomize
+  name: invalid-consumer-usernaut-test
+  namespace: usernaut
+spec:
+  group_name: invalid-consumer-usernaut-test
+  members:
+   users:
+    - ruagrawa
+    - atikande
+    - subhatta
+  backends:
+  - name: fivetran
+    type: fivetran
+  

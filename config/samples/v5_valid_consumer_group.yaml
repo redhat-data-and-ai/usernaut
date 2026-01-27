@@ -1,0 +1,17 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: Group
+metadata:
+  labels:
+    app.kubernetes.io/name: usernaut
+    app.kubernetes.io/managed-by: kustomize
+  name: dataverse-aggregate-usernaut
+  namespace: usernaut
+spec:
+  group_name: dataverse-aggregate-usernaut
+  members:
+   users:
+    - ruagrawa
+    - rmandal
+  backends:
+  - name: fivetran
+    type: fivetran
