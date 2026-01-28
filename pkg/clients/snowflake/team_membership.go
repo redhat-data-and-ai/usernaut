@@ -137,3 +137,9 @@ func (c *SnowflakeClient) makeRoleRequest(ctx context.Context, teamID, endpoint 
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodPost, payload)
 	return resp, status, err
 }
+
+func (c *SnowflakeClient) ReconcileGroupParams(
+	ctx context.Context, teamID string, groupParams structs.TeamParams) error {
+	// TODO: Implement group parameter reconciliation for Snowflake if applicable.
+	return nil
+}

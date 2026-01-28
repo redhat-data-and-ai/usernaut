@@ -110,3 +110,44 @@ func (g *GitlabClient) RemoveUserFromTeam(ctx context.Context, teamID string, us
 	}
 	return nil
 }
+
+func (g *GitlabClient) ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"service":     "gitlab",
+		"teamID":      teamID,
+		"groupParams": groupParams,
+	})
+	log.Info("reconciling group params")
+
+	team, err := g.FetchTeamDetails(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	if team.ID == "" {
+		return fmt.Errorf("team %s not found to reconcile group params", teamID)
+	}
+
+	teamIDInt, convErr := strconv.Atoi(teamID)
+	if convErr != nil {
+		return convErr
+	}
+	switch groupParams.Property {
+	case "project_access_paths":
+		for _, value := range groupParams.Value {
+			statusCode, err := g.addGroupAsProjectDeveloper(teamIDInt, value)
+			if err != nil {
+				return fmt.Errorf("failed to add group %s as project developer to Project Path %s: %w", team.Name, value, err)
+			}
+			if statusCode != http.StatusCreated {
+				return fmt.Errorf("failed to add group %s as project developer to Project Path %s: unexpected status code %d",
+					team.Name, value, statusCode)
+			}
+			log.Infof("group %s added as project developer to Project Path %s successfully with status: %d",
+				team.Name, value, statusCode)
+		}
+	default:
+		log.WithField("property", groupParams.Property).Warn("unsupported group property for gitlab backend")
+	}
+
+	return nil
+}

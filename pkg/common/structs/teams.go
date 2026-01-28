@@ -1,11 +1,10 @@
 package structs
 
 type Team struct {
-	ID          string     `json:"id,omitempty"`
-	Name        string     `json:"name"`
-	Description string     `json:"description,omitempty"`
-	Role        string     `json:"role,omitempty"`
-	TeamParams  TeamParams `json:"team_params,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Role        string `json:"role,omitempty"`
 }
 
 type TeamParams struct {

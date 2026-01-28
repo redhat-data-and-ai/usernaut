@@ -127,3 +127,8 @@ func (rC *RoverClient) AddUserToTeam(ctx context.Context, teamID string, userIDs
 func (rC *RoverClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
 	return rC.modify(ctx, "backend.redhatrover.RemoveUserFromTeam", "remove", teamID, userIDs)
 }
+
+func (rC *RoverClient) ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error {
+	// TODO: Implement group parameter reconciliation for Red Hat Rover if applicable.
+	return nil
+}
