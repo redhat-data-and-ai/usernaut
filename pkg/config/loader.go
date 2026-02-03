@@ -17,13 +17,22 @@ limitations under the License.
 package config
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/spf13/viper"
 )
 
@@ -35,6 +44,16 @@ const (
 	WorkDirEnv            = "WORKDIR"
 	EnvPrefix             = "env|"
 	FilePrefix            = "file|"
+	maxConfigSize         = 2 * 1024 * 1024 // 2MB
+	configHTTPTimeout     = 30 * time.Second
+	configUserAgent       = "usernaut-config-loader/1.0"
+)
+
+var (
+	// configHTTPClient is a shared HTTP client for loading configs from URLs
+	// It's initialized once and reused for all HTTP config requests
+	configHTTPClient     *http.Client
+	configHTTPClientOnce sync.Once
 )
 
 // Options is config options.
@@ -178,5 +197,152 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 	if err := c.viper.Unmarshal(config); err != nil {
 		return err
 	}
+	return nil
+}
+
+// getConfigHTTPClient returns a shared HTTP client for config loading.
+// The client is initialized once and reused for all requests.
+func getConfigHTTPClient() *http.Client {
+	configHTTPClientOnce.Do(func() {
+		configHTTPClient = &http.Client{
+			Timeout: configHTTPTimeout,
+			Transport: &http.Transport{
+				MaxIdleConns:    10,
+				IdleConnTimeout: 30 * time.Second,
+			},
+		}
+	})
+	return configHTTPClient
+}
+
+// LoadConfigFromPath reads a configuration from a file path or HTTP URL and unmarshalls into config.
+// The path can be:
+//   - A local file path (relative to WORKDIR/appconfig or absolute)
+//   - An HTTP/HTTPS URL
+//
+// For local file paths, it uses the same config path resolution as the main config loader.
+// For HTTP URLs, it fetches the content via HTTP GET request with context support.
+func LoadConfigFromPath(ctx context.Context, configPath string, config interface{}) error {
+	// Check if it's an HTTP URL and validate it
+	if strings.HasPrefix(configPath, "http://") || strings.HasPrefix(configPath, "https://") {
+		return loadConfigFromURL(ctx, configPath, config)
+	}
+
+	// Reject other URL schemes (like file://, ftp://, etc.)
+	if strings.Contains(configPath, "://") {
+		parsedURL, err := url.Parse(configPath)
+		if err == nil && parsedURL.Scheme != "" {
+			return fmt.Errorf("unsupported URL scheme %q: only http and https are allowed", parsedURL.Scheme)
+		}
+	}
+
+	// Handle local file path
+	resolvedPath, err := resolveLocalConfigPath(configPath)
+	if err != nil {
+		return err
+	}
+
+	// Read and unmarshal the file
+	data, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file %s: %w", resolvedPath, err)
+	}
+
+	if err := yaml.Unmarshal(data, config); err != nil {
+		return fmt.Errorf("failed to unmarshal config from %s: %w", resolvedPath, err)
+	}
+
+	return nil
+}
+
+// resolveLocalConfigPath resolves a local file path, handling relative paths and extensions.
+func resolveLocalConfigPath(configPath string) (string, error) {
+	// If it's already absolute, return as-is
+	if filepath.IsAbs(configPath) {
+		return configPath, nil
+	}
+
+	// Add .yaml extension if not present
+	if !strings.Contains(filepath.Base(configPath), ".") {
+		configPath = configPath + "." + DefaultConfigType
+	}
+
+	// Try to find in config directory using same resolution as NewDefaultOptions
+	opts := NewDefaultOptions()
+	configDir := opts.configPath
+
+	fullPath := filepath.Join(configDir, configPath)
+	if _, err := os.Stat(fullPath); err == nil {
+		return fullPath, nil
+	}
+
+	// If not found in config dir, try as relative to current dir
+	if _, err := os.Stat(configPath); err == nil {
+		return configPath, nil
+	}
+
+	return "", fmt.Errorf("config file not found: %s", configPath)
+}
+
+// loadConfigFromURL fetches configuration from an HTTP/HTTPS URL and unmarshalls it.
+// It validates the URL, uses a shared HTTP client, and includes proper error handling.
+func loadConfigFromURL(ctx context.Context, configURL string, config interface{}) error {
+	// Validate URL format and scheme
+	parsedURL, err := url.Parse(configURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL format %q: %w", configURL, err)
+	}
+
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("unsupported URL scheme %q: only http and https are allowed", parsedURL.Scheme)
+	}
+
+	// Create request with context for cancellation/timeout support
+	req, err := http.NewRequestWithContext(ctx, "GET", configURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request for %s: %w", configURL, err)
+	}
+
+	// Set User-Agent header to identify the client
+	req.Header.Set("User-Agent", configUserAgent)
+
+	// Use shared HTTP client
+	client := getConfigHTTPClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch config from %s: %w", configURL, err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("warning: failed to close response body from %s: %v", configURL, err)
+		}
+	}()
+
+	// Check status code and include response body in error for debugging
+	if resp.StatusCode != http.StatusOK {
+		// Read error response body (limited) for better error messages
+		errorBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxConfigSize)) // Limit error body to 1KB
+		errorMsg := fmt.Sprintf("HTTP %d", resp.StatusCode)
+		if readErr == nil && len(errorBody) > 0 {
+			errorMsg += fmt.Sprintf(" - %s", string(errorBody))
+		}
+		return fmt.Errorf("failed to fetch config from %s: %s", configURL, errorMsg)
+	}
+
+	// Read response body with size limit
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxConfigSize))
+	if err != nil {
+		return fmt.Errorf("failed to read response body from %s: %w", configURL, err)
+	}
+
+	// Check if we hit the size limit (io.LimitReader doesn't return error on limit)
+	if len(data) >= maxConfigSize {
+		return fmt.Errorf("config file from %s exceeds maximum size of %d bytes", configURL, maxConfigSize)
+	}
+
+	if err := yaml.Unmarshal(data, config); err != nil {
+		return fmt.Errorf("failed to unmarshal config from %s: %w", configURL, err)
+	}
+
 	return nil
 }

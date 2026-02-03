@@ -28,7 +28,9 @@ func (l *LDAPConn) parseLDAPEntry(entry *ldap.Entry) map[string]interface{} {
 
 // executeSearch is a helper method that executes the provided search request.
 // It handles connection management, search execution, and result parsing.
-func (l *LDAPConn) executeSearch(searchRequest *ldap.SearchRequest) (map[string]interface{}, error) {
+func (l *LDAPConn) executeSearch(ctx context.Context,
+	searchRequest *ldap.SearchRequest) (map[string]interface{}, error) {
+	log := logger.Logger(ctx).WithField("searchRequest", searchRequest)
 	conn := l.getConn()
 	if conn == nil {
 		return nil, errors.New("LDAP connection is nil")
@@ -45,6 +47,7 @@ func (l *LDAPConn) executeSearch(searchRequest *ldap.SearchRequest) (map[string]
 		// Handle LDAP "No Such Object" error (code 32)
 		if ldapErr, ok := err.(*ldap.Error); ok {
 			if ldapErr.ResultCode == ldap.LDAPResultNoSuchObject {
+				log.WithError(err).Debug("LDAP Result Code 32: No Such Object")
 				return nil, ErrNoUserFound
 			}
 		}
@@ -52,6 +55,7 @@ func (l *LDAPConn) executeSearch(searchRequest *ldap.SearchRequest) (map[string]
 	}
 
 	if len(resp.Entries) == 0 {
+		log.Warn("no LDAP entries found")
 		return nil, ErrNoUserFound
 	}
 
@@ -74,7 +78,7 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 		nil,
 	)
 
-	userData, err := l.executeSearch(searchRequest)
+	userData, err := l.executeSearch(ctx, searchRequest)
 	if err != nil {
 		if err == ErrNoUserFound {
 			log.Warn("no LDAP entries found for user")
@@ -106,7 +110,7 @@ func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (ma
 		nil,
 	)
 
-	userData, err := l.executeSearch(searchRequest)
+	userData, err := l.executeSearch(ctx, searchRequest)
 	if err != nil {
 		if err == ErrNoUserFound {
 			log.Warn("no LDAP entries found for email")

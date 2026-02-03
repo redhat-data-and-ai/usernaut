@@ -17,11 +17,15 @@ limitations under the License.
 package config
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type TestConfig struct {
@@ -128,4 +132,60 @@ func assertConfigs(t *testing.T, c *TestConfig) {
 
 	// assert that redis password set via environment variable is fetched accurately
 	assert.Equal(t, "redispassword", c.Cache.Redis.Password)
+}
+
+func TestLoadConfigFromPathHTTPURL(t *testing.T) {
+	type TestConfig struct {
+		Value string `yaml:"value"`
+	}
+
+	// Create a test HTTP server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("value: test-config-value\n"))
+	}))
+	defer server.Close()
+
+	var config TestConfig
+	err := LoadConfigFromPath(context.Background(), server.URL+"/config.yaml", &config)
+	require.NoError(t, err)
+	assert.Equal(t, "test-config-value", config.Value)
+}
+
+func TestLoadConfigFromPathInvalidURL(t *testing.T) {
+	type TestConfig struct {
+		Value string
+	}
+
+	var config TestConfig
+
+	// Test invalid URL format (malformed HTTP URL)
+	err := LoadConfigFromPath(context.Background(), "http://[invalid-url", &config)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid URL format")
+
+	// Test unsupported scheme (file:// is not allowed, only http/https)
+	err = LoadConfigFromPath(context.Background(), "file:///etc/config.yaml", &config)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported URL scheme")
+}
+
+func TestLoadConfigFromPathHTTPError(t *testing.T) {
+	type TestConfig struct {
+		Value string
+	}
+
+	// Create a test HTTP server that returns 404
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("Not Found"))
+	}))
+	defer server.Close()
+
+	var config TestConfig
+	err := LoadConfigFromPath(context.Background(), server.URL+"/config.yaml", &config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 404")
+	assert.Contains(t, err.Error(), "Not Found")
 }

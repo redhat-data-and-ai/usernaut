@@ -114,4 +114,4 @@ apiServer:
     allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
 
 usernautUserOffboardingInterval: "2h"
-
+offboardUserExclusionListConfigPath: "default_offboard_user_exclusion_list"
