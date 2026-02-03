@@ -26,13 +26,14 @@ import (
 
 // Config represents the top-level configuration structure
 type AppConfig struct {
-	App                             App                       `yaml:"app"`
-	LDAP                            ldap.LDAP                 `yaml:"ldap"`
-	Cache                           cache.Config              `yaml:"cache"`
-	Backends                        []Backend                 `yaml:"backends"`
-	Pattern                         map[string][]PatternEntry `yaml:"pattern"`
-	UsernautUserOffboardingInterval string                    `yaml:"usernautUserOffboardingInterval"`
-	HttpClient                      struct {
+	App                                 App                       `yaml:"app"`
+	LDAP                                ldap.LDAP                 `yaml:"ldap"`
+	Cache                               cache.Config              `yaml:"cache"`
+	Backends                            []Backend                 `yaml:"backends"`
+	Pattern                             map[string][]PatternEntry `yaml:"pattern"`
+	UsernautUserOffboardingInterval     string                    `yaml:"usernautUserOffboardingInterval"`
+	OffboardUserExclusionListConfigPath string                    `yaml:"offboardUserExclusionListConfigPath"`
+	HttpClient                          struct {
 		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
 		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
 	} `yaml:"httpClient"`
