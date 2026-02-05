@@ -118,6 +118,9 @@ backends:
       sso_sync: true
       # Default persona to assign all groups
       default_persona: "prod"
+      # OAuth credentials for user deletion (required - API tokens don't work for deletion)
+      oauth_client_id: file|path/to/atlan_oauth_client_id
+      oauth_client_secret: file|path/to/atlan_oauth_client_secret
 
 apiServer:
   address: "0.0.0.0:8080"

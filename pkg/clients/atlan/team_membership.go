@@ -45,26 +45,34 @@ func (ac *AtlanClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 	log.Info("fetching team members from Atlan")
 
 	teamMembers := make(map[string]*structs.User)
+	offset := 0
 
-	url := fmt.Sprintf("%s/api/service/groups/%s/members", ac.url, teamID)
-	response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchTeamMembersByTeamID")
-	if err != nil {
-		log.WithError(err).Error("failed to fetch team members from Atlan")
-		return nil, fmt.Errorf("failed to fetch team members from Atlan: %w", err)
-	}
-
-	var apiResponse AtlanGroupMembersResponse
-	if err := json.Unmarshal(response, &apiResponse); err != nil {
-		log.WithError(err).Error("failed to parse team members response from Atlan")
-		return nil, fmt.Errorf("failed to parse team members response from Atlan: %w", err)
-	}
-
-	for _, member := range apiResponse.Records {
-		teamMembers[member.ID] = &structs.User{
-			ID:       member.ID,
-			Email:    member.Email,
-			UserName: member.Username,
+	for {
+		url := fmt.Sprintf("%s/api/service/groups/%s/members?limit=%d&offset=%d", ac.url, teamID, paginationLimit, offset)
+		response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchTeamMembersByTeamID")
+		if err != nil {
+			log.WithError(err).Error("failed to fetch team members from Atlan")
+			return nil, fmt.Errorf("failed to fetch team members from Atlan: %w", err)
 		}
+
+		var apiResponse AtlanGroupMembersResponse
+		if err := json.Unmarshal(response, &apiResponse); err != nil {
+			log.WithError(err).Error("failed to parse team members response from Atlan")
+			return nil, fmt.Errorf("failed to parse team members response from Atlan: %w", err)
+		}
+
+		for _, member := range apiResponse.Records {
+			teamMembers[member.ID] = &structs.User{
+				ID:       member.ID,
+				Email:    member.Email,
+				UserName: member.Username,
+			}
+		}
+
+		if len(apiResponse.Records) < paginationLimit {
+			break
+		}
+		offset += paginationLimit
 	}
 
 	log.WithField("member_count", len(teamMembers)).Info("fetched team members from Atlan")
