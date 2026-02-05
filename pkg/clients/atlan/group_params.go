@@ -26,7 +26,9 @@ import (
 
 // ReconcileGroupParams reconciles backend-specific parameters for a group/team in Atlan.
 // For Atlan, this handles persona assignment based on the group_params configuration.
-func (ac *AtlanClient) ReconcileGroupParams(ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams) error {
+func (ac *AtlanClient) ReconcileGroupParams(
+	ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams,
+) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service":  "atlan",
 		"teamID":   teamID,
