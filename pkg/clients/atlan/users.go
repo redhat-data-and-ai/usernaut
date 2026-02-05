@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
+	atlansdk "github.com/atlanhq/atlan-go/atlan/assets"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
@@ -161,8 +162,8 @@ func (ac *AtlanClient) DeleteUser(ctx context.Context, userID string) error {
 		return fmt.Errorf("asset_transfer_username is required in atlan config for user deletion")
 	}
 
-	if ac.sdkClient == nil {
-		return fmt.Errorf("atlan SDK client not initialized")
+	if ac.oauthTokenManager == nil {
+		return fmt.Errorf("oauth_client_id and oauth_client_secret are required for user deletion")
 	}
 
 	// The SDK's RemoveUser expects username, not userID
@@ -175,8 +176,22 @@ func (ac *AtlanClient) DeleteUser(ctx context.Context, userID string) error {
 
 	log.WithField("username", userDetails.UserName).Info("removing user via Atlan SDK")
 
+	// Get OAuth token (required for deletion, static API tokens don't have permission)
+	oauthToken, err := ac.oauthTokenManager.GetToken()
+	if err != nil {
+		log.WithError(err).Error("failed to get OAuth token")
+		return fmt.Errorf("failed to get OAuth token: %w", err)
+	}
+
+	// Initialize SDK with OAuth token
+	sdkClient, err := atlansdk.Context(ac.url, oauthToken)
+	if err != nil {
+		log.WithError(err).Error("failed to initialize Atlan SDK")
+		return fmt.Errorf("failed to initialize Atlan SDK: %w", err)
+	}
+
 	// Use the SDK to delete the user - it creates a workflow internally
-	_, sdkErr := ac.sdkClient.UserClient.RemoveUser(
+	_, sdkErr := sdkClient.UserClient.RemoveUser(
 		userDetails.UserName,
 		ac.assetTransferUsername,
 		nil, // wfCreatorUserName defaults to transferToUserName

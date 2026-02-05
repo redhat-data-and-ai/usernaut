@@ -17,24 +17,21 @@ limitations under the License.
 package atlan
 
 import (
-	atlansdk "github.com/atlanhq/atlan-go/atlan/assets"
 	"github.com/gojek/heimdall/v7"
 )
 
 // AtlanClient is the HTTP client for Atlan API
 type AtlanClient struct {
 	client                heimdall.Doer
-	sdkClient             *atlansdk.AtlanClient
 	url                   string
 	apiToken              string
 	identityProviderAlias string
-	// assetTransferUsername is the username to transfer asset ownership to when deleting a user.
-	// Atlan requires ownership transfer before user deletion.
 	assetTransferUsername string
 	defaultPersona        string
 	ssoSync               bool
 	ldapSync              bool
 	ssoGroupName          string
+	oauthTokenManager     *OAuthTokenManager
 }
 
 // AtlanConfig holds the configuration needed to connect to Atlan
@@ -42,9 +39,10 @@ type AtlanConfig struct {
 	URL                   string `json:"url"`
 	APIToken              string `json:"api_token"`
 	IdentityProviderAlias string `json:"identity_provider_alias"`
-	// AssetTransferUsername is the username to transfer asset ownership to when deleting a user
 	AssetTransferUsername string `json:"asset_transfer_username"`
 	DefaultPersona        string `json:"default_persona"`
+	OAuthClientID         string `json:"oauth_client_id"`
+	OAuthClientSecret     string `json:"oauth_client_secret"`
 }
 
 // AtlanUser represents a user in Atlan's API response

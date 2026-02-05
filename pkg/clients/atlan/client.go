@@ -24,7 +24,6 @@ import (
 	"slices"
 	"time"
 
-	atlansdk "github.com/atlanhq/atlan-go/atlan/assets"
 	"github.com/gojek/heimdall/v7"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
@@ -61,20 +60,20 @@ func NewClient(atlanAppConfig map[string]interface{},
 		return nil, fmt.Errorf("failed to initialize http client: %w", err)
 	}
 
-	// Initialize the Atlan SDK client for operations that require it (e.g., DeleteUser)
-	sdkClient, err := atlansdk.Context(atlanConfig.URL, atlanConfig.APIToken)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Atlan SDK client: %w", err)
+	// Initialize OAuth token manager if credentials are provided (required for user deletion)
+	var oauthManager *OAuthTokenManager
+	if atlanConfig.OAuthClientID != "" && atlanConfig.OAuthClientSecret != "" {
+		oauthManager = NewOAuthTokenManager(atlanConfig.URL, atlanConfig.OAuthClientID, atlanConfig.OAuthClientSecret)
 	}
 
 	return &AtlanClient{
 		client:                client,
-		sdkClient:             sdkClient,
 		url:                   atlanConfig.URL,
 		apiToken:              atlanConfig.APIToken,
 		identityProviderAlias: atlanConfig.IdentityProviderAlias,
 		assetTransferUsername: atlanConfig.AssetTransferUsername,
 		defaultPersona:        atlanConfig.DefaultPersona,
+		oauthTokenManager:     oauthManager,
 	}, nil
 }
 
