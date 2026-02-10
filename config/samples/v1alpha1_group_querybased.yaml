@@ -12,7 +12,7 @@ spec:
   members:
     ldap_query:
       operator: and
-      filters:
+      filters:  # key: LDAP attribute (e.g. manager, title, givenName, employeeType, rhatGeo, co, st). See DEVELOPMENT.md for full list.
         - key: manager
           criteria: equals
           value: pbhattac  # user ID only (expanded to uid=pbhattac,<baseUserDN>)

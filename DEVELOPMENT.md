@@ -6,24 +6,41 @@ Welcome to Usernaut! This guide provides a comprehensive overview of the project
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Core Components](#core-components)
-  - [Custom Resource Definition (Group CRD)](#1-custom-resource-definition-group-crd)
-  - [Group Controller](#2-group-controller-groupreconciler)
-  - [Backend Clients](#3-backend-clients)
-  - [Store Layer](#4-store-layer)
-  - [Cache Layer](#5-cache-layer)
-  - [Periodic Tasks Controller](#6-periodic-tasks-controller)
-  - [HTTP API Server](#7-http-api-server)
-- [Data Flow](#data-flow)
-- [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Development Guidelines](#development-guidelines)
-- [Testing](#testing)
-- [Debugging](#debugging)
-- [Troubleshooting](#troubleshooting)
+- [Usernaut Developer Documentation](#usernaut-developer-documentation)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+    - [Key Features](#key-features)
+    - [How It Works (High Level)](#how-it-works-high-level)
+  - [Architecture](#architecture)
+    - [Architecture Highlights](#architecture-highlights)
+  - [Flow Diagram](#flow-diagram)
+    - [Data Flow Summary](#data-flow-summary)
+  - [Core Components](#core-components)
+    - [1. Custom Resource Definition (Group CRD)](#1-custom-resource-definition-group-crd)
+    - [2. Group Controller (GroupReconciler)](#2-group-controller-groupreconciler)
+    - [3. Backend Clients](#3-backend-clients)
+    - [4. Store Layer](#4-store-layer)
+    - [5. Cache Layer](#5-cache-layer)
+    - [6. Periodic Tasks Controller](#6-periodic-tasks-controller)
+    - [7. HTTP API Server](#7-http-api-server)
+  - [Data Flow](#data-flow)
+    - [User Onboarding Flow](#user-onboarding-flow)
+    - [User Offboarding Flow (Automatic)](#user-offboarding-flow-automatic)
+  - [Configuration](#configuration)
+    - [Configuration Structure](#configuration-structure)
+    - [Secret Loading](#secret-loading)
+    - [Environment Selection](#environment-selection)
+  - [Project Structure](#project-structure)
+  - [Getting Started](#getting-started)
+    - [Startup Sequence](#startup-sequence)
+      - [Key Startup Details\*\*](#key-startup-details)
+    - [Ramp Up](#ramp-up)
+    - [Prerequisites](#prerequisites)
+    - [Development Environment Setup](#development-environment-setup)
+  - [Development Guidelines](#development-guidelines)
+  - [Testing](#testing)
+  - [Debugging](#debugging)
+  - [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -249,7 +266,7 @@ spec:
     ldap_query:
       operator: and   # "and" or "or"
       filters:
-        - key: manager
+        - key: manager       # See below for all possible keys
           criteria: equals   # equals | contains | not
           value: "jsmith"    # for key=manager, use user ID only (expanded to uid=value,baseUserDN)
         - key: title
@@ -289,9 +306,29 @@ status:
 | `GroupStatus` | Observed state: reconciled users, conditions, backend statuses             |
 | `Members`     | `users` (direct), `groups` (nested), `ldap_query` (optional), `ldap_options` (optional) |
 | `LDAPQuery`   | `operator` (`and` or `or`) and `filters` (array of LDAPFilter)              |
-| `LDAPFilter`  | `key` (LDAP attribute), `criteria` (`equals`, `contains`, `not`), `value`. For `key=manager`, use user ID only (username); it is expanded to full DN. |
+| `LDAPFilter`  | `key` (LDAP attribute name), `criteria` (`equals`, `contains`, `not`), `value`. See **Valid filter keys** below. For `key=manager`, use user ID only (username); it is expanded to full DN. |
 | `LDAPOptions` | `include_indirect_reports` (bool, optional)                                |
 | `Backend`     | Backend identifier with `name` and `type`                                   |
+
+**Valid filter keys** (LDAP attribute names supported in `ldap_query.filters[].key`):
+
+| Key                  | Description        |
+| -------------------- | ------------------ |
+| `givenName`          | First Name         |
+| `displayName`        | Preferred Name    |
+| `rhatJobTitle`       | Business Card Title |
+| `title`              | Job Title          |
+| `employeeType`       | Employee Type     |
+| `manager`            | Manager (use **user ID** as value; expanded to full DN) |
+| `rhatCostCenter`     | Cost Center Number |
+| `rhatCostCenterDesc` | Cost Center Name  |
+| `rhatGeo`            | Red Hat Geo        |
+| `co`                 | Country            |
+| `st`                 | State              |
+| `rhatLocation`       | Location           |
+| `rhatOfficeLocation` | Office             |
+| `rhatOfficeFloor`    | Office Floor       |
+| `roomNumber`         | Desk Number        |
 
 Members from `ldap_query` are resolved at reconcile time via LDAP search and merged with `users` and nested `groups` (after cycle-aware expansion). For **`key=manager`**, always use just the **user ID** (username) as `value`; the controller expands it to `uid=<value>,<baseUserDN>` when building the LDAP filter. For other keys, use the literal attribute value.
 
