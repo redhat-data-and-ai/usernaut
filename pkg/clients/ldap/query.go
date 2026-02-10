@@ -3,8 +3,11 @@ package ldap
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+	v1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
 
@@ -67,4 +70,107 @@ func parseUIDFromDN(dn *ldap.DN) string {
 		}
 	}
 	return ""
+}
+
+func (l *LDAPConn) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error) {
+	log := logger.Logger(ctx).WithField("build_ldap_query", "spec")
+	filter, err := buildLDAPQueryFromSpec(query, l.baseUserDN)
+	if err != nil {
+		log.WithError(err).Error("failed to build ldap query from spec")
+		return "", err
+	}
+
+	return filter, nil
+}
+
+func buildLDAPQueryFromSpec(query *v1alpha1.LDAPQuery, baseUserDN string) (string, error) {
+	if query == nil {
+		return "", errors.New("ldap query is nil")
+	}
+
+	op := strings.ToLower(strings.TrimSpace(query.Operator))
+	switch op {
+	case "and":
+		if len(query.Filters) == 0 {
+			return "", errors.New("and operator requires filters")
+		}
+		filters, err := buildFiltersFromSpec(query.Filters, baseUserDN)
+		if err != nil {
+			return "", err
+		}
+		return "(&" + strings.Join(filters, "") + ")", nil
+	case "or":
+		if len(query.Filters) == 0 {
+			return "", errors.New("or operator requires filters")
+		}
+		filters, err := buildFiltersFromSpec(query.Filters, baseUserDN)
+		if err != nil {
+			return "", err
+		}
+		return "(|" + strings.Join(filters, "") + ")", nil
+	default:
+		return "", fmt.Errorf("unsupported operator %q", query.Operator)
+	}
+}
+
+func buildFiltersFromSpec(filters []v1alpha1.LDAPFilter, baseUserDN string) ([]string, error) {
+	results := make([]string, 0, len(filters))
+	for _, filter := range filters {
+		result, err := buildFilterFromSpec(filter, baseUserDN)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string, error) {
+	op := strings.ToLower(strings.TrimSpace(filter.Criteria))
+	switch op {
+	case "equals":
+		return buildEqualsFilter(filter.Key, filter.Value, baseUserDN)
+	case "not":
+		return buildNotFilter(filter.Key, filter.Value, baseUserDN)
+	case "contains":
+		return buildContainsFilter(filter.Key, filter.Value, baseUserDN)
+	default:
+		return "", fmt.Errorf("unsupported filter operator %q", filter.Criteria)
+	}
+}
+
+func buildNotFilter(key, value, baseUserDN string) (string, error) {
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("not operator requires key")
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", errors.New("not operator requires value")
+	}
+	return "(!(" + key + "=" + value + "))", nil
+}
+
+func buildContainsFilter(key, value, baseUserDN string) (string, error) {
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("contains operator requires key")
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", errors.New("contains operator requires value")
+	}
+	return "(" + key + "=*" + value + "*)", nil
+}
+
+func buildEqualsFilter(attr, value, baseUserDN string) (string, error) {
+	if strings.TrimSpace(attr) == "" {
+		return "", errors.New("equals operator requires attr")
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", errors.New("equals operator requires value")
+	}
+
+	value = strings.TrimSpace(value)
+	if attr == "manager" && !strings.Contains(value, ",") && baseUserDN != "" {
+		value = "uid=" + value + "," + baseUserDN
+	}
+
+	return "(" + attr + "=" + value + ")", nil
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-ldap/ldap/v3"
 	"github.com/golang/mock/gomock"
+	v1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -151,4 +152,90 @@ func (suite *LDAPTestSuite) TestGetQueryMembers_EmptyQuery() {
 
 	assertions.NoError(err)
 	assertions.Empty(resp)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_AndOperator() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "manager",
+				Criteria: "equals",
+				Value:    "pbhattac",
+			},
+			{
+				Key:      "title",
+				Criteria: "equals",
+				Value:    "*senior*",
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.NoError(err)
+	assertions.Equal("(&(manager=uid=pbhattac,ou=users,dc=redhat,dc=com)(title=*senior*))", filter)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OrOperator() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "or",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "manager",
+				Criteria: "equals",
+				Value:    "zzhou",
+			},
+			{
+				Key:      "manager",
+				Criteria: "equals",
+				Value:    "robwilli",
+			},
+		},
+	}
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.NoError(err)
+	assertions.Equal("(|(manager=uid=zzhou,ou=users,dc=redhat,dc=com)(manager=uid=robwilli,ou=users,dc=redhat,dc=com))", filter)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MixOperator() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "manager",
+				Criteria: "equals",
+				Value:    "ticramer",
+			},
+			{
+				Key:      "employeeType",
+				Criteria: "not",
+				Value:    "external employee",
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.NoError(err)
+	assertions.Equal("(&(manager=uid=ticramer,ou=users,dc=redhat,dc=com)(!(employeeType=external employee)))", filter)
 }
