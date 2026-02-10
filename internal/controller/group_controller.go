@@ -236,6 +236,8 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 		return nil, nil
 	}
 
+	log.WithField("query_members", queryMembers).Info("query members fetched successfully")
+
 	hasManagerFilter := false
 	for _, filter := range query.Filters {
 		if filter.Key == "manager" {
