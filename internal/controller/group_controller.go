@@ -124,20 +124,20 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
 		"request":    req.NamespacedName.String(),
 		"group":      groupCR.Spec.GroupName,
-		"ldap_query": groupCR.Spec.LDAPQuery,
+		"ldap_query": groupCR.Spec.Members.LDAPQuery,
 		"members":    len(groupCR.Spec.Members.Users),
 		"groups":     groupCR.Spec.Members.Groups,
 	})
 
 	var err error
 	queryMembers := []string{}
-	if groupCR.Spec.LDAPQuery != "" {
-		r.log.WithField("ldap_query", groupCR.Spec.LDAPQuery).Info("fetching query members")
-		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.LDAPQuery)
+	if groupCR.Spec.Members.LDAPQuery != nil {
+		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, groupCR.Spec.Members.LDAPOptions.IncludeIndirectReports)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching query members")
 			return ctrl.Result{}, err
 		}
+		r.log.WithField("query_members", queryMembers).Info("query members fetched successfully")
 	}
 
 	visitedGroups := make(map[string]struct{})
@@ -205,14 +205,87 @@ type LDAPFetchResult struct {
 	ActiveUserList []string // UIDs of active users
 }
 
-func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query string) ([]string, error) {
+func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery, includeIndirectReports bool) ([]string, error) {
+	log := logger.Logger(ctx).WithField("fetching query members", query)
+
+	log.WithField("ldap_query", query).Info("building query string from YAML")
+	queryString, err := r.buildLDAPQueryFromYAML(ctx, query)
+	if err != nil {
+		r.log.WithError(err).Error("error building query string from YAML")
+		return []string{}, err
+	}
+
+	log.WithField("query_string", queryString).Info("query string built successfully")
 	// fetch users from LDAP using the query
-	queryMembers, err := r.LdapConn.GetQueryMembers(ctx, query)
+	queryMembers, err := r.LdapConn.GetQueryMembers(ctx, queryString)
 	if err != nil {
 		r.log.WithError(err).Error("error fetching users from LDAP using the query")
 		return []string{}, err
 	}
-	return queryMembers, nil
+
+	hasManagerFilter := false
+
+	for _, filter := range query.Filters {
+		if filter.Key == "manager" {
+			hasManagerFilter = true
+			break
+		}
+	}
+
+	indirectReports := []string{}
+	if hasManagerFilter && includeIndirectReports {
+		log.Info("has manager filter, fetching indirect reports")
+		nestedQuery := usernautdevv1alpha1.LDAPQuery{}
+		nestedQuery.Operator = query.Operator
+
+		for _, member := range queryMembers {
+			nestedQuery.Filters = []usernautdevv1alpha1.LDAPFilter{}
+
+			for _, filter := range query.Filters {
+				value := filter.Value
+				if filter.Key == "manager" {
+					value = member
+				}
+				newFilter := usernautdevv1alpha1.LDAPFilter{
+					Key:      filter.Key,
+					Criteria: filter.Criteria,
+					Value:    value,
+				}
+				nestedQuery.Filters = append(nestedQuery.Filters, newFilter)
+			}
+			queryString, err := r.buildLDAPQueryFromYAML(ctx, &nestedQuery)
+			if err != nil {
+				r.log.WithError(err).Error("error building query string from YAML")
+				continue
+			}
+			reports, err := r.LdapConn.GetQueryMembers(ctx, queryString)
+			if err != nil {
+				r.log.WithError(err).Error("error fetching nested query members")
+				continue
+			}
+			indirectReports = append(indirectReports, reports...)
+		}
+	}
+	r.log.WithField("indirect_reports", indirectReports).Info("indirect reports fetched successfully")
+	combinesMembers := append(queryMembers, indirectReports...)
+	r.log.WithField("combined_members", combinesMembers).Info("combined members fetched successfully")
+
+	return combinesMembers, nil
+}
+
+func (r *GroupReconciler) buildLDAPQueryFromYAML(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery) (string, error) {
+	log := logger.Logger(ctx).WithField("building query string from YAML", query)
+	if query == nil {
+		return "", errors.New("ldap query is nil")
+	}
+
+	queryString, err := r.LdapConn.BuildLDAPQueryFromSpec(ctx, query)
+	if err != nil {
+		log.WithError(err).Error("failed to build ldap query from yaml")
+		return "", err
+	}
+
+	return queryString, nil
 }
 
 // fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData

@@ -217,7 +217,6 @@ var _ = Describe("Group Controller", func() {
 				},
 				Spec: usernautdevv1alpha1.GroupSpec{
 					GroupName: multiName,
-					LDAPQuery: "",
 					Members: usernautdevv1alpha1.Members{
 						Groups: []string{},
 						Users:  []string{"test-user-1", "test-user-2"},

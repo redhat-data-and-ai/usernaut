@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
+	v1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 )
 
 type LDAP struct {
@@ -36,6 +37,7 @@ type LDAPConn struct {
 type LDAPClient interface {
 	GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error)
 	GetQueryMembers(ctx context.Context, query string) ([]string, error)
+	BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error)
 }
 
 // InitLdap initializes a connection to the LDAP server using the provided configuration.
