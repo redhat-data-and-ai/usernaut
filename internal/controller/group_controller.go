@@ -132,7 +132,8 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var err error
 	queryMembers := []string{}
 	if groupCR.Spec.Members.LDAPQuery != nil {
-		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, groupCR.Spec.Members.LDAPOptions.IncludeIndirectReports)
+		includeIndirectReports := groupCR.Spec.Members.LDAPOptions != nil && groupCR.Spec.Members.LDAPOptions.IncludeIndirectReports
+		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, includeIndirectReports, nil)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching query members")
 			return ctrl.Result{}, err
@@ -205,26 +206,37 @@ type LDAPFetchResult struct {
 	ActiveUserList []string // UIDs of active users
 }
 
-func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery, includeIndirectReports bool) ([]string, error) {
+// fetchQueryMembers runs the LDAP query and, when the query has a manager filter and
+// includeIndirectReports is true, recursively expands each member's reports (people who
+// report to them) and returns the combined set. visited tracks UIDs already expanded to
+// avoid cycles; pass nil for the top-level call (a new map is allocated).
+func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery, includeIndirectReports bool, visited map[string]struct{}) ([]string, error) {
 	log := logger.Logger(ctx).WithField("fetching query members", query)
+
+	if visited == nil {
+		visited = make(map[string]struct{})
+	}
 
 	log.WithField("ldap_query", query).Info("building query string from YAML")
 	queryString, err := r.buildLDAPQueryFromYAML(ctx, query)
 	if err != nil {
-		r.log.WithError(err).Error("error building query string from YAML")
-		return []string{}, err
+		log.WithError(err).Error("error building query string from YAML")
+		return nil, err
 	}
 
 	log.WithField("query_string", queryString).Info("query string built successfully")
-	// fetch users from LDAP using the query
 	queryMembers, err := r.LdapConn.GetQueryMembers(ctx, queryString)
 	if err != nil {
-		r.log.WithError(err).Error("error fetching users from LDAP using the query")
-		return []string{}, err
+		log.WithError(err).Error("error fetching users from LDAP using the query")
+		return nil, err
+	}
+
+	if len(queryMembers) == 0 {
+		log.Info("no users found in LDAP using the query")
+		return nil, nil
 	}
 
 	hasManagerFilter := false
-
 	for _, filter := range query.Filters {
 		if filter.Key == "manager" {
 			hasManagerFilter = true
@@ -232,45 +244,49 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 		}
 	}
 
-	indirectReports := []string{}
+	// Manager filter present but indirect reports disabled: return only direct reports of the manager in the query (no recursion).
+	if hasManagerFilter && !includeIndirectReports {
+		return r.deduplicateMembers(queryMembers), nil
+	}
+
 	if hasManagerFilter && includeIndirectReports {
 		log.Info("has manager filter, fetching indirect reports")
-		nestedQuery := usernautdevv1alpha1.LDAPQuery{}
-		nestedQuery.Operator = query.Operator
+		nestedQuery := usernautdevv1alpha1.LDAPQuery{
+			Operator: query.Operator,
+		}
 
 		for _, member := range queryMembers {
-			nestedQuery.Filters = []usernautdevv1alpha1.LDAPFilter{}
+			if _, seen := visited[member]; seen {
+				log.WithField("member", member).Debug("skipping already-expanded member to avoid cycle")
+				continue
+			}
+			visited[member] = struct{}{}
 
+			nestedQuery.Filters = make([]usernautdevv1alpha1.LDAPFilter, 0, len(query.Filters))
 			for _, filter := range query.Filters {
 				value := filter.Value
 				if filter.Key == "manager" {
 					value = member
 				}
-				newFilter := usernautdevv1alpha1.LDAPFilter{
+				nestedQuery.Filters = append(nestedQuery.Filters, usernautdevv1alpha1.LDAPFilter{
 					Key:      filter.Key,
 					Criteria: filter.Criteria,
 					Value:    value,
-				}
-				nestedQuery.Filters = append(nestedQuery.Filters, newFilter)
+				})
 			}
-			queryString, err := r.buildLDAPQueryFromYAML(ctx, &nestedQuery)
+			nestedQueryMembers, err := r.fetchQueryMembers(ctx, &nestedQuery, includeIndirectReports, visited)
 			if err != nil {
-				r.log.WithError(err).Error("error building query string from YAML")
+				log.WithError(err).WithField("manager", member).Error("error fetching indirect reports")
 				continue
 			}
-			reports, err := r.LdapConn.GetQueryMembers(ctx, queryString)
-			if err != nil {
-				r.log.WithError(err).Error("error fetching nested query members")
-				continue
+			if len(nestedQueryMembers) > 0 {
+				log.WithField("manager", member).WithField("reports", nestedQueryMembers).Info("reports found")
+				queryMembers = append(queryMembers, nestedQueryMembers...)
 			}
-			indirectReports = append(indirectReports, reports...)
 		}
 	}
-	r.log.WithField("indirect_reports", indirectReports).Info("indirect reports fetched successfully")
-	combinesMembers := append(queryMembers, indirectReports...)
-	r.log.WithField("combined_members", combinesMembers).Info("combined members fetched successfully")
 
-	return combinesMembers, nil
+	return r.deduplicateMembers(queryMembers), nil
 }
 
 func (r *GroupReconciler) buildLDAPQueryFromYAML(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery) (string, error) {
