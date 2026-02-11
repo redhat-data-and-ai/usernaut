@@ -26,3 +26,8 @@ func NewPeriodicTaskManager() *PeriodicTaskManager {
 func (p *PeriodicTaskManager) AddTask(task PeriodicTask) {
 	p.Tasks = append(p.Tasks, task)
 }
+
+// OffboardUserExclusionList represents the structure of the exclusion list YAML file.
+type OffboardUserExclusionList struct {
+	Exclusions []string `yaml:"exclusions"`
+}

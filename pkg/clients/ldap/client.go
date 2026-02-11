@@ -22,6 +22,7 @@ type LDAP struct {
 type LDAPConnClient interface {
 	IsClosing() bool
 	Search(*ldap.SearchRequest) (*ldap.SearchResult, error)
+	UnauthenticatedBind(username string) error
 }
 
 type LDAPConn struct {
@@ -38,6 +39,7 @@ type LDAPClient interface {
 	GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error)
 	GetQueryMembers(ctx context.Context, query string) ([]string, error)
 	BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error)
+	GetUserLDAPDataByEmail(ctx context.Context, email string) (map[string]interface{}, error)
 }
 
 // InitLdap initializes a connection to the LDAP server using the provided configuration.
@@ -45,6 +47,13 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 	ldapConn, err := ldap.DialURL(ldapConfig.Server, ldap.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
 	if err != nil {
 		return nil, err
+	}
+
+	// Perform anonymous bind (equivalent to ldapsearch -x)
+	err = ldapConn.UnauthenticatedBind("")
+	if err != nil {
+		_ = ldapConn.Close()
+		return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
 	}
 
 	return &LDAPConn{
@@ -65,6 +74,13 @@ func (l *LDAPConn) getConn() LDAPConnClient {
 		if err != nil {
 			// Log the error and return the existing connection (or nil if no valid connection exists)
 			fmt.Printf("Failed to re-establish LDAP connection: %v\n", err)
+			return nil
+		}
+		// Perform anonymous bind (equivalent to ldapsearch -x)
+		err = newConn.UnauthenticatedBind("")
+		if err != nil {
+			fmt.Printf("Failed to bind re-established LDAP connection: %v\n", err)
+			_ = newConn.Close()
 			return nil
 		}
 		l.conn = newConn

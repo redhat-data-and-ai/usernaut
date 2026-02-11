@@ -42,6 +42,7 @@ ldap:
   baseDN: "ou=adhoc,ou=managedGroups,dc=org,dc=com"
   baseUserDN: "ou=users,dc=org,dc=com"
   userDN: "uid=%s,ou=users,dc=org,dc=com"
+  baseUserDN: "ou=users,dc=redhat,dc=com"
   userSearchFilter: "(objectClass=filterClass)"
   attributes: ["mail", "uid", "cn", "sn", "displayName"]
 
@@ -54,6 +55,7 @@ cache:
     host: localhost
     port: "6379"
     database: 0
+    username: ""
     password: ""
 
 httpClient:
@@ -66,7 +68,8 @@ httpClient:
     requestVolumeThreshold: 20
     circuitBreakerSleepWindow: 5000
     errorPercentThreshold: 50
-    circuitBreakerTimeout: 10000
+    circuitBreakerTimeout: 120000
+
 
 backends:
   - name: fivetran
@@ -110,3 +113,6 @@ apiServer:
 
   cors:
     allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
+
+usernautUserOffboardingInterval: "2h"
+offboardUserExclusionListConfigPath: "default_offboard_user_exclusion_list"

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-redis/redis"
-	otredis "github.com/opentracing-contrib/goredis"
+	"github.com/redis/go-redis/extra/redisotel/v9"
+	"github.com/redis/go-redis/v9"
 )
 
 // Config holds all required info for initializing redis driver
@@ -14,12 +14,13 @@ type Config struct {
 	Host     string
 	Port     string
 	Database int32
+	Username string
 	Password string
 }
 
 // RedisCache holds the handler for the redisclient and auxiliary info
 type RedisCache struct {
-	client otredis.Client
+	client redis.UniversalClient
 }
 
 // NewRedisClient inits a RedisCache instance
@@ -31,16 +32,28 @@ func NewCache(config *Config) (*RedisCache, error) {
 	addr := fmt.Sprintf("%s:%s", config.Host, config.Port)
 	options := &redis.UniversalOptions{
 		Addrs:    []string{addr},
+		Username: config.Username,
 		Password: config.Password,
 		DB:       int(config.Database),
 	}
 
-	redisClient := otredis.Wrap(redis.NewUniversalClient(options))
+	redisClient := redis.NewUniversalClient(options)
+
+	// Enable OpenTelemetry instrumentation
+	if err := redisotel.InstrumentTracing(redisClient); err != nil {
+		return nil, fmt.Errorf("failed to instrument redis: %w", err)
+	}
+	if err := redisotel.InstrumentMetrics(redisClient); err != nil {
+		return nil, fmt.Errorf("failed to instrument redis metrics: %w", err)
+	}
+
 	rc := RedisCache{
 		client: redisClient,
 	}
 
-	_, err := rc.client.Ping().Result()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := rc.client.Ping(ctx).Result()
 	if err != nil {
 		return nil, fmt.Errorf("ping failed: %w", err)
 	}
@@ -50,6 +63,7 @@ func NewCache(config *Config) (*RedisCache, error) {
 
 func getDefaultConfig() *Config {
 	return &Config{
+		Username: "",
 		Host:     "localhost",
 		Port:     "6379",
 		Database: 0,
@@ -59,17 +73,12 @@ func getDefaultConfig() *Config {
 
 // Set - sets a key value pair in redis
 func (rc *RedisCache) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
-	err := rc.client.WithContext(ctx).Set(key, value, ttl).Err()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return rc.client.Set(ctx, key, value, ttl).Err()
 }
 
 // Get - gets a value from redis
 func (rc *RedisCache) Get(ctx context.Context, key string) (interface{}, error) {
-	val, err := rc.client.WithContext(ctx).Get(key).Result()
+	val, err := rc.client.Get(ctx, key).Result()
 	if err != nil {
 		return "", err
 	}
@@ -79,8 +88,8 @@ func (rc *RedisCache) Get(ctx context.Context, key string) (interface{}, error) 
 func (rc *RedisCache) GetByPattern(ctx context.Context, keyPattern string) (map[string]interface{}, error) {
 	// First, collect all keys matching the pattern
 	var keys []string
-	iter := rc.client.WithContext(ctx).Scan(0, keyPattern, 0).Iterator()
-	for iter.Next() {
+	iter := rc.client.Scan(ctx, 0, keyPattern, 0).Iterator()
+	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())
 	}
 	if err := iter.Err(); err != nil {
@@ -93,7 +102,7 @@ func (rc *RedisCache) GetByPattern(ctx context.Context, keyPattern string) (map[
 	}
 
 	// Use MGET to retrieve all values in a single round trip
-	vals, err := rc.client.WithContext(ctx).MGet(keys...).Result()
+	vals, err := rc.client.MGet(ctx, keys...).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -112,8 +121,7 @@ func (rc *RedisCache) GetByPattern(ctx context.Context, keyPattern string) (map[
 
 // Delete - deletes a key from redis
 func (rc *RedisCache) Delete(ctx context.Context, key string) error {
-	err := rc.client.WithContext(ctx).Del(key).Err()
-	return err
+	return rc.client.Del(ctx, key).Err()
 }
 
 // Disconnect ... disconnects from the redis server
