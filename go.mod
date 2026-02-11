@@ -7,6 +7,7 @@ require (
 	github.com/fivetran/go-fivetran v1.1.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-ldap/ldap/v3 v3.4.12
+	github.com/goccy/go-yaml v1.18.0
 	github.com/gojek/heimdall/v7 v7.0.3
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
@@ -22,8 +23,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	gitlab.com/gitlab-org/api/client-go v0.145.0
 	golang.org/x/sync v0.19.0
-	k8s.io/apimachinery v0.34.3
-	k8s.io/client-go v0.34.3
+	k8s.io/apimachinery v0.34.4
+	k8s.io/client-go v0.34.4
 	sigs.k8s.io/controller-runtime v0.22.4
 )
 
@@ -64,7 +65,6 @@ require (
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
-	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/gojek/valkyrie v0.0.0-20180215180059-6aee720afcdf // indirect
 	github.com/google/btree v1.1.3 // indirect
@@ -142,7 +142,7 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.34.3 // indirect
+	k8s.io/api v0.34.4 // indirect
 	k8s.io/apiextensions-apiserver v0.34.1 // indirect
 	k8s.io/apiserver v0.34.1 // indirect
 	k8s.io/component-base v0.34.1 // indirect
