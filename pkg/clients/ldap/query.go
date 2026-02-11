@@ -133,7 +133,7 @@ func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string,
 	case "not":
 		return buildNotFilter(filter.Key, filter.Value, baseUserDN)
 	case "contains":
-		return buildContainsFilter(filter.Key, filter.Value, baseUserDN)
+		return buildContainsFilter(filter.Key, filter.Value)
 	default:
 		return "", fmt.Errorf("unsupported filter operator %q", filter.Criteria)
 	}
@@ -143,34 +143,38 @@ func buildNotFilter(key, value, baseUserDN string) (string, error) {
 	if strings.TrimSpace(key) == "" {
 		return "", errors.New("not operator requires key")
 	}
-	if strings.TrimSpace(value) == "" {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return "", errors.New("not operator requires value")
+	}
+	if key == "manager" && !strings.Contains(value, ",") && baseUserDN != "" {
+		value = "uid=" + value + "," + baseUserDN
 	}
 	return "(!(" + key + "=" + value + "))", nil
 }
 
-func buildContainsFilter(key, value, baseUserDN string) (string, error) {
+func buildContainsFilter(key, value string) (string, error) {
 	if strings.TrimSpace(key) == "" {
 		return "", errors.New("contains operator requires key")
 	}
-	if strings.TrimSpace(value) == "" {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return "", errors.New("contains operator requires value")
 	}
 	return "(" + key + "=*" + value + "*)", nil
 }
 
-func buildEqualsFilter(attr, value, baseUserDN string) (string, error) {
-	if strings.TrimSpace(attr) == "" {
-		return "", errors.New("equals operator requires attr")
+func buildEqualsFilter(key, value, baseUserDN string) (string, error) {
+	if strings.TrimSpace(key) == "" {
+		return "", errors.New("equals operator requires key")
 	}
-	if strings.TrimSpace(value) == "" {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return "", errors.New("equals operator requires value")
 	}
-
-	value = strings.TrimSpace(value)
-	if attr == "manager" && !strings.Contains(value, ",") && baseUserDN != "" {
+	if key == "manager" && !strings.Contains(value, ",") && baseUserDN != "" {
 		value = "uid=" + value + "," + baseUserDN
 	}
 
-	return "(" + attr + "=" + value + ")", nil
+	return "(" + key + "=" + value + ")", nil
 }

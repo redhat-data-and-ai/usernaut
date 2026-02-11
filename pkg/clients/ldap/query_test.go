@@ -208,7 +208,10 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OrOperator() {
 	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
 
 	assertions.NoError(err)
-	assertions.Equal("(|(manager=uid=zzhou,ou=users,dc=redhat,dc=com)(manager=uid=robwilli,ou=users,dc=redhat,dc=com))", filter)
+	assertions.Equal(
+		"(|(manager=uid=zzhou,ou=users,dc=redhat,dc=com)(manager=uid=robwilli,ou=users,dc=redhat,dc=com))",
+		filter,
+	)
 }
 
 func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MixOperator() {
