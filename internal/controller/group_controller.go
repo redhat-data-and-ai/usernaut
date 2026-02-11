@@ -257,6 +257,9 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 			Operator: query.Operator,
 		}
 
+		// Here we recursively iterate the direct reports and then find their own direct reports and so on.
+		// It's not optimized for performance. If a manager is high enough in tree, then this will be slow.
+		// In the next iteration, we can optimize this by using some sort of parallelization using goroutine and semaphore.
 		for _, member := range queryMembers {
 			if _, seen := visited[member]; seen {
 				log.WithField("member", member).Debug("skipping already-expanded member to avoid cycle")
