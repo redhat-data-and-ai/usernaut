@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -225,9 +226,24 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 	}
 
 	log.WithField("query_string", queryString).Info("query string built successfully")
-	queryMembers, err := r.LdapConn.GetQueryMembers(ctx, queryString)
+	var queryMembers []string
+	// Retry LDAP query up to 3 times for transient failures.
+	for attempt := 1; attempt <= 3; attempt++ {
+		queryMembers, err = r.LdapConn.GetQueryMembers(ctx, queryString)
+		if err == nil {
+			break
+		}
+		log.WithError(err).WithField("attempt", attempt).Warn("error fetching users from LDAP using the query")
+		if attempt < 3 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
 	if err != nil {
-		log.WithError(err).Error("error fetching users from LDAP using the query")
+		log.WithError(err).Error("failed to fetch users from LDAP using the query after retries")
 		return nil, err
 	}
 
@@ -240,7 +256,7 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 
 	hasManagerFilter := false
 	for _, filter := range query.Filters {
-		if filter.Key == "manager" {
+		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
 			hasManagerFilter = true
 			break
 		}
@@ -257,10 +273,22 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 			Operator: query.Operator,
 		}
 
-		// Here we recursively iterate the direct reports and then find their own direct reports and so on.
-		// It's not optimized for performance. If a manager is high enough in tree, then this will be slow.
-		// In the next iteration, we can optimize this by using some sort of parallelization using goroutine and semaphore.
-		for _, member := range queryMembers {
+		queue := make([]string, 0, len(queryMembers))
+		queue = append(queue, queryMembers...)
+
+		// Using DFS search based on a queue.
+		// We can use this queue later for parallelization using goroutine and semaphore.
+		for len(queue) > 0 {
+			log.WithField("queue", queue).Info("==== processing queue ====")
+			// Check if the context is done
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+
+			// Use DFS
+			member := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+
 			if _, seen := visited[member]; seen {
 				log.WithField("member", member).Debug("skipping already-expanded member to avoid cycle")
 				continue
@@ -270,7 +298,7 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 			nestedQuery.Filters = make([]usernautdevv1alpha1.LDAPFilter, 0, len(query.Filters))
 			for _, filter := range query.Filters {
 				value := filter.Value
-				if filter.Key == "manager" {
+				if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
 					value = member
 				}
 				nestedQuery.Filters = append(nestedQuery.Filters, usernautdevv1alpha1.LDAPFilter{
@@ -286,7 +314,7 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 			}
 			if len(nestedQueryMembers) > 0 {
 				log.WithField("manager", member).WithField("reports", nestedQueryMembers).Info("reports found")
-				queryMembers = append(queryMembers, nestedQueryMembers...)
+				queue = append(queue, nestedQueryMembers...)
 			}
 		}
 	}

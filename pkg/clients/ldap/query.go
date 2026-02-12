@@ -140,21 +140,23 @@ func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string,
 }
 
 func buildNotFilter(key, value, baseUserDN string) (string, error) {
-	if strings.TrimSpace(key) == "" {
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return "", errors.New("not operator requires key")
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", errors.New("not operator requires value")
 	}
-	if key == "manager" && !strings.Contains(value, ",") && baseUserDN != "" {
+	if strings.EqualFold(key, "manager") && !strings.Contains(value, ",") && baseUserDN != "" {
 		value = "uid=" + value + "," + baseUserDN
 	}
 	return "(!(" + key + "=" + value + "))", nil
 }
 
 func buildContainsFilter(key, value string) (string, error) {
-	if strings.TrimSpace(key) == "" {
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return "", errors.New("contains operator requires key")
 	}
 	value = strings.TrimSpace(value)
@@ -165,14 +167,15 @@ func buildContainsFilter(key, value string) (string, error) {
 }
 
 func buildEqualsFilter(key, value, baseUserDN string) (string, error) {
-	if strings.TrimSpace(key) == "" {
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return "", errors.New("equals operator requires key")
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", errors.New("equals operator requires value")
 	}
-	if key == "manager" && !strings.Contains(value, ",") && baseUserDN != "" {
+	if strings.EqualFold(key, "manager") && !strings.Contains(value, ",") && baseUserDN != "" {
 		value = "uid=" + value + "," + baseUserDN
 	}
 
