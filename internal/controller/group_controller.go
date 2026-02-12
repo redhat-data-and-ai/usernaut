@@ -315,6 +315,7 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 			if len(nestedQueryMembers) > 0 {
 				log.WithField("manager", member).WithField("reports", nestedQueryMembers).Info("reports found")
 				queue = append(queue, nestedQueryMembers...)
+				queryMembers = append(queryMembers, nestedQueryMembers...)
 			}
 		}
 	}
