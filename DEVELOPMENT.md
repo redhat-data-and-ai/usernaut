@@ -285,6 +285,22 @@ status:
 
 The heart of Usernaut. This controller watches Group CRs and ensures the actual state matches the desired state.
 
+#### Parallel Reconciliation
+
+The Group controller supports parallel reconciliation of multiple Group resources using controller-runtime's `controller.maxConcurrentReconciles` option. This allows multiple Group CRs to be processed simultaneously.
+
+**Configuration:**
+
+Parallel reconciliation is configured via the `controller.maxConcurrentReconciles` setting in your configuration file:
+
+```yaml
+controller:
+  maxConcurrentReconciles: 5  # Process up to 5 Group CRs concurrently
+```
+
+- Default: 1 
+- Recommended Production: 5-10 
+
 **Reconciliation Flow**:
 
 ```
