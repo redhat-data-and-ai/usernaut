@@ -37,14 +37,20 @@ type AppConfig struct {
 		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
 		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
 	} `yaml:"httpClient"`
-	APIServer  APIServerConfig               `yaml:"apiServer"`
-	BackendMap map[string]map[string]Backend `yaml:"-"`
+	APIServer        APIServerConfig               `yaml:"apiServer"`
+	ControllerConfig ControllerConfig              `yaml:"controllerConfig"`
+	BackendMap       map[string]map[string]Backend `yaml:"-"`
 }
 
 type APIServerConfig struct {
 	Address string     `yaml:"address"`
 	Auth    AuthConfig `yaml:"auth"`
 	CORS    CORSConfig `yaml:"cors"`
+}
+
+// ControllerConfig represents controller-specific configuration
+type ControllerConfig struct {
+	MaxConcurrentReconciles int `yaml:"maxConcurrentReconciles"`
 }
 
 type CORSConfig struct {
