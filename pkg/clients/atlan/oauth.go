@@ -17,6 +17,7 @@ limitations under the License.
 package atlan
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +27,8 @@ import (
 	"sync"
 	"time"
 )
+
+const tokenRefreshBuffer = 30 * time.Second
 
 // OAuthTokenManager handles OAuth token generation for user deletion
 type OAuthTokenManager struct {
@@ -48,9 +51,9 @@ func NewOAuthTokenManager(baseURL, clientID, clientSecret string) *OAuthTokenMan
 }
 
 // GetToken returns a valid OAuth token, refreshing if needed
-func (tm *OAuthTokenManager) GetToken() (string, error) {
+func (tm *OAuthTokenManager) GetToken(ctx context.Context) (string, error) {
 	tm.mu.RLock()
-	if tm.accessToken != "" && time.Now().Add(30*time.Second).Before(tm.expiresAt) {
+	if tm.accessToken != "" && time.Now().Add(tokenRefreshBuffer).Before(tm.expiresAt) {
 		token := tm.accessToken
 		tm.mu.RUnlock()
 		return token, nil
@@ -61,7 +64,7 @@ func (tm *OAuthTokenManager) GetToken() (string, error) {
 	defer tm.mu.Unlock()
 
 	// Double-check after lock
-	if tm.accessToken != "" && time.Now().Add(30*time.Second).Before(tm.expiresAt) {
+	if tm.accessToken != "" && time.Now().Add(tokenRefreshBuffer).Before(tm.expiresAt) {
 		return tm.accessToken, nil
 	}
 
@@ -73,13 +76,28 @@ func (tm *OAuthTokenManager) GetToken() (string, error) {
 	formData.Set("client_id", tm.clientID)
 	formData.Set("client_secret", tm.clientSecret)
 
-	resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(formData.Encode()))
 	if err != nil {
+		return "", fmt.Errorf("failed to create token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return "", fmt.Errorf("token request cancelled: %w", err)
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("token request timed out: %w", err)
+		}
 		return "", fmt.Errorf("token request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("token request failed (status %d): %s", resp.StatusCode, string(body))
 	}
