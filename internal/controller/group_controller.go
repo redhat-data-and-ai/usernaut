@@ -39,9 +39,9 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/internal/controller/controllerutils"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/atlan"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
-
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
@@ -397,7 +397,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 		Name: backend.Name,
 		Type: backend.Type,
 	}
-	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
+	teamID, teamName, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching or creating team")
 		return err
@@ -406,14 +406,13 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 
 	// Independent reconciliation of Group Params for each backend
 	if backendGroupParams.Property != "" {
-		err = backendClient.ReconcileGroupParams(ctx, teamID, backendGroupParams)
+		err = backendClient.ReconcileGroupParams(ctx, teamID, teamName, backendGroupParams)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error reconciling group params")
 			return err
 		}
 		r.backendLogger.Info("successfully reconciled group params")
 	}
-
 	// Create users in backend and cache
 	if err := r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient); err != nil {
 		r.backendLogger.WithError(err).Error("error creating users in backend and cache")
@@ -732,9 +731,10 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	return nil
 }
 
+// fetchOrCreateTeam fetches or creates a team and returns both teamID and teamName (transformed group name)
 func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	groupName string, backendClient clients.Client,
-	backendParams *structs.BackendParams) (string, error) {
+	backendParams *structs.BackendParams) (string, string, error) {
 
 	backendName := backendParams.GetName()
 	backendType := backendParams.GetType()
@@ -743,7 +743,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backendType, groupName)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error transforming the group Name")
-		return "", err
+		return "", "", err
 	}
 
 	backendKey := backendName + "_" + backendType
@@ -752,19 +752,19 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backendName, backendType)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching team details from GroupStore")
-		return "", err
+		return "", "", err
 	}
 
 	if teamID != "" {
 		r.backendLogger.WithField("teamID", teamID).Info("team details found in GroupStore")
-		return teamID, nil
+		return teamID, transformedGroupName, nil
 	}
 
 	// Step 2: Fallback to TeamStore (using transformed name, populated during preload)
 	teamBackends, err := r.Store.Team.GetBackends(ctx, transformedGroupName)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching team details from TeamStore")
-		return "", err
+		return "", "", err
 	}
 
 	if id, exists := teamBackends[backendKey]; exists && id != "" {
@@ -773,11 +773,11 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		// Migrate data from TeamStore to GroupStore
 		if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, id); err != nil {
 			r.backendLogger.WithError(err).Error("error migrating team details to GroupStore")
-			return "", err
+			return "", "", err
 		}
 
 		r.backendLogger.Info("successfully migrated team details from TeamStore to GroupStore")
-		return id, nil
+		return id, transformedGroupName, nil
 	}
 
 	// Step 3: Team not found in either store, create a new team
@@ -790,7 +790,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	})
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error creating team in backend")
-		return "", err
+		return "", "", err
 	}
 
 	r.backendLogger.Info("created team in backend successfully")
@@ -798,12 +798,12 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Store in GroupStore only - TeamStore is populated by preloadCache and used as read-only fallback
 	if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, newTeam.ID); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in GroupStore")
-		return "", err
+		return "", "", err
 	}
 
 	r.backendLogger.Info("updated team details in GroupStore successfully")
 
-	return newTeam.ID, nil
+	return newTeam.ID, transformedGroupName, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -997,6 +997,45 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 			return false, errors.New("backend client is not a GitlabClient")
 		}
 		gitlabClient.SetLdapSync(true, groupName)
+		r.backendLogger.Infof("setup successfully for %s", backendType)
+		return true, nil
+
+	case "atlan":
+		backendConfig := r.AppConfig.BackendMap["atlan"][backendName]
+		atlanClient, ok := backendClient.(*atlan.AtlanClient)
+		if !ok {
+			return false, errors.New("backend client is not an AtlanClient")
+		}
+
+		// Set SSO sync from connection config (for user creation)
+		if ssoSync, ok := backendConfig.Connection["sso_sync"].(bool); ok && ssoSync {
+			atlanClient.SetSSOSync(true)
+			r.backendLogger.Info("sso sync enabled for atlan backend")
+		}
+
+		// Check for LDAP sync (depends_on rover)
+		dependsOn := backendConfig.DependsOn
+		if dependsOn.Type == "" && dependsOn.Name == "" {
+			r.backendLogger.Infof("no ldap dependant found for %s backend", backendType)
+			return false, nil
+		}
+
+		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, dependsOn.Type, groupName)
+		if err != nil {
+			r.backendLogger.WithError(err).Error("error transforming the group Name")
+			return false, err
+		}
+		err = r.ldapDependantChecks(dependsOn, transformedGroupName)
+		if err != nil {
+			return false, err
+		}
+
+		if !isGroupCRHasDependants(backends, dependsOn) {
+			return false, fmt.Errorf("ldap dependants for %s backend doesn't exist in group CR", backendType)
+		}
+
+		// Pass original groupName for SSO mapping, not transformed name
+		atlanClient.SetLdapSync(true, groupName)
 		r.backendLogger.Infof("ldap sync setup successfully for %s", backendType)
 		return true, nil
 	}

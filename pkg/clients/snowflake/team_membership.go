@@ -139,7 +139,7 @@ func (c *SnowflakeClient) makeRoleRequest(ctx context.Context, teamID, endpoint 
 }
 
 func (c *SnowflakeClient) ReconcileGroupParams(
-	ctx context.Context, teamID string, groupParams structs.TeamParams) error {
-	// TODO: Implement group parameter reconciliation for Snowflake if applicable.
+	ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams) error {
+	// Snowflake does not support group parameter reconciliation
 	return nil
 }
