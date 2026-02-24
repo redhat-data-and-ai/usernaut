@@ -87,11 +87,6 @@ spec:
                     items:
                       type: string
                     type: array
-                  ldap_options:
-                    properties:
-                      include_indirect_reports:
-                        type: boolean
-                    type: object
                   ldap_query:
                     properties:
                       filters:
@@ -111,6 +106,13 @@ spec:
                         type: array
                       operator:
                         type: string
+                      options:
+                        properties:
+                          include_manager:
+                            type: boolean
+                          include_indirect_reports:
+                            type: boolean
+                        type: object
                     required:
                     - filters
                     - operator

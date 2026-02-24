@@ -264,6 +264,9 @@ spec:
       - "dataverse-platform-admin"
     # Optional: LDAP query to resolve members dynamically
     ldap_query:
+      options:    # Optional LDAP query options
+        include_indirect_reports: false
+        include_manager: false
       operator: and   # "and" or "or"
       filters:
         - key: manager       # See below for all possible keys
@@ -272,8 +275,6 @@ spec:
         - key: title
           criteria: contains
           value: "engineer"
-    ldap_options:   # Optional LDAP query options
-      include_indirect_reports: false
   backends: # Target platforms
     - name: fivetran
       type: fivetran
@@ -304,10 +305,10 @@ status:
 | ------------- | --------------------------------------------------------------------------- |
 | `GroupSpec`   | Desired state: group name, members, target backends                         |
 | `GroupStatus` | Observed state: reconciled users, conditions, backend statuses             |
-| `Members`     | `users` (direct), `groups` (nested), `ldap_query` (optional), `ldap_options` (optional) |
-| `LDAPQuery`   | `operator` (`and` or `or`) and `filters` (array of LDAPFilter)              |
+| `Members`     | `users` (direct), `groups` (nested), `ldap_query` (optional) |
+| `LDAPQuery`   | `options` (optional), `operator` (`and` or `or`) and `filters` (array of LDAPFilter)              |
 | `LDAPFilter`  | `key` (LDAP attribute name), `criteria` (`equals`, `contains`, `not`), `value`. See **Valid filter keys** below. For `key=manager`, use user ID only (username); it is expanded to full DN. |
-| `LDAPOptions` | `include_indirect_reports` (bool, optional)                                |
+| `LDAPOptions` | `include_indirect_reports` (bool, optional), `include_manager` (bool, optional) |
 | `Backend`     | Backend identifier with `name` and `type`                                   |
 
 **Valid filter keys** (LDAP attribute names supported in `ldap_query.filters[].key`):

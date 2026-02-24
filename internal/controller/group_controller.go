@@ -133,13 +133,17 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var err error
 	queryMembers := []string{}
 	if groupCR.Spec.Members.LDAPQuery != nil {
-		includeIndirectReports := groupCR.Spec.Members.LDAPOptions != nil && groupCR.Spec.Members.LDAPOptions.IncludeIndirectReports
+		includeIndirectReports := groupCR.Spec.Members.LDAPQuery.Options != nil && groupCR.Spec.Members.LDAPQuery.Options.IncludeIndirectReports
+		includeManager := groupCR.Spec.Members.LDAPQuery.Options != nil && groupCR.Spec.Members.LDAPQuery.Options.IncludeManager
 		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, includeIndirectReports, nil)
 		if err != nil {
 			r.log.WithError(err).Error("error fetching query members")
 			return ctrl.Result{}, err
 		}
-		r.log.WithField("query_members", queryMembers).Info("query members fetched successfully")
+		if includeManager {
+			queryMembers = append(queryMembers, extractManagerUIDsFromQuery(groupCR.Spec.Members.LDAPQuery)...)
+		}
+		r.log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
 	}
 
 	visitedGroups := make(map[string]struct{})
@@ -252,7 +256,7 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 		return nil, nil
 	}
 
-	log.WithField("query_members", queryMembers).Info("query members fetched successfully")
+	log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
 
 	hasManagerFilter := false
 	for _, filter := range query.Filters {
@@ -336,6 +340,32 @@ func (r *GroupReconciler) buildLDAPQueryFromYAML(ctx context.Context, query *use
 	}
 
 	return queryString, nil
+}
+
+func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string {
+	if query == nil {
+		return nil
+	}
+
+	managerUIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, filter := range query.Filters {
+		if !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+			continue
+		}
+
+		uid := filter.Value
+		if uid == "" {
+			continue
+		}
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		managerUIDs = append(managerUIDs, uid)
+	}
+
+	return managerUIDs
 }
 
 // fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData

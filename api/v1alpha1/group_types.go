@@ -45,10 +45,12 @@ type LDAPFilter struct {
 type LDAPQuery struct {
 	Operator string       `json:"operator"`
 	Filters  []LDAPFilter `json:"filters"`
+	Options  *LDAPOptions `json:"options,omitempty"`
 }
 
 type LDAPOptions struct {
 	IncludeIndirectReports bool `json:"include_indirect_reports,omitempty"`
+	IncludeManager         bool `json:"include_manager,omitempty"`
 }
 
 // GroupSpec defines the desired state of Group
@@ -60,10 +62,9 @@ type GroupSpec struct {
 }
 
 type Members struct {
-	Groups      []string     `json:"groups,omitempty"`
-	Users       []string     `json:"users"`
-	LDAPQuery   *LDAPQuery   `json:"ldap_query,omitempty"`
-	LDAPOptions *LDAPOptions `json:"ldap_options,omitempty"`
+	Groups    []string   `json:"groups,omitempty"`
+	Users     []string   `json:"users"`
+	LDAPQuery *LDAPQuery `json:"ldap_query,omitempty"`
 }
 
 type GroupParam struct {
