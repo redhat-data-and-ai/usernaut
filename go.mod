@@ -7,7 +7,7 @@ require (
 	github.com/fivetran/go-fivetran v1.1.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-ldap/ldap/v3 v3.4.12
-	github.com/goccy/go-yaml v1.18.0
+	github.com/goccy/go-yaml v1.19.2
 	github.com/gojek/heimdall/v7 v7.0.3
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
