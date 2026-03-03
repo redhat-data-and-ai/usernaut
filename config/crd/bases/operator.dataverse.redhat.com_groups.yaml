@@ -87,6 +87,36 @@ spec:
                     items:
                       type: string
                     type: array
+                  ldap_query:
+                    properties:
+                      filters:
+                        items:
+                          properties:
+                            criteria:
+                              type: string
+                            key:
+                              type: string
+                            value:
+                              type: string
+                          required:
+                          - criteria
+                          - key
+                          - value
+                          type: object
+                        type: array
+                      operator:
+                        type: string
+                      options:
+                        properties:
+                          include_manager:
+                            type: boolean
+                          include_indirect_reports:
+                            type: boolean
+                        type: object
+                    required:
+                    - filters
+                    - operator
+                    type: object
                   users:
                     items:
                       type: string

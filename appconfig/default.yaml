@@ -40,8 +40,8 @@ app:
 ldap:
   server: "ldap://ldap.test.com:389"
   baseDN: "ou=adhoc,ou=managedGroups,dc=org,dc=com"
+  baseUserDN: "ou=users,dc=org,dc=com"
   userDN: "uid=%s,ou=users,dc=org,dc=com"
-  baseUserDN: "ou=users,dc=redhat,dc=com"
   userSearchFilter: "(objectClass=filterClass)"
   attributes: ["mail", "uid", "cn", "sn", "displayName"]
 
@@ -88,13 +88,13 @@ backends:
   - name: test
     type: "snowflake"
     enabled: true
-    connection: 
+    connection:
       pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
   - name: gitlab
     type: "gitlab"
     enabled: true
-    depends_on: 
+    depends_on:
       name: "rover"
       type: "rover"
     connection:

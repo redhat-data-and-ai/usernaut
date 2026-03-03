@@ -19,6 +19,7 @@ Managing user access across multiple SaaS platforms is challenging:
 - **Multi-Backend Sync**: Simultaneously manage users across Fivetran, GitLab, Snowflake, and Rover
 - **LDAP Integration**: Automatically fetches user details from your corporate directory
 - **Nested Groups**: Groups can include other groups for flexible team structures
+- **Query-based Groups**: Members can be defined by LDAP queries (e.g. by manager, title) in addition to direct users and nested groups
 - **Automatic Offboarding**: Daily job removes users no longer in LDAP from all backends
 - **REST API**: Query user group memberships programmatically
 
@@ -42,9 +43,11 @@ Managing user access across multiple SaaS platforms is challenging:
 │  │              │      │  Controller     │      │               │  │
 │  │ - group_name │      │                 │      │ • Fivetran    │  │
 │  │ - members    │      │ • Sync users    │      │ • GitLab      │  │
-│  │ - backends   │      │ • Manage teams  │      │ • Snowflake   │  │
-│  └──────────────┘      │ • Auto-offboard │      │ • Rover       │  │
-│                        └────────┬────────┘      └───────────────┘  │
+│  │   (users,    │      │ • Manage teams  │      │ • Snowflake   │  │
+│  │    groups,   │      │ • Auto-offboard │      │ • Rover       │  │
+│  │    ldap_query) │      │ • Resolve LDAP  │      │               │  │
+│  │ - backends   │      │   query members │      │               │  │
+│  └──────────────┘      └────────┬────────┘      └───────────────┘  │
 │                                 │                                   │
 │                                 ▼                                   │
 │                        ┌─────────────────┐      ┌───────────────┐  │

@@ -1,0 +1,29 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: Group
+metadata:
+  labels:
+    app.kubernetes.io/name: usernaut
+    app.kubernetes.io/managed-by: kustomize
+  name: dataverse-aggregate-mygroupquerybased
+  namespace: usernaut
+spec:
+  group_name: dataverse-aggregate-mygroupquerybased
+  members:
+    ldap_query:
+      options:
+        include_indirect_reports: true
+        include_manager: true
+      operator: and
+      filters:  # key: LDAP attribute (e.g. manager, title, givenName, employeeType, rhatGeo, co, st). See DEVELOPMENT.md for full list.
+        - key: manager
+          criteria: equals
+          value: pbhattac  # user ID only (expanded to uid=pbhattac,<baseUserDN>)
+        - key: co
+          criteria: equals
+          value: "IND"
+    users:
+      - subhatta
+      - arijroy
+  backends:
+  - name: snowflake
+    type: snowflake
