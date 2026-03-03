@@ -35,4 +35,12 @@ appconfig/local.yaml
 *.p12
 *.crt
 *.pem
+
+# Environment variables and secrets
 .env
+.env.local
+.env.*.local
+
+# Local development config with secrets
+appconfig/local*.yaml
+appconfig/.env*
