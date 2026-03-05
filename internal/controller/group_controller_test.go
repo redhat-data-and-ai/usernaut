@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	// "encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -25,6 +26,9 @@ import (
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/sirupsen/logrus"
+
+	// "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -350,6 +354,259 @@ var _ = Describe("Group Controller", func() {
 			Expect(status.Name).To(Equal("gitlab-main"))
 			Expect(status.Status).To(BeFalse())
 			Expect(status.Message).To(ContainSubstring("missing required connection parameters"))
+		})
+
+		// DATA-3526: Tests for backend removal functionality
+		Context("When backends are removed from the spec", func() {
+			It("should detect removed backends correctly", func() {
+				By("setting up a Group with existing backend status")
+
+				const removedBackendsName = "test-removed-backends"
+
+				// Create Group with multiple backends in status but fewer in spec
+				groupWithRemovedBackends := &usernautdevv1alpha1.Group{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      removedBackendsName,
+						Namespace: "default",
+					},
+					Spec: usernautdevv1alpha1.GroupSpec{
+						GroupName: removedBackendsName,
+						Members: usernautdevv1alpha1.Members{
+							Users: []string{"test-user"},
+						},
+						Backends: []usernautdevv1alpha1.Backend{
+							{Name: "rover", Type: "rover"}, // Only rover in spec
+						},
+					},
+					Status: usernautdevv1alpha1.GroupStatus{
+						BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+							{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+							{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},   // Should be detected as removed
+							{Name: "snowflake", Type: "snowflake", Status: true, Message: "Successful"}, // Should be detected as removed
+						},
+					},
+				}
+
+				appConfig := &config.AppConfig{}
+				testCache, err := cache.New(&cache.Config{
+					Driver: "memory",
+					InMemory: &inmemory.Config{
+						DefaultExpiration: int32(-1),
+						CleanupInterval:   int32(-1),
+					},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				reconciler := &GroupReconciler{
+					Client:     k8sClient,
+					Scheme:     k8sClient.Scheme(),
+					AppConfig:  appConfig,
+					Store:      store.New(testCache),
+					CacheMutex: &sync.RWMutex{},
+					log:        logrus.NewEntry(logrus.New()),
+				}
+
+				By("detecting removed backends")
+				removedBackends := reconciler.detectRemovedBackends(groupWithRemovedBackends)
+
+				By("verifying that fivetran and snowflake are detected as removed")
+				Expect(removedBackends).To(HaveLen(2))
+
+				removedNames := make(map[string]bool)
+				for _, backend := range removedBackends {
+					removedNames[backend.Name] = true
+				}
+
+				Expect(removedNames).To(HaveKey("fivetran"))
+				Expect(removedNames).To(HaveKey("snowflake"))
+				Expect(removedNames).NotTo(HaveKey("rover")) // rover should NOT be detected as removed
+			})
+
+			It("should not detect any removed backends when specs match status", func() {
+				By("setting up a Group where spec and status have same backends")
+
+				groupMatching := &usernautdevv1alpha1.Group{
+					Spec: usernautdevv1alpha1.GroupSpec{
+						Backends: []usernautdevv1alpha1.Backend{
+							{Name: "rover", Type: "rover"},
+							{Name: "fivetran", Type: "fivetran"},
+						},
+					},
+					Status: usernautdevv1alpha1.GroupStatus{
+						BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+							{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+							{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},
+						},
+					},
+				}
+
+				reconciler := &GroupReconciler{
+					log: logrus.NewEntry(logrus.New()),
+				}
+
+				By("detecting removed backends")
+				removedBackends := reconciler.detectRemovedBackends(groupMatching)
+
+				By("verifying no backends are detected as removed")
+				Expect(removedBackends).To(BeEmpty())
+			})
+
+			It("should not detect removed backends when status is false", func() {
+				By("setting up a Group with failed backends in status")
+
+				groupWithFailedBackends := &usernautdevv1alpha1.Group{
+					Spec: usernautdevv1alpha1.GroupSpec{
+						Backends: []usernautdevv1alpha1.Backend{
+							{Name: "rover", Type: "rover"},
+						},
+					},
+					Status: usernautdevv1alpha1.GroupStatus{
+						BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+							{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+							{Name: "fivetran", Type: "fivetran", Status: false, Message: "Failed"}, // Failed status, should not be removed
+						},
+					},
+				}
+
+				reconciler := &GroupReconciler{
+					log: logrus.NewEntry(logrus.New()),
+				}
+
+				By("detecting removed backends")
+				removedBackends := reconciler.detectRemovedBackends(groupWithFailedBackends)
+
+				By("verifying no backends are detected as removed (failed backends are not considered for removal)")
+				Expect(removedBackends).To(BeEmpty())
+			})
+
+			It("should handle empty status gracefully", func() {
+				By("setting up a Group with empty status")
+
+				groupEmptyStatus := &usernautdevv1alpha1.Group{
+					Spec: usernautdevv1alpha1.GroupSpec{
+						Backends: []usernautdevv1alpha1.Backend{
+							{Name: "rover", Type: "rover"},
+						},
+					},
+					Status: usernautdevv1alpha1.GroupStatus{
+						BackendsStatus: []usernautdevv1alpha1.BackendStatus{}, // Empty status
+					},
+				}
+
+				reconciler := &GroupReconciler{
+					log: logrus.NewEntry(logrus.New()),
+				}
+
+				By("detecting removed backends")
+				removedBackends := reconciler.detectRemovedBackends(groupEmptyStatus)
+
+				By("verifying no backends are detected as removed")
+				Expect(removedBackends).To(BeEmpty())
+			})
+		})
+
+		// DATA-3526: Table-driven tests for detectRemovedBackends edge cases
+		Context("When testing detectRemovedBackends with various scenarios", func() {
+			type detectRemovedBackendsTestCase struct {
+				name                 string
+				specBackends         []usernautdevv1alpha1.Backend
+				statusBackends       []usernautdevv1alpha1.BackendStatus
+				expectedRemovedCount int
+				expectedRemovedNames []string
+			}
+
+			DescribeTable("should detect removed backends correctly",
+				func(tc detectRemovedBackendsTestCase) {
+					group := &usernautdevv1alpha1.Group{
+						Spec: usernautdevv1alpha1.GroupSpec{
+							Backends: tc.specBackends,
+						},
+						Status: usernautdevv1alpha1.GroupStatus{
+							BackendsStatus: tc.statusBackends,
+						},
+					}
+
+					reconciler := &GroupReconciler{
+						log: logrus.NewEntry(logrus.New()),
+					}
+					removedBackends := reconciler.detectRemovedBackends(group)
+
+					Expect(removedBackends).To(HaveLen(tc.expectedRemovedCount))
+
+					if tc.expectedRemovedCount > 0 {
+						removedNames := make([]string, len(removedBackends))
+						for i, backend := range removedBackends {
+							removedNames[i] = backend.Name
+						}
+						Expect(removedNames).To(ConsistOf(tc.expectedRemovedNames))
+					}
+				},
+				Entry("no backends in spec or status", detectRemovedBackendsTestCase{
+					name:                 "empty spec and status",
+					specBackends:         []usernautdevv1alpha1.Backend{},
+					statusBackends:       []usernautdevv1alpha1.BackendStatus{},
+					expectedRemovedCount: 0,
+					expectedRemovedNames: []string{},
+				}),
+				Entry("single backend removed", detectRemovedBackendsTestCase{
+					name: "single backend removed",
+					specBackends: []usernautdevv1alpha1.Backend{
+						{Name: "rover", Type: "rover"},
+					},
+					statusBackends: []usernautdevv1alpha1.BackendStatus{
+						{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+						{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},
+					},
+					expectedRemovedCount: 1,
+					expectedRemovedNames: []string{"fivetran"},
+				}),
+				Entry("multiple backends removed", detectRemovedBackendsTestCase{
+					name: "multiple backends removed",
+					specBackends: []usernautdevv1alpha1.Backend{
+						{Name: "rover", Type: "rover"},
+					},
+					statusBackends: []usernautdevv1alpha1.BackendStatus{
+						{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+						{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},
+						{Name: "snowflake", Type: "snowflake", Status: true, Message: "Successful"},
+					},
+					expectedRemovedCount: 2,
+					expectedRemovedNames: []string{"fivetran", "snowflake"},
+				}),
+				Entry("all backends removed", detectRemovedBackendsTestCase{
+					name:         "all backends removed",
+					specBackends: []usernautdevv1alpha1.Backend{},
+					statusBackends: []usernautdevv1alpha1.BackendStatus{
+						{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+						{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},
+					},
+					expectedRemovedCount: 2,
+					expectedRemovedNames: []string{"rover", "fivetran"},
+				}),
+				Entry("failed backends not considered for removal", detectRemovedBackendsTestCase{
+					name: "failed backends ignored",
+					specBackends: []usernautdevv1alpha1.Backend{
+						{Name: "rover", Type: "rover"},
+					},
+					statusBackends: []usernautdevv1alpha1.BackendStatus{
+						{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+						{Name: "fivetran", Type: "fivetran", Status: false, Message: "Failed"},
+					},
+					expectedRemovedCount: 0,
+					expectedRemovedNames: []string{},
+				}),
+				Entry("mixed successful and failed backends", detectRemovedBackendsTestCase{
+					name:         "mixed success and failure",
+					specBackends: []usernautdevv1alpha1.Backend{},
+					statusBackends: []usernautdevv1alpha1.BackendStatus{
+						{Name: "rover", Type: "rover", Status: true, Message: "Successful"},      // Should be removed
+						{Name: "fivetran", Type: "fivetran", Status: false, Message: "Failed"},   // Should NOT be removed
+						{Name: "snowflake", Type: "snowflake", Status: true, Message: "Success"}, // Should be removed
+					},
+					expectedRemovedCount: 2,
+					expectedRemovedNames: []string{"rover", "snowflake"},
+				}),
+			)
 		})
 	})
 })
