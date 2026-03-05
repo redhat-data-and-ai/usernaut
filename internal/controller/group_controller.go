@@ -687,6 +687,15 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	// NOTE: CacheMutex is already held by caller (Reconcile)
 	backendKey := backendName + "_" + backendType
 
+	type userCheck struct {
+		user     string
+		email    string
+		cachedID string
+	}
+	var usersToCheck []userCheck
+	var usersToCreate []string
+
+	// Identify users to check or create (Lock held)
 	for _, user := range users {
 		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {
@@ -703,10 +712,64 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 
 		// Check if user already has ID for this backend
 		if userID, exists := userBackends[backendKey]; exists && userID != "" {
-			r.backendLogger.WithField("user", user).Debug("user already exists in cache")
-			continue
+			if backendType == "gitlab" {
+				usersToCheck = append(usersToCheck, userCheck{
+					user:     user,
+					email:    userDetails.GetEmail(),
+					cachedID: userID,
+				})
+			} else {
+				r.backendLogger.WithField("user", user).Info("user already exists in cache")
+			}
+		} else {
+			usersToCreate = append(usersToCreate, user)
+		}
+	}
+
+	if len(usersToCheck) > 0 {
+		// Release the lock before making network calls
+		r.CacheMutex.Unlock()
+
+		type checkResult struct {
+			userCheck
+			fetchedID string
+			err       error
+		}
+		results := make([]checkResult, 0, len(usersToCheck))
+
+		for _, check := range usersToCheck {
+			userFetched, err := backendClient.FetchUserDetails(ctx, check.cachedID)
+			res := checkResult{userCheck: check, err: err}
+			if err == nil {
+				res.fetchedID = userFetched.ID
+			}
+			results = append(results, res)
 		}
 
+		r.CacheMutex.Lock()
+
+		// Apply cache updates for GitLab users (Lock held)
+		for _, res := range results {
+			if res.err != nil {
+				r.backendLogger.WithField("user", res.user).WithError(res.err).Error("error fetching user details")
+				return res.err
+			}
+
+			if res.fetchedID == res.cachedID {
+				r.backendLogger.WithField("user", res.user).Info("user already exists in cache")
+			} else {
+				r.backendLogger.WithField("user", res.user).Info("user has logged in, updating cache with new userID")
+				if err := r.Store.User.SetBackend(ctx, res.email, backendKey, res.fetchedID); err != nil {
+					r.backendLogger.WithField("user", res.user).WithError(err).Error("error updating user details in cache")
+					return err
+				}
+			}
+		}
+	}
+
+	// Create new users (Lock held)
+	for _, user := range usersToCreate {
+		userDetails := r.allLdapUserData[user]
 		// if user details are not found in cache, create a new user in backend
 		newUser, err := backendClient.CreateUser(ctx, &structs.User{
 			Email:     userDetails.GetEmail(),
