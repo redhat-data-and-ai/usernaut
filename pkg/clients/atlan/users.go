@@ -28,11 +28,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const (
-	// paginationLimit is the number of records to fetch per API request
-	paginationLimit = 100
-)
-
 // FetchAllUsers retrieves all users from Atlan with pagination
 // This function fetches users regardless of SSO sync status
 func (ac *AtlanClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
@@ -45,7 +40,7 @@ func (ac *AtlanClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 	offset := 0
 
 	for {
-		url := fmt.Sprintf("%s/api/service/users?limit=%d&offset=%d", ac.url, paginationLimit, offset)
+		url := fmt.Sprintf("%s/api/service/users?limit=%d&offset=%d", ac.url, ac.paginationLimit, offset)
 		response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchAllUsers")
 		if err != nil {
 			log.WithError(err).Error("failed to fetch users from Atlan")
@@ -66,10 +61,10 @@ func (ac *AtlanClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 			userIDMap[user.ID] = userStruct
 		}
 
-		if len(apiResponse.Records) < paginationLimit {
+		if len(apiResponse.Records) < ac.paginationLimit {
 			break
 		}
-		offset += paginationLimit
+		offset += ac.paginationLimit
 	}
 
 	log.WithField("total_user_count", len(userIDMap)).Info("successfully fetched users from Atlan")

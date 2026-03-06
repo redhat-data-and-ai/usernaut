@@ -121,6 +121,8 @@ backends:
       # OAuth credentials for user deletion (required - API tokens don't work for deletion)
       oauth_client_id: file|path/to/atlan_oauth_client_id
       oauth_client_secret: file|path/to/atlan_oauth_client_secret
+      # Number of records to fetch per API request for pagination (default: 100)
+      pagination_limit: 100
 
 apiServer:
   address: "0.0.0.0:8080"

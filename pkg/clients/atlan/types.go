@@ -28,6 +28,7 @@ type AtlanClient struct {
 	identityProviderAlias string
 	assetTransferUsername string
 	defaultPersona        string
+	paginationLimit       int
 	ssoSync               bool
 	ldapSync              bool
 	ssoGroupName          string
@@ -43,6 +44,7 @@ type AtlanConfig struct {
 	DefaultPersona        string `json:"default_persona"`
 	OAuthClientID         string `json:"oauth_client_id"`
 	OAuthClientSecret     string `json:"oauth_client_secret"`
+	PaginationLimit       int    `json:"pagination_limit"`
 }
 
 // AtlanUser represents a user in Atlan's API response
