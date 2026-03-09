@@ -28,6 +28,7 @@ type AtlanClient struct {
 	identityProviderAlias string
 	assetTransferUsername string
 	defaultPersona        string
+	paginationLimit       int
 	ssoSync               bool
 	ldapSync              bool
 	ssoGroupName          string
@@ -43,6 +44,7 @@ type AtlanConfig struct {
 	DefaultPersona        string `json:"default_persona"`
 	OAuthClientID         string `json:"oauth_client_id"`
 	OAuthClientSecret     string `json:"oauth_client_secret"`
+	PaginationLimit       int    `json:"pagination_limit"`
 }
 
 // AtlanUser represents a user in Atlan's API response
@@ -54,6 +56,15 @@ type AtlanUser struct {
 	LastName    string `json:"lastName"`
 	DisplayName string `json:"name"`
 	Enabled     bool   `json:"enabled"`
+}
+
+// createUserRequest represents the request body for creating a user in Atlan
+type createUserRequest struct {
+	Email     string `json:"email"`
+	Username  string `json:"username"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	RoleName  string `json:"roleName"`
 }
 
 // AtlanUsersResponse represents the response from Atlan's users API

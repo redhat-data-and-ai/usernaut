@@ -66,6 +66,12 @@ func NewClient(atlanAppConfig map[string]interface{},
 		oauthManager = NewOAuthTokenManager(atlanConfig.URL, atlanConfig.OAuthClientID, atlanConfig.OAuthClientSecret)
 	}
 
+	// Set default pagination limit if not configured
+	paginationLimit := atlanConfig.PaginationLimit
+	if paginationLimit <= 0 {
+		paginationLimit = 100
+	}
+
 	return &AtlanClient{
 		client:                client,
 		url:                   atlanConfig.URL,
@@ -73,6 +79,7 @@ func NewClient(atlanAppConfig map[string]interface{},
 		identityProviderAlias: atlanConfig.IdentityProviderAlias,
 		assetTransferUsername: atlanConfig.AssetTransferUsername,
 		defaultPersona:        atlanConfig.DefaultPersona,
+		paginationLimit:       paginationLimit,
 		oauthTokenManager:     oauthManager,
 	}, nil
 }

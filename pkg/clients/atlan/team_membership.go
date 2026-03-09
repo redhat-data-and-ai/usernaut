@@ -48,7 +48,7 @@ func (ac *AtlanClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 	offset := 0
 
 	for {
-		url := fmt.Sprintf("%s/api/service/groups/%s/members?limit=%d&offset=%d", ac.url, teamID, paginationLimit, offset)
+		url := fmt.Sprintf("%s/api/service/groups/%s/members?limit=%d&offset=%d", ac.url, teamID, ac.paginationLimit, offset)
 		response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchTeamMembersByTeamID")
 		if err != nil {
 			log.WithError(err).Error("failed to fetch team members from Atlan")
@@ -69,10 +69,10 @@ func (ac *AtlanClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 			}
 		}
 
-		if len(apiResponse.Records) < paginationLimit {
+		if len(apiResponse.Records) < ac.paginationLimit {
 			break
 		}
-		offset += paginationLimit
+		offset += ac.paginationLimit
 	}
 
 	log.WithField("member_count", len(teamMembers)).Info("fetched team members from Atlan")
