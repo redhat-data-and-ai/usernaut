@@ -26,24 +26,31 @@ import (
 
 // Config represents the top-level configuration structure
 type AppConfig struct {
-	App                             App                       `yaml:"app"`
-	LDAP                            ldap.LDAP                 `yaml:"ldap"`
-	Cache                           cache.Config              `yaml:"cache"`
-	Backends                        []Backend                 `yaml:"backends"`
-	Pattern                         map[string][]PatternEntry `yaml:"pattern"`
-	UsernautUserOffboardingInterval string                    `yaml:"usernautUserOffboardingInterval"`
-	HttpClient                      struct {
+	App                                 App                       `yaml:"app"`
+	LDAP                                ldap.LDAP                 `yaml:"ldap"`
+	Cache                               cache.Config              `yaml:"cache"`
+	Backends                            []Backend                 `yaml:"backends"`
+	Pattern                             map[string][]PatternEntry `yaml:"pattern"`
+	UsernautUserOffboardingInterval     string                    `yaml:"usernautUserOffboardingInterval"`
+	OffboardUserExclusionListConfigPath string                    `yaml:"offboardUserExclusionListConfigPath"`
+	HttpClient                          struct {
 		ConnectionPoolConfig    httpclient.ConnectionPoolConfig    `yaml:"connectionPoolConfig"`
 		HystrixResiliencyConfig httpclient.HystrixResiliencyConfig `yaml:"hystrixResiliencyConfig"`
 	} `yaml:"httpClient"`
-	APIServer  APIServerConfig               `yaml:"apiServer"`
-	BackendMap map[string]map[string]Backend `yaml:"-"`
+	APIServer        APIServerConfig               `yaml:"apiServer"`
+	ControllerConfig ControllerConfig              `yaml:"controllerConfig"`
+	BackendMap       map[string]map[string]Backend `yaml:"-"`
 }
 
 type APIServerConfig struct {
 	Address string     `yaml:"address"`
 	Auth    AuthConfig `yaml:"auth"`
 	CORS    CORSConfig `yaml:"cors"`
+}
+
+// ControllerConfig represents controller-specific configuration
+type ControllerConfig struct {
+	MaxConcurrentReconciles int `yaml:"maxConcurrentReconciles"`
 }
 
 type CORSConfig struct {

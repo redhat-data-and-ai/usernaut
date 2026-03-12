@@ -552,7 +552,10 @@ func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName 
 
 	// Remove the group from each member's user:groups index
 	for _, email := range members {
-		r.log.WithField("user", email).WithField("group", groupName).Info("removing group from user's group list during deletion")
+		r.log.WithFields(logrus.Fields{
+			"user":  email,
+			"group": groupName,
+		}).Info("removing group from user's group list during deletion")
 		if err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName); err != nil {
 			r.log.WithError(err).WithField("user", email).Error("error removing group from user's groups index during deletion")
 			// Continue processing other members
@@ -847,6 +850,17 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// force reconcile flag
 	labelPredicate := controllerutils.ForceReconcilePredicate()
+
+	maxConcurrentReconciles := r.AppConfig.ControllerConfig.MaxConcurrentReconciles
+	if maxConcurrentReconciles <= 0 {
+		maxConcurrentReconciles = 1 // default value
+	}
+
+	// Log the configured concurrency level
+	logger.Logger(context.Background()).WithFields(logrus.Fields{
+		"maxConcurrentReconciles": maxConcurrentReconciles,
+	}).Info("Configuring MaxConcurrentReconciles for Group controller")
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&usernautdevv1alpha1.Group{}).
 		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, labelPredicate)).
@@ -854,6 +868,9 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			client.Object(&usernautdevv1alpha1.Group{}),
 			handler.EnqueueRequestsFromMapFunc(mapFunc),
 		).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: maxConcurrentReconciles,
+		}).
 		Complete(r)
 }
 

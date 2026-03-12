@@ -137,3 +137,8 @@ apiServer:
 
 usernautUserOffboardingInterval: "2h"
 offboardUserExclusionListConfigPath: "default_offboard_user_exclusion_list"
+
+# Controller configuration
+controllerConfig:
+  maxConcurrentReconciles: 1
+  

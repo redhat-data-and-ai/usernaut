@@ -3,6 +3,8 @@ package periodicjobs
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -43,9 +45,17 @@ cache:
   inmemory:
     defaultExpiration: -1
     cleanupInterval: -1
-usernaut_user_offboarding_job_interval: "24h"
+usernautUserOffboardingInterval: "24h"
+offboardUserExclusionListConfigPath: "test_offboard_user_exclusion_list"
 `
 	err = os.WriteFile(filepath.Join(configDir, "default.yaml"), []byte(configContent), 0644)
+	require.NoError(t, err)
+
+	// Create exclusion list file (empty by default, tests can override if needed)
+	exclusionListContent := `exclusions: []
+`
+	exclusionListFile := filepath.Join(configDir, "test_offboard_user_exclusion_list.yaml")
+	err = os.WriteFile(exclusionListFile, []byte(exclusionListContent), 0644)
 	require.NoError(t, err)
 
 	// Set WORKDIR to point to our test directory
@@ -399,5 +409,291 @@ func TestUserOffboardingJobInterval(t *testing.T) {
 		// Should be at least the default interval
 		assert.GreaterOrEqual(t, interval1, DefaultUserOffboardingJobInterval,
 			"GetInterval should return at least the default interval")
+	})
+}
+
+// TestUserOffboardingJobEmptyUserKey tests handling of empty user keys
+func TestUserOffboardingJobEmptyUserKey(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	cacheConfig := &inmemory.Config{
+		DefaultExpiration: 60,
+		CleanupInterval:   120,
+	}
+	inMemCache, err := inmemory.NewCache(cacheConfig)
+	require.NoError(t, err)
+
+	dataStore := store.New(inMemCache)
+	ctx := context.Background()
+
+	// Setup cache with valid user and empty user key
+	testUser := &structs.User{
+		ID:       "test_user_123",
+		Email:    "testuser@example.com",
+		UserName: "testuser",
+	}
+
+	// Add valid user
+	err = dataStore.User.SetBackend(ctx, testUser.Email, "fivetran_fivetran", testUser.ID)
+	require.NoError(t, err)
+
+	// Add empty user key by directly setting an empty key in cache
+	// This simulates a blank userKey in the cache
+	// (key "user:" results in empty email after prefix removal)
+	backendData := `{"fivetran_fivetran":"empty_user_id"}`
+	err = inMemCache.Set(ctx, "user:", backendData, 0)
+	require.NoError(t, err)
+
+	backendClients := map[string]clients.Client{
+		"fivetran_fivetran": mockBackendClient,
+	}
+
+	sharedCacheMutex := &sync.RWMutex{}
+	job := NewUserOffboardingJob(
+		sharedCacheMutex,
+		dataStore,
+		mockLDAPClient,
+		backendClients,
+	)
+
+	t.Run("Empty_UserKey_Should_Be_Skipped", func(t *testing.T) {
+		// Valid user should be processed
+		mockLDAPClient.EXPECT().
+			GetUserLDAPDataByEmail(gomock.Any(), testUser.Email).
+			Return(nil, ldap.ErrNoUserFound).
+			Times(1)
+
+		mockBackendClient.EXPECT().
+			DeleteUser(gomock.Any(), testUser.ID).
+			Return(nil).
+			Times(1)
+
+		// Empty user key should be skipped (no LDAP or backend calls for it)
+		// The job should complete successfully despite the empty key
+
+		err := job.Run(ctx)
+		assert.NoError(t, err)
+
+		// Valid user should be removed
+		exists, err := dataStore.User.Exists(ctx, testUser.Email)
+		require.NoError(t, err)
+		assert.False(t, exists, "Valid user should be removed from cache")
+	})
+}
+
+// TestUserOffboardingJobExclusionList tests handling of users in exclusion list
+func TestUserOffboardingJobExclusionList(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	cacheConfig := &inmemory.Config{
+		DefaultExpiration: 60,
+		CleanupInterval:   120,
+	}
+	inMemCache, err := inmemory.NewCache(cacheConfig)
+	require.NoError(t, err)
+
+	dataStore := store.New(inMemCache)
+	ctx := context.Background()
+
+	// Setup test users
+	excludedUser := &structs.User{
+		ID:       "excluded_user_123",
+		Email:    "excluded@example.com",
+		UserName: "excluded",
+	}
+
+	normalUser := &structs.User{
+		ID:       "normal_user_456",
+		Email:    "normal@example.com",
+		UserName: "normal",
+	}
+
+	// Add users to cache
+	err = dataStore.User.SetBackend(ctx, excludedUser.Email, "fivetran_fivetran", excludedUser.ID)
+	require.NoError(t, err)
+	err = dataStore.User.SetBackend(ctx, normalUser.Email, "fivetran_fivetran", normalUser.ID)
+	require.NoError(t, err)
+
+	// Create exclusion list file with excluded user
+	tempDir := os.Getenv("WORKDIR")
+	configDir := filepath.Join(tempDir, "appconfig")
+	exclusionListContent := `exclusions:
+  - excluded@example.com
+`
+	exclusionListFile := filepath.Join(configDir, "test_offboard_user_exclusion_list.yaml")
+	err = os.WriteFile(exclusionListFile, []byte(exclusionListContent), 0644)
+	require.NoError(t, err)
+
+	backendClients := map[string]clients.Client{
+		"fivetran_fivetran": mockBackendClient,
+	}
+
+	sharedCacheMutex := &sync.RWMutex{}
+	// Create job after exclusion list file is created so it loads the exclusion list
+	job := NewUserOffboardingJob(
+		sharedCacheMutex,
+		dataStore,
+		mockLDAPClient,
+		backendClients,
+	)
+
+	t.Run("Excluded_User_Should_Be_Skipped", func(t *testing.T) {
+		// Excluded user should NOT be checked in LDAP or deleted from backend
+		// (no EXPECT calls for excluded user)
+
+		// Normal user should be processed
+		mockLDAPClient.EXPECT().
+			GetUserLDAPDataByEmail(gomock.Any(), normalUser.Email).
+			Return(nil, ldap.ErrNoUserFound).
+			Times(1)
+
+		mockBackendClient.EXPECT().
+			DeleteUser(gomock.Any(), normalUser.ID).
+			Return(nil).
+			Times(1)
+
+		err := job.Run(ctx)
+		assert.NoError(t, err)
+
+		// Excluded user should still be in cache
+		exists, err := dataStore.User.Exists(ctx, excludedUser.Email)
+		require.NoError(t, err)
+		assert.True(t, exists, "Excluded user should remain in cache")
+
+		// Normal user should be removed
+		exists, err = dataStore.User.Exists(ctx, normalUser.Email)
+		require.NoError(t, err)
+		assert.False(t, exists, "Normal user should be removed from cache")
+	})
+}
+
+// TestUserOffboardingJobExclusionListFromURL tests loading exclusion list from HTTP URL
+func TestUserOffboardingJobExclusionListFromURL(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	cacheConfig := &inmemory.Config{
+		DefaultExpiration: 60,
+		CleanupInterval:   120,
+	}
+	inMemCache, err := inmemory.NewCache(cacheConfig)
+	require.NoError(t, err)
+
+	dataStore := store.New(inMemCache)
+	ctx := context.Background()
+
+	// Setup test users
+	excludedUser := &structs.User{
+		ID:       "excluded_user_123",
+		Email:    "excluded@example.com",
+		UserName: "excluded",
+	}
+
+	normalUser := &structs.User{
+		ID:       "normal_user_456",
+		Email:    "normal@example.com",
+		UserName: "normal",
+	}
+
+	// Add users to cache
+	err = dataStore.User.SetBackend(ctx, excludedUser.Email, "fivetran_fivetran", excludedUser.ID)
+	require.NoError(t, err)
+	err = dataStore.User.SetBackend(ctx, normalUser.Email, "fivetran_fivetran", normalUser.ID)
+	require.NoError(t, err)
+
+	// Create a test HTTP server that serves the exclusion list
+	exclusionListContent := `exclusions:
+  - excluded@example.com
+`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/config/exclusion_list.yaml" {
+			w.Header().Set("Content-Type", "application/yaml")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(exclusionListContent))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	// Update config to use HTTP URL
+	tempDir := os.Getenv("WORKDIR")
+	configDir := filepath.Join(tempDir, "appconfig")
+	configContent := `app:
+  name: "usernaut-test"
+  version: "0.0.1"
+  environment: "test"
+cache:
+  driver: "memory"
+  inmemory:
+    defaultExpiration: -1
+    cleanupInterval: -1
+usernautUserOffboardingInterval: "24h"
+offboardUserExclusionListConfigPath: "` + server.URL + `/config/exclusion_list.yaml"
+`
+	err = os.WriteFile(filepath.Join(configDir, "default.yaml"), []byte(configContent), 0644)
+	require.NoError(t, err)
+
+	// Force reload of config
+	_, err = config.LoadConfig("default")
+	require.NoError(t, err)
+
+	backendClients := map[string]clients.Client{
+		"fivetran_fivetran": mockBackendClient,
+	}
+
+	sharedCacheMutex := &sync.RWMutex{}
+	// Create job after config is updated so it loads the exclusion list from URL
+	job := NewUserOffboardingJob(
+		sharedCacheMutex,
+		dataStore,
+		mockLDAPClient,
+		backendClients,
+	)
+
+	t.Run("Excluded_User_From_URL_Should_Be_Skipped", func(t *testing.T) {
+		// Excluded user should NOT be checked in LDAP or deleted from backend
+		// (no EXPECT calls for excluded user)
+
+		// Normal user should be processed
+		mockLDAPClient.EXPECT().
+			GetUserLDAPDataByEmail(gomock.Any(), normalUser.Email).
+			Return(nil, ldap.ErrNoUserFound).
+			Times(1)
+
+		mockBackendClient.EXPECT().
+			DeleteUser(gomock.Any(), normalUser.ID).
+			Return(nil).
+			Times(1)
+
+		err := job.Run(ctx)
+		assert.NoError(t, err)
+
+		// Excluded user should still be in cache
+		exists, err := dataStore.User.Exists(ctx, excludedUser.Email)
+		require.NoError(t, err)
+		assert.True(t, exists, "Excluded user should remain in cache")
+
+		// Normal user should be removed
+		exists, err = dataStore.User.Exists(ctx, normalUser.Email)
+		require.NoError(t, err)
+		assert.False(t, exists, "Normal user should be removed from cache")
 	})
 }
