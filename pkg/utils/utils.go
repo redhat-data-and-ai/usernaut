@@ -11,6 +11,9 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
+// standardizeNameReplacer replaces period, parenthesis, and comma with space in a single pass.
+var standardizeNameReplacer = strings.NewReplacer(".", " ", "(", " ", ")", " ", ",", " ")
+
 // MapToStruct populates a struct with values from a map using json tags
 // target must be a pointer to a struct
 func MapToStruct(data map[string]interface{}, target interface{}) error {
@@ -303,11 +306,7 @@ func StandardizeNameForBackend(name string) string {
 	if name == "" {
 		return ""
 	}
-	s := name
-	s = strings.ReplaceAll(s, ".", " ")
-	s = strings.ReplaceAll(s, "(", " ")
-	s = strings.ReplaceAll(s, ")", " ")
-	s = strings.ReplaceAll(s, ",", " ")
+	s := standardizeNameReplacer.Replace(name)
 	// Collapse multiple spaces and trim
 	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
 }
