@@ -3,6 +3,7 @@ package utils
 import (
 	"testing"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/stretchr/testify/assert"
 )
@@ -349,4 +350,85 @@ func TestGetTransformGroupName(t *testing.T) {
 			assert.Equal(t, val.output, returnedString)
 		})
 	}
+}
+
+func TestStandardizeNameForBackend(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "period in name - Kyle St. Pierre",
+			input:    "Kyle St. Pierre",
+			expected: "Kyle St Pierre",
+		},
+		{
+			name:     "multiple periods - Roshah C.S Nomo",
+			input:    "Roshah C.S Nomo",
+			expected: "Roshah C S Nomo",
+		},
+		{
+			name:     "initials with periods - J.C. Molet",
+			input:    "J.C. Molet",
+			expected: "J C Molet",
+		},
+		{
+			name:     "parentheses",
+			input:    "John (Johnny) Doe",
+			expected: "John Johnny Doe",
+		},
+		{
+			name:     "comma in name",
+			input:    "Doe, Jr., John",
+			expected: "Doe Jr John",
+		},
+		{
+			name:     "mixed special chars",
+			input:    "St. (Jr.) Pierre, K.",
+			expected: "St Jr Pierre K",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "no special characters unchanged",
+			input:    "Alice Smith",
+			expected: "Alice Smith",
+		},
+		{
+			name:     "multiple spaces collapsed",
+			input:    "Kyle   St.   Pierre",
+			expected: "Kyle St Pierre",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StandardizeNameForBackend(tt.input)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+// TestStandardizeNameForBackend_ControllerIntegration verifies that the same logic
+// used in group_controller (FirstName/LastName from LDAP with standardization) produces
+// backend-safe names. If this test fails, ensure group_controller still applies
+// utils.StandardizeNameForBackend to GetDisplayName() and GetSN() when building User for CreateUser.
+func TestStandardizeNameForBackend_ControllerIntegration(t *testing.T) {
+	ldapUser := &structs.LDAPUser{
+		DisplayName: "Kyle St. Pierre",
+		SN:          "St. Pierre",
+		Email:       "kyle@example.com",
+		UID:         "kstpierre",
+	}
+	// Same construction as in group_controller.createUsersInBackendAndCache
+	userForBackend := &structs.User{
+		FirstName: StandardizeNameForBackend(ldapUser.GetDisplayName()),
+		LastName:  StandardizeNameForBackend(ldapUser.GetSN()),
+		Email:     ldapUser.GetEmail(),
+	}
+	assert.Equal(t, "Kyle St Pierre", userForBackend.FirstName)
+	assert.Equal(t, "St Pierre", userForBackend.LastName)
 }

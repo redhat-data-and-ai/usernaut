@@ -295,3 +295,19 @@ func GetTransformedGroupName(cfg *config.AppConfig, typeName, inputStr string) (
 
 	return "", fmt.Errorf("no matching pattern found for backend type %s and input string is %s", typeName, inputStr)
 }
+
+// StandardizeNameForBackend standardizes a user's first or last name for systems (e.g. Fivetran)
+// that do not support certain special characters. It replaces period (.), parenthesis (( )), and comma (,)
+// with a space, then collapses multiple spaces and trims.
+func StandardizeNameForBackend(name string) string {
+	if name == "" {
+		return ""
+	}
+	s := name
+	s = strings.ReplaceAll(s, ".", " ")
+	s = strings.ReplaceAll(s, "(", " ")
+	s = strings.ReplaceAll(s, ")", " ")
+	s = strings.ReplaceAll(s, ",", " ")
+	// Collapse multiple spaces and trim
+	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+}
