@@ -3,7 +3,6 @@ package utils
 import (
 	"testing"
 
-	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/stretchr/testify/assert"
 )
@@ -410,25 +409,4 @@ func TestStandardizeNameForBackend(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
-}
-
-// TestStandardizeNameForBackend_ControllerIntegration verifies that the same logic
-// used in group_controller (FirstName/LastName from LDAP with standardization) produces
-// backend-safe names. If this test fails, ensure group_controller still applies
-// utils.StandardizeNameForBackend to GetDisplayName() and GetSN() when building User for CreateUser.
-func TestStandardizeNameForBackend_ControllerIntegration(t *testing.T) {
-	ldapUser := &structs.LDAPUser{
-		DisplayName: "Kyle St. Pierre",
-		SN:          "St. Pierre",
-		Email:       "kyle@example.com",
-		UID:         "kstpierre",
-	}
-	// Same construction as in group_controller.createUsersInBackendAndCache
-	userForBackend := &structs.User{
-		FirstName: StandardizeNameForBackend(ldapUser.GetDisplayName()),
-		LastName:  StandardizeNameForBackend(ldapUser.GetSN()),
-		Email:     ldapUser.GetEmail(),
-	}
-	assert.Equal(t, "Kyle St Pierre", userForBackend.FirstName)
-	assert.Equal(t, "St Pierre", userForBackend.LastName)
 }

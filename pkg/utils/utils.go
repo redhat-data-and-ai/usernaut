@@ -308,5 +308,5 @@ func StandardizeNameForBackend(name string) string {
 	}
 	s := standardizeNameReplacer.Replace(name)
 	// Collapse multiple spaces and trim
-	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+	return strings.Join(strings.Fields(s), " ")
 }
