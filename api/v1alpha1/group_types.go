@@ -37,12 +37,14 @@ type Backend struct {
 }
 
 type LDAPFilter struct {
-	Key      string `json:"key"`
+	Key string `json:"key"`
+	// +kubebuilder:validation:Enum=equals;contains;not
 	Criteria string `json:"criteria"`
 	Value    string `json:"value"`
 }
 
 type LDAPQuery struct {
+	// +kubebuilder:validation:Enum=and;or
 	Operator string       `json:"operator"`
 	Filters  []LDAPFilter `json:"filters"`
 	Options  *LDAPOptions `json:"options,omitempty"`

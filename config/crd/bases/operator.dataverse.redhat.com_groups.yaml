@@ -93,6 +93,10 @@ spec:
                         items:
                           properties:
                             criteria:
+                              enum:
+                              - equals
+                              - contains
+                              - not
                               type: string
                             key:
                               type: string
@@ -105,12 +109,15 @@ spec:
                           type: object
                         type: array
                       operator:
+                        enum:
+                        - and
+                        - or
                         type: string
                       options:
                         properties:
-                          include_manager:
-                            type: boolean
                           include_indirect_reports:
+                            type: boolean
+                          include_manager:
                             type: boolean
                         type: object
                     required:

@@ -74,39 +74,24 @@ func parseUIDFromDN(dn *ldap.DN) string {
 
 func (l *LDAPConn) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error) {
 	log := logger.Logger(ctx).WithField("build_ldap_query", "spec")
-	filter, err := buildLDAPQueryFromSpec(query, l.baseUserDN)
-	if err != nil {
-		log.WithError(err).Error("failed to build ldap query from spec")
-		return "", err
-	}
+	log.WithField("query", query).Info("building LDAP query from spec")
 
-	return filter, nil
-}
-
-func buildLDAPQueryFromSpec(query *v1alpha1.LDAPQuery, baseUserDN string) (string, error) {
 	if query == nil {
 		return "", errors.New("ldap query is nil")
+	}
+	if len(query.Filters) == 0 {
+		return "", errors.New("filters are empty")
+	}
+	filters, err := buildFiltersFromSpec(query.Filters, l.baseUserDN)
+	if err != nil {
+		return "", err
 	}
 
 	op := strings.ToLower(strings.TrimSpace(query.Operator))
 	switch op {
 	case "and":
-		if len(query.Filters) == 0 {
-			return "", errors.New("and operator requires filters")
-		}
-		filters, err := buildFiltersFromSpec(query.Filters, baseUserDN)
-		if err != nil {
-			return "", err
-		}
 		return "(&" + strings.Join(filters, "") + ")", nil
 	case "or":
-		if len(query.Filters) == 0 {
-			return "", errors.New("or operator requires filters")
-		}
-		filters, err := buildFiltersFromSpec(query.Filters, baseUserDN)
-		if err != nil {
-			return "", err
-		}
 		return "(|" + strings.Join(filters, "") + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported operator %q", query.Operator)
@@ -127,57 +112,33 @@ func buildFiltersFromSpec(filters []v1alpha1.LDAPFilter, baseUserDN string) ([]s
 
 func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string, error) {
 	op := strings.ToLower(strings.TrimSpace(filter.Criteria))
+
+	if baseUserDN == "" {
+		return "", errors.New("base user DN is empty")
+	}
+
+	key := strings.TrimSpace(filter.Key)
+	if key == "" {
+		return "", errors.New("filter key is empty")
+	}
+
+	value := ldap.EscapeFilter(strings.TrimSpace(filter.Value))
+	if value == "" {
+		return "", errors.New("filter value is empty")
+	}
+
+	if strings.EqualFold(key, "manager") {
+		value = "uid=" + value + "," + baseUserDN
+	}
+
 	switch op {
 	case "equals":
-		return buildEqualsFilter(filter.Key, filter.Value, baseUserDN)
+		return "(" + key + "=" + value + ")", nil
 	case "not":
-		return buildNotFilter(filter.Key, filter.Value, baseUserDN)
+		return "(!(" + key + "=" + value + "))", nil
 	case "contains":
-		return buildContainsFilter(filter.Key, filter.Value)
+		return "(" + key + "=*" + value + "*)", nil
 	default:
-		return "", fmt.Errorf("unsupported filter operator %q", filter.Criteria)
+		return "", fmt.Errorf("unsupported filter operator %q", op)
 	}
-}
-
-func buildNotFilter(key, value, baseUserDN string) (string, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return "", errors.New("not operator requires key")
-	}
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", errors.New("not operator requires value")
-	}
-	if strings.EqualFold(key, "manager") && !strings.Contains(value, ",") && baseUserDN != "" {
-		value = "uid=" + value + "," + baseUserDN
-	}
-	return "(!(" + key + "=" + value + "))", nil
-}
-
-func buildContainsFilter(key, value string) (string, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return "", errors.New("contains operator requires key")
-	}
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", errors.New("contains operator requires value")
-	}
-	return "(" + key + "=*" + value + "*)", nil
-}
-
-func buildEqualsFilter(key, value, baseUserDN string) (string, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return "", errors.New("equals operator requires key")
-	}
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", errors.New("equals operator requires value")
-	}
-	if strings.EqualFold(key, "manager") && !strings.Contains(value, ",") && baseUserDN != "" {
-		value = "uid=" + value + "," + baseUserDN
-	}
-
-	return "(" + key + "=" + value + ")", nil
 }

@@ -123,11 +123,11 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
-		"request":    req.NamespacedName.String(),
-		"group":      groupCR.Spec.GroupName,
-		"ldap_query": groupCR.Spec.Members.LDAPQuery,
-		"members":    len(groupCR.Spec.Members.Users),
-		"groups":     groupCR.Spec.Members.Groups,
+		"request":        req.NamespacedName.String(),
+		"group":          groupCR.Spec.GroupName,
+		"has_ldap_query": groupCR.Spec.Members.LDAPQuery != nil,
+		"members":        len(groupCR.Spec.Members.Users),
+		"groups":         groupCR.Spec.Members.Groups,
 	})
 
 	var err error
@@ -200,9 +200,10 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Step 5: Update status and handle errors
-	return ctrl.Result{
-		RequeueAfter: requeueAfter,
-	}, r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
+	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // LDAPFetchResult contains the results of LDAP data fetching
@@ -223,9 +224,10 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 	}
 
 	log.WithField("ldap_query", query).Info("building query string from YAML")
-	queryString, err := r.buildLDAPQueryFromYAML(ctx, query)
+
+	queryString, err := r.LdapConn.BuildLDAPQueryFromSpec(ctx, query)
 	if err != nil {
-		log.WithError(err).Error("error building query string from YAML")
+		log.WithError(err).Error("failed to build ldap query from spec")
 		return nil, err
 	}
 
@@ -283,7 +285,6 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 		// Using DFS search based on a queue.
 		// We can use this queue later for parallelization using goroutine and semaphore.
 		for len(queue) > 0 {
-			log.WithField("queue", queue).Info("==== processing queue ====")
 			// Check if the context is done
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -325,21 +326,6 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 	}
 
 	return r.deduplicateMembers(queryMembers), nil
-}
-
-func (r *GroupReconciler) buildLDAPQueryFromYAML(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery) (string, error) {
-	log := logger.Logger(ctx).WithField("building query string from YAML", query)
-	if query == nil {
-		return "", errors.New("ldap query is nil")
-	}
-
-	queryString, err := r.LdapConn.BuildLDAPQueryFromSpec(ctx, query)
-	if err != nil {
-		log.WithError(err).Error("failed to build ldap query from yaml")
-		return "", err
-	}
-
-	return queryString, nil
 }
 
 func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string {
