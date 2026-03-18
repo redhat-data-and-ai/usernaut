@@ -171,8 +171,8 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_AndOperator() {
 			},
 			{
 				Key:      "title",
-				Criteria: "equals",
-				Value:    "*senior*",
+				Criteria: "contains",
+				Value:    "senior",
 			},
 		},
 	}
