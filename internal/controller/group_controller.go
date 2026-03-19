@@ -744,12 +744,13 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 		}
 
 		// if user details are not found in cache, create a new user in backend
+		// Standardize first/last names for backends (e.g. Fivetran) that do not support ., (, ), or , in names
 		newUser, err := backendClient.CreateUser(ctx, &structs.User{
 			Email:     userDetails.GetEmail(),
 			UserName:  user,
 			Role:      fivetran.AccountReviewerRole,
-			FirstName: userDetails.GetDisplayName(),
-			LastName:  userDetails.GetSN(),
+			FirstName: utils.StandardizeNameForBackend(userDetails.GetDisplayName()),
+			LastName:  utils.StandardizeNameForBackend(userDetails.GetSN()),
 		})
 		if err != nil {
 			// TODO: handle the error in case user already exists in backend, we need to again populate the cache
