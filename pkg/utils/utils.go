@@ -11,6 +11,9 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
+// standardizeNameReplacer replaces period, parenthesis, and comma with space in a single pass.
+var standardizeNameReplacer = strings.NewReplacer(".", " ", "(", " ", ")", " ", ",", " ")
+
 // MapToStruct populates a struct with values from a map using json tags
 // target must be a pointer to a struct
 func MapToStruct(data map[string]interface{}, target interface{}) error {
@@ -294,4 +297,16 @@ func GetTransformedGroupName(cfg *config.AppConfig, typeName, inputStr string) (
 	}
 
 	return "", fmt.Errorf("no matching pattern found for backend type %s and input string is %s", typeName, inputStr)
+}
+
+// StandardizeNameForBackend standardizes a user's first or last name for systems (e.g. Fivetran)
+// that do not support certain special characters. It replaces period (.), parenthesis (( )), and comma (,)
+// with a space, then collapses multiple spaces and trims.
+func StandardizeNameForBackend(name string) string {
+	if name == "" {
+		return ""
+	}
+	s := standardizeNameReplacer.Replace(name)
+	// Collapse multiple spaces and trim
+	return strings.Join(strings.Fields(s), " ")
 }

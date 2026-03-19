@@ -350,3 +350,63 @@ func TestGetTransformGroupName(t *testing.T) {
 		})
 	}
 }
+
+func TestStandardizeNameForBackend(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "period in name - Kyle St. Pierre",
+			input:    "Kyle St. Pierre",
+			expected: "Kyle St Pierre",
+		},
+		{
+			name:     "multiple periods - Roshah C.S Nomo",
+			input:    "Roshah C.S Nomo",
+			expected: "Roshah C S Nomo",
+		},
+		{
+			name:     "initials with periods - J.C. Molet",
+			input:    "J.C. Molet",
+			expected: "J C Molet",
+		},
+		{
+			name:     "parentheses",
+			input:    "John (Johnny) Doe",
+			expected: "John Johnny Doe",
+		},
+		{
+			name:     "comma in name",
+			input:    "Doe, Jr., John",
+			expected: "Doe Jr John",
+		},
+		{
+			name:     "mixed special chars",
+			input:    "St. (Jr.) Pierre, K.",
+			expected: "St Jr Pierre K",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "no special characters unchanged",
+			input:    "Alice Smith",
+			expected: "Alice Smith",
+		},
+		{
+			name:     "multiple spaces collapsed",
+			input:    "Kyle   St.   Pierre",
+			expected: "Kyle St Pierre",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StandardizeNameForBackend(tt.input)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
