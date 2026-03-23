@@ -155,7 +155,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
-	r.log.WithField("unique_members", uniqueMembers).Info("unique members to be reconciled")
+	r.log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
