@@ -37,6 +37,7 @@ type Backend struct {
 }
 
 type LDAPFilter struct {
+	// +kubebuilder:validation:Enum=givenName;displayName;rhatJobTitle;title;employeeType;manager;rhatCostCenter;rhatCostCenterDesc;rhatGeo;co;st;rhatLocation;rhatOfficeLocation;rhatOfficeFloor;roomNumber
 	Key string `json:"key"`
 	// +kubebuilder:validation:Enum=equals;contains;not
 	Criteria string `json:"criteria"`

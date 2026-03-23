@@ -99,6 +99,22 @@ spec:
                               - not
                               type: string
                             key:
+                              enum:
+                              - givenName
+                              - displayName
+                              - rhatJobTitle
+                              - title
+                              - employeeType
+                              - manager
+                              - rhatCostCenter
+                              - rhatCostCenterDesc
+                              - rhatGeo
+                              - co
+                              - st
+                              - rhatLocation
+                              - rhatOfficeLocation
+                              - rhatOfficeFloor
+                              - roomNumber
                               type: string
                             value:
                               type: string
