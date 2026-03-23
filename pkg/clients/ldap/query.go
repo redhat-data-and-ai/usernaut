@@ -127,6 +127,10 @@ func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string,
 		return "", errors.New("filter value is empty")
 	}
 
+	if op == "contains" {
+		value = "*" + value + "*"
+	}
+
 	if strings.EqualFold(key, "manager") {
 		value = "uid=" + value + "," + baseUserDN
 	}
@@ -137,7 +141,7 @@ func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string,
 	case "not":
 		return "(!(" + key + "=" + value + "))", nil
 	case "contains":
-		return "(" + key + "=*" + value + "*)", nil
+		return "(" + key + "=" + value + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported filter operator %q", op)
 	}

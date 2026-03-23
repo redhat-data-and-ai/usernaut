@@ -214,6 +214,30 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OrOperator() {
 	)
 }
 
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ManagerContains() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "manager",
+				Criteria: "contains",
+				Value:    "foobar",
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.NoError(err)
+	assertions.Equal("(&(manager=uid=*foobar*,ou=users,dc=redhat,dc=com))", filter)
+}
+
 func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MixOperator() {
 	assertions := assert.New(suite.T())
 
