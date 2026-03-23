@@ -103,7 +103,7 @@ func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (ma
 	filter := fmt.Sprintf("(&%s%s)", l.userSearchFilter, mailFilter)
 
 	searchRequest := ldap.NewSearchRequest(
-		l.BaseUserDN,
+		l.baseUserDN,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		filter,
 		l.attributes,

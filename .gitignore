@@ -44,3 +44,6 @@ appconfig/local.yaml
 # Local development config with secrets
 appconfig/local*.yaml
 appconfig/.env*
+
+# Secrets
+secrets/
