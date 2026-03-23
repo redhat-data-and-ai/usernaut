@@ -21,7 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,6 +55,10 @@ import (
 
 const (
 	groupFinalizer = "operator.dataverse.redhat.com/finalizer"
+
+	// requeueAfter is the duration after which the group controller will requeue the group for reconciliation
+	// this takes care of updating users in ldap query based groups
+	requeueAfter = 8 * time.Hour
 )
 
 // GroupReconciler reconciles a Group object
@@ -117,20 +123,39 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
-		"request": req.NamespacedName.String(),
-		"group":   groupCR.Spec.GroupName,
-		"members": len(groupCR.Spec.Members.Users),
-		"groups":  groupCR.Spec.Members.Groups,
+		"request":        req.NamespacedName.String(),
+		"group":          groupCR.Spec.GroupName,
+		"has_ldap_query": groupCR.Spec.Members.LDAPQuery != nil,
+		"members":        len(groupCR.Spec.Members.Users),
+		"groups":         groupCR.Spec.Members.Groups,
 	})
 
+	var err error
+	queryMembers := []string{}
+	if groupCR.Spec.Members.LDAPQuery != nil {
+		includeIndirectReports := groupCR.Spec.Members.LDAPQuery.Options != nil && groupCR.Spec.Members.LDAPQuery.Options.IncludeIndirectReports
+		includeManager := groupCR.Spec.Members.LDAPQuery.Options != nil && groupCR.Spec.Members.LDAPQuery.Options.IncludeManager
+		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, includeIndirectReports, nil)
+		if err != nil {
+			r.log.WithError(err).Error("error fetching query members")
+			return ctrl.Result{}, err
+		}
+		if includeManager {
+			queryMembers = append(queryMembers, extractManagerUIDsFromQuery(groupCR.Spec.Members.LDAPQuery)...)
+		}
+		r.log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
+	}
+
 	visitedGroups := make(map[string]struct{})
-	allMembers, err := r.fetchUniqueGroupMembers(ctx, groupCR.Spec.GroupName, groupCR.Namespace, visitedGroups)
+	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups)
 	if err != nil {
 		r.log.WithError(err).Error("error fetching unique group members")
 		return ctrl.Result{}, err
 	}
 
-	uniqueMembers := r.deduplicateMembers(allMembers)
+	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
+
+	r.log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
@@ -175,13 +200,158 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Step 5: Update status and handle errors
-	return ctrl.Result{}, r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors)
+	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // LDAPFetchResult contains the results of LDAP data fetching
 type LDAPFetchResult struct {
 	CurrentMembers []string // emails of users with valid LDAP data
 	ActiveUserList []string // UIDs of active users
+}
+
+// fetchQueryMembers runs the LDAP query and, when the query has a manager filter and
+// includeIndirectReports is true, recursively expands each member's reports (people who
+// report to them) and returns the combined set. visited tracks UIDs already expanded to
+// avoid cycles; pass nil for the top-level call (a new map is allocated).
+func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery, includeIndirectReports bool, visited map[string]struct{}) ([]string, error) {
+	log := logger.Logger(ctx).WithField("fetching query members", query)
+
+	if visited == nil {
+		visited = make(map[string]struct{})
+	}
+
+	log.WithField("ldap_query", query).Info("building query string from YAML")
+
+	queryString, err := r.LdapConn.BuildLDAPQueryFromSpec(ctx, query)
+	if err != nil {
+		log.WithError(err).Error("failed to build ldap query from spec")
+		return nil, err
+	}
+
+	log.WithField("query_string", queryString).Info("query string built successfully")
+	var queryMembers []string
+	// Retry LDAP query up to 3 times for transient failures.
+	for attempt := 1; attempt <= 3; attempt++ {
+		queryMembers, err = r.LdapConn.GetQueryMembers(ctx, queryString)
+		if err == nil {
+			break
+		}
+		log.WithError(err).WithField("attempt", attempt).Warn("error fetching users from LDAP using the query")
+		if attempt < 3 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
+	if err != nil {
+		log.WithError(err).Error("failed to fetch users from LDAP using the query after retries")
+		return nil, err
+	}
+
+	if len(queryMembers) == 0 {
+		log.Info("no users found in LDAP using the query")
+		return nil, nil
+	}
+
+	log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
+
+	hasManagerFilter := false
+	for _, filter := range query.Filters {
+		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+			hasManagerFilter = true
+			break
+		}
+	}
+
+	// Manager filter present but indirect reports disabled: return only direct reports of the manager in the query (no recursion).
+	if hasManagerFilter && !includeIndirectReports {
+		return r.deduplicateMembers(queryMembers), nil
+	}
+
+	if hasManagerFilter && includeIndirectReports {
+		log.Info("has manager filter, fetching indirect reports")
+		nestedQuery := usernautdevv1alpha1.LDAPQuery{
+			Operator: query.Operator,
+		}
+
+		queue := make([]string, 0, len(queryMembers))
+		queue = append(queue, queryMembers...)
+
+		// Using DFS search based on a queue.
+		// We can use this queue later for parallelization using goroutine and semaphore.
+		for len(queue) > 0 {
+			// Check if the context is done
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+
+			// Use DFS
+			member := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+
+			if _, seen := visited[member]; seen {
+				log.WithField("member", member).Debug("skipping already-expanded member to avoid cycle")
+				continue
+			}
+			visited[member] = struct{}{}
+
+			nestedQuery.Filters = make([]usernautdevv1alpha1.LDAPFilter, 0, len(query.Filters))
+			for _, filter := range query.Filters {
+				value := filter.Value
+				if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+					value = member
+				}
+				nestedQuery.Filters = append(nestedQuery.Filters, usernautdevv1alpha1.LDAPFilter{
+					Key:      filter.Key,
+					Criteria: filter.Criteria,
+					Value:    value,
+				})
+			}
+			nestedQueryMembers, err := r.fetchQueryMembers(ctx, &nestedQuery, includeIndirectReports, visited)
+			if err != nil {
+				log.WithError(err).WithField("manager", member).Error("error fetching indirect reports")
+				continue
+			}
+			if len(nestedQueryMembers) > 0 {
+				log.WithField("manager", member).WithField("reports", nestedQueryMembers).Info("reports found")
+				queue = append(queue, nestedQueryMembers...)
+				queryMembers = append(queryMembers, nestedQueryMembers...)
+			}
+		}
+	}
+
+	return r.deduplicateMembers(queryMembers), nil
+}
+
+func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string {
+	if query == nil {
+		return nil
+	}
+
+	managerUIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, filter := range query.Filters {
+		if !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+			continue
+		}
+
+		uid := filter.Value
+		if uid == "" {
+			continue
+		}
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		managerUIDs = append(managerUIDs, uid)
+	}
+
+	return managerUIDs
 }
 
 // fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData

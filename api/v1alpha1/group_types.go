@@ -36,6 +36,25 @@ type Backend struct {
 	Type string `json:"type"`
 }
 
+type LDAPFilter struct {
+	Key string `json:"key"`
+	// +kubebuilder:validation:Enum=equals;contains;not
+	Criteria string `json:"criteria"`
+	Value    string `json:"value"`
+}
+
+type LDAPQuery struct {
+	// +kubebuilder:validation:Enum=and;or
+	Operator string       `json:"operator"`
+	Filters  []LDAPFilter `json:"filters"`
+	Options  *LDAPOptions `json:"options,omitempty"`
+}
+
+type LDAPOptions struct {
+	IncludeIndirectReports bool `json:"include_indirect_reports,omitempty"`
+	IncludeManager         bool `json:"include_manager,omitempty"`
+}
+
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
 	GroupName   string       `json:"group_name"`
@@ -45,8 +64,9 @@ type GroupSpec struct {
 }
 
 type Members struct {
-	Groups []string `json:"groups,omitempty"`
-	Users  []string `json:"users"`
+	Groups    []string   `json:"groups,omitempty"`
+	Users     []string   `json:"users"`
+	LDAPQuery *LDAPQuery `json:"ldap_query,omitempty"`
 }
 
 type GroupParam struct {

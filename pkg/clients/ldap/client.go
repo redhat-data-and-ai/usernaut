@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
+	v1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 )
 
 type LDAP struct {
 	Server           string   `yaml:"server"`
 	BaseDN           string   `yaml:"baseDN"`
-	UserDN           string   `yaml:"userDN"`
 	BaseUserDN       string   `yaml:"baseUserDN"`
+	UserDN           string   `yaml:"userDN"`
 	UserSearchFilter string   `yaml:"userSearchFilter"`
 	Attributes       []string `yaml:"attributes"`
 }
@@ -28,7 +29,7 @@ type LDAPConn struct {
 	conn             LDAPConnClient
 	userDN           string
 	baseDN           string
-	BaseUserDN       string
+	baseUserDN       string
 	server           string
 	userSearchFilter string
 	attributes       []string
@@ -36,6 +37,8 @@ type LDAPConn struct {
 
 type LDAPClient interface {
 	GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error)
+	GetQueryMembers(ctx context.Context, query string) ([]string, error)
+	BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error)
 	GetUserLDAPDataByEmail(ctx context.Context, email string) (map[string]interface{}, error)
 }
 
@@ -57,8 +60,8 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 		conn:             ldapConn,
 		server:           ldapConfig.Server,
 		userDN:           ldapConfig.UserDN,
-		BaseUserDN:       ldapConfig.BaseUserDN,
 		baseDN:           ldapConfig.BaseDN,
+		baseUserDN:       ldapConfig.BaseUserDN,
 		userSearchFilter: ldapConfig.UserSearchFilter,
 		attributes:       ldapConfig.Attributes,
 	}, nil

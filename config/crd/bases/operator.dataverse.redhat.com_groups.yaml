@@ -87,6 +87,43 @@ spec:
                     items:
                       type: string
                     type: array
+                  ldap_query:
+                    properties:
+                      filters:
+                        items:
+                          properties:
+                            criteria:
+                              enum:
+                              - equals
+                              - contains
+                              - not
+                              type: string
+                            key:
+                              type: string
+                            value:
+                              type: string
+                          required:
+                          - criteria
+                          - key
+                          - value
+                          type: object
+                        type: array
+                      operator:
+                        enum:
+                        - and
+                        - or
+                        type: string
+                      options:
+                        properties:
+                          include_indirect_reports:
+                            type: boolean
+                          include_manager:
+                            type: boolean
+                        type: object
+                    required:
+                    - filters
+                    - operator
+                    type: object
                   users:
                     items:
                       type: string

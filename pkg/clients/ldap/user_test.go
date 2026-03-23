@@ -246,7 +246,7 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail() {
 	ldapConn := &LDAPConn{
 		conn:             suite.ldapClient,
 		userDN:           "uid=%s,ou=users,dc=example,dc=com",
-		BaseUserDN:       "ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
 		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
 		server:           "ldap://ldap.com:389",
 		userSearchFilter: "(objectClass=person)",
@@ -271,7 +271,7 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_NoUserFound() {
 	ldapConn := &LDAPConn{
 		conn:             suite.ldapClient,
 		userDN:           "uid=%s,ou=users,dc=example,dc=com",
-		BaseUserDN:       "ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
 		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
 		server:           "ldap://ldap.com:389",
 		userSearchFilter: "(objectClass=person)",
@@ -294,7 +294,7 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_NoSuchObject() {
 	ldapConn := &LDAPConn{
 		conn:             suite.ldapClient,
 		userDN:           "uid=%s,ou=users,dc=example,dc=com",
-		BaseUserDN:       "ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
 		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
 		server:           "ldap://ldap.com:389",
 		userSearchFilter: "(objectClass=person)",
@@ -327,7 +327,7 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_EmptyAttributes() {
 	ldapConn := &LDAPConn{
 		conn:             suite.ldapClient,
 		userDN:           "uid=%s,ou=users,dc=example,dc=com",
-		BaseUserDN:       "ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
 		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
 		server:           "ldap://ldap.com:389",
 		userSearchFilter: "(objectClass=person)",
@@ -352,7 +352,7 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_SearchError() {
 	ldapConn := &LDAPConn{
 		conn:             suite.ldapClient,
 		userDN:           "uid=%s,ou=users,dc=example,dc=com",
-		BaseUserDN:       "ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
 		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
 		server:           "ldap://ldap.com:389",
 		userSearchFilter: "(objectClass=person)",
@@ -376,7 +376,7 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_NilConnection() {
 	ldapConn := &LDAPConn{
 		conn:             nil, // Simulating a nil connection
 		userDN:           "uid=%s,ou=users,dc=example,dc=com",
-		BaseUserDN:       "ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
 		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
 		server:           "ldap://ldap.com:389",
 		userSearchFilter: "(objectClass=person)",
@@ -395,7 +395,7 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_BindError() {
 	ldapConn := &LDAPConn{
 		conn:             suite.ldapClient,
 		userDN:           "uid=%s,ou=users,dc=example,dc=com",
-		BaseUserDN:       "ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
 		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
 		server:           "ldap://ldap.com:389",
 		userSearchFilter: "(objectClass=person)",

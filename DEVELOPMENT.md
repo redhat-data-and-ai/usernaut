@@ -6,24 +6,41 @@ Welcome to Usernaut! This guide provides a comprehensive overview of the project
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Core Components](#core-components)
-  - [Custom Resource Definition (Group CRD)](#1-custom-resource-definition-group-crd)
-  - [Group Controller](#2-group-controller-groupreconciler)
-  - [Backend Clients](#3-backend-clients)
-  - [Store Layer](#4-store-layer)
-  - [Cache Layer](#5-cache-layer)
-  - [Periodic Tasks Controller](#6-periodic-tasks-controller)
-  - [HTTP API Server](#7-http-api-server)
-- [Data Flow](#data-flow)
-- [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Development Guidelines](#development-guidelines)
-- [Testing](#testing)
-- [Debugging](#debugging)
-- [Troubleshooting](#troubleshooting)
+- [Usernaut Developer Documentation](#usernaut-developer-documentation)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+    - [Key Features](#key-features)
+    - [How It Works (High Level)](#how-it-works-high-level)
+  - [Architecture](#architecture)
+    - [Architecture Highlights](#architecture-highlights)
+  - [Flow Diagram](#flow-diagram)
+    - [Data Flow Summary](#data-flow-summary)
+  - [Core Components](#core-components)
+    - [1. Custom Resource Definition (Group CRD)](#1-custom-resource-definition-group-crd)
+    - [2. Group Controller (GroupReconciler)](#2-group-controller-groupreconciler)
+    - [3. Backend Clients](#3-backend-clients)
+    - [4. Store Layer](#4-store-layer)
+    - [5. Cache Layer](#5-cache-layer)
+    - [6. Periodic Tasks Controller](#6-periodic-tasks-controller)
+    - [7. HTTP API Server](#7-http-api-server)
+  - [Data Flow](#data-flow)
+    - [User Onboarding Flow](#user-onboarding-flow)
+    - [User Offboarding Flow (Automatic)](#user-offboarding-flow-automatic)
+  - [Configuration](#configuration)
+    - [Configuration Structure](#configuration-structure)
+    - [Secret Loading](#secret-loading)
+    - [Environment Selection](#environment-selection)
+  - [Project Structure](#project-structure)
+  - [Getting Started](#getting-started)
+    - [Startup Sequence](#startup-sequence)
+      - [Key Startup Details\*\*](#key-startup-details)
+    - [Ramp Up](#ramp-up)
+    - [Prerequisites](#prerequisites)
+    - [Development Environment Setup](#development-environment-setup)
+  - [Development Guidelines](#development-guidelines)
+  - [Testing](#testing)
+  - [Debugging](#debugging)
+  - [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -44,12 +61,13 @@ Welcome to Usernaut! This guide provides a comprehensive overview of the project
 | **Multi-Backend Support**  | Fivetran, GitLab, Snowflake, Red Hat Rover           |
 | **LDAP Integration**       | Fetches user details from corporate LDAP directory   |
 | **Nested Groups**          | Groups can include other groups with cycle detection |
+| **Query-based Groups**     | Members can be defined by LDAP queries (filters with and/or) |
 | **Automatic Offboarding**  | Removes inactive users from backends every 24 hours  |
 | **REST API**               | Query user group memberships via HTTP                |
 
 ### How It Works (High Level)
 
-1. **Admin creates a `Group` CR** specifying members (users/groups) and target backends
+1. **Admin creates a `Group` CR** specifying members (users, groups, and/or LDAP query) and target backends
 2. **GroupReconciler watches** for Group CR changes
 3. **Controller fetches user data** from LDAP
 4. **Controller syncs** users and team memberships to each backend
@@ -70,11 +88,11 @@ Welcome to Usernaut! This guide provides a comprehensive overview of the project
 │  │                 │         │  1. Fetch unique members (recursive)      │  │
 │  │  - group_name   │         │  2. Acquire cache lock                    │  │
 │  │  - members      │         │  3. Fetch LDAP data for each user         │  │
-│  │  - backends[]   │         │  4. Process each backend:                 │  │
-│  └─────────────────┘         │     - Create/get team                     │  │
-│                              │     - Create users if needed              │  │
-│                              │     - Add/remove team members             │  │
-│                              │  5. Update cache indexes                  │  │
+│  │    (users,      │         │  4. Process each backend:                 │  │
+│  │     groups,     │         │     - Create/get team                     │  │
+│  │     ldap_query) │         │     - Create users if needed              │  │
+│  │  - backends[]   │         │     - Add/remove team members             │  │
+│  └─────────────────┘         │  5. Update cache indexes                  │  │
 │                              │  6. Update CR status                      │  │
 │                              └───────────────────┬───────────────────────┘  │
 │                                                  │                          │
@@ -135,7 +153,7 @@ flowchart TB
         direction TB
 
         subgraph CRD["Custom Resources"]
-            GroupCR["📋 Group CR<br/><i>- group_name</i><br/><i>- members (users/groups)</i><br/><i>- backends</i>"]
+            GroupCR["📋 Group CR<br/><i>- group_name</i><br/><i>- members (users, groups, ldap_query)</i><br/><i>- backends</i>"]
         end
 
         subgraph Controllers["Usernaut Controllers"]
@@ -244,6 +262,19 @@ spec:
       - "mjohnson"
     groups: # Nested groups (references other Group CRs)
       - "dataverse-platform-admin"
+    # Optional: LDAP query to resolve members dynamically
+    ldap_query:
+      options:    # Optional LDAP query options
+        include_indirect_reports: false
+        include_manager: false
+      operator: and   # "and" or "or"
+      filters:
+        - key: manager       # See below for all possible keys
+          criteria: equals   # equals | contains | not
+          value: "jsmith"    # for key=manager, use user ID only (expanded to uid=value,baseUserDN)
+        - key: title
+          criteria: contains
+          value: "engineer"
   backends: # Target platforms
     - name: fivetran
       type: fivetran
@@ -270,12 +301,37 @@ status:
 
 **Key Types**:
 
-| Type          | Description                                                      |
-| ------------- | ---------------------------------------------------------------- |
-| `GroupSpec`   | Desired state: group name, members, target backends              |
-| `GroupStatus` | Observed state: reconciled users, conditions, backend statuses   |
-| `Members`     | Contains `users` (direct) and `groups` (nested group references) |
-| `Backend`     | Backend identifier with `name` and `type`                        |
+| Type          | Description                                                                 |
+| ------------- | --------------------------------------------------------------------------- |
+| `GroupSpec`   | Desired state: group name, members, target backends                         |
+| `GroupStatus` | Observed state: reconciled users, conditions, backend statuses             |
+| `Members`     | `users` (direct), `groups` (nested), `ldap_query` (optional) |
+| `LDAPQuery`   | `options` (optional), `operator` (`and` or `or`) and `filters` (array of LDAPFilter)              |
+| `LDAPFilter`  | `key` (LDAP attribute name), `criteria` (`equals`, `contains`, `not`), `value`. See **Valid filter keys** below. For `key=manager`, use user ID only (username); it is expanded to full DN. |
+| `LDAPOptions` | `include_indirect_reports` (bool, optional), `include_manager` (bool, optional) |
+| `Backend`     | Backend identifier with `name` and `type`                                   |
+
+**Valid filter keys** (LDAP attribute names supported in `ldap_query.filters[].key`):
+
+| Key                  | Description        |
+| -------------------- | ------------------ |
+| `givenName`          | First Name         |
+| `displayName`        | Preferred Name    |
+| `rhatJobTitle`       | Business Card Title |
+| `title`              | Job Title          |
+| `employeeType`       | Employee Type     |
+| `manager`            | Manager (use **user ID** as value; expanded to full DN) |
+| `rhatCostCenter`     | Cost Center Number |
+| `rhatCostCenterDesc` | Cost Center Name  |
+| `rhatGeo`            | Red Hat Geo        |
+| `co`                 | Country            |
+| `st`                 | State              |
+| `rhatLocation`       | Location           |
+| `rhatOfficeLocation` | Office             |
+| `rhatOfficeFloor`    | Office Floor       |
+| `roomNumber`         | Desk Number        |
+
+Members from `ldap_query` are resolved at reconcile time via LDAP search and merged with `users` and nested `groups` (after cycle-aware expansion). For **`key=manager`**, always use just the **user ID** (username) as `value`; the controller expands it to `uid=<value>,<baseUserDN>` when building the LDAP filter. For other keys, use the literal attribute value.
 
 ---
 
@@ -319,7 +375,8 @@ controller:
 │  4. Set status to "Waiting"                                             │
 │                                                                         │
 │  5. Fetch unique members (recursive, cycle-aware)                       │
-│     └── fetchUniqueGroupMembers() handles nested groups                 │
+│     └── fetchUniqueGroupMembers() handles nested groups + ldap_query    │
+│     └── LDAP query members resolved via GetQueryMembers()               │
 │     └── deduplicateMembers() removes duplicates                         │
 │                                                                         │
 │  6. Acquire cache mutex (shared lock)                                   │
@@ -360,14 +417,10 @@ controller:
 | `processUsers()`                 | Determines who to add/remove from team         |
 | `handleDeletion()`               | Cleanup when Group CR is deleted               |
 
-**Nested Group Handling**:
+**Member resolution**:
 
-Groups can reference other groups via `spec.members.groups`. The controller:
-
-1. Uses a `visitedGroups` map to detect cycles
-2. Recursively fetches all members
-3. Deduplicates the final member list
-4. Sets owner references to enable garbage collection
+- **Nested groups**: Groups can reference other groups via `spec.members.groups`. The controller uses a `visitedGroups` map to detect cycles, recursively fetches all members, deduplicates the final list, and sets owner references for garbage collection.
+- **LDAP query**: When `spec.members.ldap_query` is set, the controller builds an LDAP filter from the spec (see `pkg/clients/ldap/query.go`), runs a search, and merges the resulting UIDs with members from `users` and expanded `groups`.
 
 ---
 
@@ -605,7 +658,7 @@ Admin creates Group CR
               ▼
 ┌─────────────────────────────┐
 │  Fetch members recursively  │
-│  (handle nested groups)     │
+│  (nested groups + ldap_query)│
 └─────────────┬───────────────┘
               │
               ▼
@@ -948,6 +1001,8 @@ Before diving into development, familiarize yourself with:
 
    ```bash
    kubectl apply -f config/samples/v1alpha1_group.yaml
+   # Or use a query-based group (members from LDAP query):
+   kubectl apply -f config/samples/v1alpha1_group_querybased.yaml
    ```
 
 ---

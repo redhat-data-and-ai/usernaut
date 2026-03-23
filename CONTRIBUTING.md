@@ -45,7 +45,7 @@ Usernaut is built on the shoulders of many open-source projects and communities.
 As Usernaut continues to evolve, we have several planned features and improvements:
 
 - **Support for Additional SaaS Platforms**: Expanding the list of supported SaaS platforms to include more services.
-- **Group Inheritance**: Implementing group inheritance to allow for more flexible user management.
+- **Group Inheritance**: Implementing group inheritance to allow for more flexible user management. (Note: query-based groups via `spec.members.ldap_query` are already supported.)
 - **Monitoring and Metrics**: Integrating monitoring and metrics to provide insights into the operator's performance and resource usage.
 - **Enhanced Error Handling**: Improving error handling and reporting to make it easier to diagnose issues.
 
