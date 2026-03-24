@@ -160,7 +160,7 @@ func (g *GitlabClient) DeleteTeamByID(ctx context.Context, teamID string) error 
 	return nil
 }
 
-func (g *GitlabClient) addToLdapGroup(groupID int) (string, int, error) {
+func (g *GitlabClient) addToLdapGroup(groupID int64) (string, int, error) {
 	accessLevel := gitlab.DeveloperPermissions
 	ldapLink, response, err := g.gitlabClient.Groups.AddGroupLDAPLink(groupID, &gitlab.AddGroupLDAPLinkOptions{
 		GroupAccess: &accessLevel,
@@ -216,7 +216,7 @@ func (g *GitlabClient) pollForPendingDeletion(ctx context.Context,
 	return "", fmt.Errorf("timeout: Group %v was not marked for deletion after %d attempts", teamID, maxAttempts)
 }
 
-func (g *GitlabClient) addGroupAsProjectDeveloper(groupID int, projectPathString string) (int, error) {
+func (g *GitlabClient) addGroupAsProjectDeveloper(groupID int64, projectPathString string) (int, error) {
 	developerAccess := gitlab.DeveloperPermissions
 	opt := &gitlab.ShareWithGroupOptions{
 		GroupID:     &groupID,
