@@ -21,6 +21,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/atlan"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
 	redhatrover "github.com/redhat-data-and-ai/usernaut/pkg/clients/redhat_rover"
@@ -59,7 +60,8 @@ type Client interface {
 	// Returns the list of users present under a team
 	FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error)
 	// ReconcileGroupParams reconciles backend-specific parameters for a group/team.
-	ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error
+	// teamName is the transformed group name used in the backend system.
+	ReconcileGroupParams(ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams) error
 	// Adds a member to the team
 	AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error
 	// Removes a member from the team
@@ -111,6 +113,13 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 			return nil, err
 		}
 		return gitlabClient, nil
+	case "atlan":
+		appConfig, err := config.GetConfig()
+		if err != nil {
+			return nil, err
+		}
+		return atlan.NewClient(backend.Connection,
+			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
 	default:
 		// If no valid backend type is matched, return an error
 		return nil, ErrInvalidBackend
