@@ -64,7 +64,7 @@ func (g *GitlabClient) AddUserToTeam(ctx context.Context, teamID string, userIDs
 
 	accessLevel := gitlab.DeveloperPermissions
 	for _, userID := range userIDs {
-		userIDInt, convErr := strconv.Atoi(userID)
+		userIDInt, convErr := strconv.ParseInt(userID, 10, 64)
 		if convErr != nil {
 			return convErr
 		}
@@ -96,7 +96,7 @@ func (g *GitlabClient) RemoveUserFromTeam(ctx context.Context, teamID string, us
 	}
 
 	for _, userID := range userIDs {
-		userIDInt, convErr := strconv.Atoi(userID)
+		userIDInt, convErr := strconv.ParseInt(userID, 10, 64)
 		if convErr != nil {
 			return convErr
 		}
@@ -127,7 +127,7 @@ func (g *GitlabClient) ReconcileGroupParams(ctx context.Context, teamID string, 
 		return fmt.Errorf("team %s not found to reconcile group params", teamID)
 	}
 
-	teamIDInt, convErr := strconv.Atoi(teamID)
+	teamIDInt, convErr := strconv.ParseInt(teamID, 10, 64)
 	if convErr != nil {
 		return convErr
 	}

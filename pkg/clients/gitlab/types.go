@@ -37,5 +37,5 @@ type GitlabClient struct {
 type GitlabConfig struct {
 	URL           string `json:"url"`
 	Token         string `json:"token"`
-	ParentGroupId int    `json:"parent_group_id"`
+	ParentGroupId int64  `json:"parent_group_id"`
 }

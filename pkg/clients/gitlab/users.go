@@ -65,7 +65,7 @@ func (g *GitlabClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 		}
 
 		// Check if we got fewer users than requested (last page)
-		if len(users) < opt.PerPage {
+		if int64(len(users)) < opt.PerPage {
 			break
 		}
 
@@ -88,7 +88,7 @@ func (g *GitlabClient) FetchUserDetails(ctx context.Context, userID string) (*st
 	log.Info("fetching user details")
 	var user *gitlab.User
 
-	userIDInt, err := strconv.Atoi(userID)
+	userIDInt, err := strconv.ParseInt(userID, 10, 64)
 	if err != nil {
 		var numErr *strconv.NumError
 		// If the error is a syntax error, it's not a number, so we assume it's a username.
@@ -186,7 +186,7 @@ func (g *GitlabClient) DeleteUser(ctx context.Context, userID string) error {
 		return nil
 	}
 
-	userIDInt, err := strconv.Atoi(userID)
+	userIDInt, err := strconv.ParseInt(userID, 10, 64)
 	if err != nil {
 		log.WithError(err).Error("Failed to convert userID to int")
 		return err
