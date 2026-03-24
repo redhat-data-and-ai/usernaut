@@ -3,7 +3,7 @@ module github.com/redhat-data-and-ai/usernaut
 go 1.24.2
 
 require (
-	github.com/alicebob/miniredis/v2 v2.36.1
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/fivetran/go-fivetran v1.1.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-ldap/ldap/v3 v3.4.12
