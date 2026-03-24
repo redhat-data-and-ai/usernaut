@@ -16,8 +16,8 @@ require (
 	github.com/opentracing-contrib/go-stdlib v1.1.1
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/redis/go-redis/extra/redisotel/v9 v9.17.2
-	github.com/redis/go-redis/v9 v9.17.3
+	github.com/redis/go-redis/extra/redisotel/v9 v9.18.0
+	github.com/redis/go-redis/v9 v9.18.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -96,7 +96,7 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.57.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
-	github.com/redis/go-redis/extra/rediscmd/v9 v9.17.2 // indirect
+	github.com/redis/go-redis/extra/rediscmd/v9 v9.18.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
@@ -119,6 +119,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.40.0 // indirect
 	go.opentelemetry.io/otel/trace v1.40.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
