@@ -16,7 +16,7 @@ github.com/afex/hystrix-go/hystrix
 github.com/afex/hystrix-go/hystrix/metric_collector
 github.com/afex/hystrix-go/hystrix/rolling
 github.com/afex/hystrix-go/plugins
-# github.com/alicebob/miniredis/v2 v2.36.1
+# github.com/alicebob/miniredis/v2 v2.37.0
 ## explicit; go 1.17
 github.com/alicebob/miniredis/v2
 github.com/alicebob/miniredis/v2/fpconv
