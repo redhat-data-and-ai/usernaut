@@ -5,7 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/fivetran/go-fivetran/compare/v1.0.7...HEAD)
+## [Unreleased](https://github.com/fivetran/go-fivetran/compare/v1.3.0...HEAD)
+
+## [1.3.0](https://github.com/fivetran/go-fivetran/compare/v1.2.9...v1.3.0)
+
+## Added
+- `ConfigurableVarDefinition` struct with fields `Type`, `Description`, `AllowedValues` for Quickstart package configurable variable definitions.
+- `ConfigurableVars` field (`map[string]ConfigurableVarDefinition`) to `quickstartPackageResponseBase`, deserializing `configurable_variables` from `GET /transformations/package-metadata/{id}` and `GET /transformations/package-metadata` responses.
+
+## [1.2.9](https://github.com/fivetran/go-fivetran/compare/v1.2.8...v1.2.9)
+
+## Added
+- `destination_schema_names` field for [creating Connection](https://fivetran.com/docs/rest-api/api-reference/connections/create-connection?service=#destination_schema_names).
+
+## [1.2.8](https://github.com/fivetran/go-fivetran/compare/v1.2.7...v1.2.8)
+
+## Added
+Support flexible sync schedule for connector:
+- `ConnectorSchedule` struct with fields `ScheduleType`, `Cron`, `DaysOfWeek`, `Interval`, `TimeOfDay`
+- `ConnectionUpdateService.Schedule` method
+- `DetailsResponseDataCommon.Schedule` field in response
+
+## [1.2.7](https://github.com/fivetran/go-fivetran/compare/v1.2.6...v1.2.7)
+
+## Added
+Support Proxy Agent Id in Destination API:
+- `DestinationCreateService.proxyAgentId`
+- `DestinationModifyService.proxyAgentId`
+- `DestinationDetailsService.proxyAgentId`
+
+## [1.2.6](https://github.com/fivetran/go-fivetran/compare/v1.2.5...v1.2.6)
+
+## Added
+Support for custom config (`map[string]interface{}`) for external log details:
+- `ExternalLoggingDetailsService.DoCustom` method
+- `ExternalLoggingDetailsService.DoCustomMerged` method
+
+## [1.2.5](https://github.com/fivetran/go-fivetran/compare/v1.2.4...v1.2.5)
+
+## Added
+Support for custom config (`map[string]interface{}`) for destinations:
+- `DestinationSetupTestsService.DoCustom` method
+
+## [1.2.4](https://github.com/fivetran/go-fivetran/compare/v1.2.3...v1.2.4)
+
+## Added
+- `AccountInfoService` for getting information about current account from API key
+
+## [1.2.3](https://github.com/fivetran/go-fivetran/compare/v1.2.2...v1.2.3)
+
+## Added
+- `GroupID` and `Schema` methods to `ConnectionsListService` for filtering connection list by group ID and schema name
+
+## [1.2.2](https://github.com/fivetran/go-fivetran/compare/v1.2.1...v1.2.2)
+
+## Added
+- field `Host` into `privatelink.PrivateLinkResponseBase`
+
+## [1.2.1](https://github.com/fivetran/go-fivetran/compare/v1.2.0...v1.2.1)
+
+## Updated
+Change method in `ProxyRegenerateSecretsService` 
+
+## [1.2.0](https://github.com/fivetran/go-fivetran/compare/v1.1.1...v1.2.0)
+
+## Added
+- fields `ClientCert` and `ClientPrivateKey` from `proxy.ProxyCreateData`
+Supported the following Fivetran API endpoint for Proxy Agents Management:
+- [Regenerate Secrets for Proxy Agent](https://fivetran.com/docs/rest-api/api-reference/proxy-agent/regenerate-secrets-proxy-agent)
+Supported the following Fivetran API endpoints:
+- [Retrieve connector configuration metadata](https://fivetran.com/docs/rest-api/api-reference/connector-metadata/metadata-connector-config)
+- [Retrieve source metadata](https://fivetran.com/docs/rest-api/api-reference/connector-metadata/metadata-connectors)
+
+## Removed
+- field `ProxyServerUri` from `proxy.ProxyCreateData`
+
+## Breaking changes
+- Service `ConnectionsSourceMetadataService` replaced with `MetadataListService`
+
+## [1.1.1](https://github.com/fivetran/go-fivetran/compare/v1.1.0...v1.1.1)
+
+## Re-release
+- Re-release due to issues with https://pkg.go.dev/github.com/fivetran/go-fivetran
+
+## [1.1.0](https://github.com/fivetran/go-fivetran/compare/v1.0.6...v1.1.1)
+
+## Added
+-  Add `IsDeprecated`, `ReplacementRoleName` to `RolesListResponse`
+
+## Updated
+In order to synchronize terminology, we have renamed all services and structures that use incorrect terminology:
+- `connectors` package is now called `connections`. All services, data structures, methods with names like `Connector*` are now named `Connection*`
+- `teams` package - all nested services, data structures, methods with names like `TeamConnector*` are now named `TeamConnection*`
+- `users` package - all nested services, data structures, methods with names like `UserConnector*` are now named `UserConnection*`
+- `certificates` package - all nested services, data structures, methods with names like `ConnectorCertificate*` are now named `ConnectionCertificate*`
+- `fingerprints` package - all nested services, data structures, methods with names like `ConnectorFingerprint*` are now named `ConnectionFingerprint*`
+- `GroupListConnectorsService`  are now named `GroupListConnectionsService`
+- all services, data structures, methods with names like `*Modify*` are now named `*Update*`
+
+## Removed
+Removed the following Fivetran API endpoints:
+- [Retrieve dbt model details](https://fivetran.com/docs/rest-api/dbt-transformation-management#retrievedbtprojectmodeldetails)
+- [Retrieve dbt models list](https://fivetran.com/docs/rest-api/dbt-transformation-management#retrievedbtprojectmodels)
+- [Create dbt project](https://fivetran.com/docs/rest-api/dbt-transformation-management#createdbtproject)
+- [Retrieve dbt projects list](https://fivetran.com/docs/rest-api/dbt-transformation-management#retrievedbtprojects)
+- [Retrieve dbt project details](https://fivetran.com/docs/rest-api/dbt-transformation-management#retrievedbtprojectdetails)
+- [Update dbt project](https://fivetran.com/docs/rest-api/dbt-transformation-management#modifydbtproject)
+- [Delete dbt project](https://fivetran.com/docs/rest-api/dbt-transformation-management#deletedbtproject)
+- [Test dbt Project](https://fivetran.com/docs/rest-api/transformations-for-dbt-core-management#testdbtproject)
 
 ## [1.0.7](https://github.com/fivetran/go-fivetran/compare/v1.0.6...v1.0.7)
 
@@ -43,8 +150,6 @@ Our old API for dbt projects and transformations is marked as deprecated. Suppor
 ## Added
 -  Add `is_primary_key` to `ConnectorSchemaConfigColumn`
 
-## [Unreleased](https://github.com/fivetran/go-fivetran/compare/v1.0.4...HEAD)
-
 ## [1.0.4](https://github.com/fivetran/go-fivetran/compare/v1.0.3...v1.0.4)
 
 ## Added
@@ -72,8 +177,6 @@ Support for custom config (`map[string]interface{}`) for private links:
 - `PrivateDnsRegions` field in `privatelink.PrivateLinkConfig`
 
 ## [1.0.0](https://github.com/fivetran/go-fivetran/compare/v0.9.4...v1.0.0)
-
-Release version
 
 Renamed the following service from Local Processing Agent to Hybrid Deployment Agent:
 - LocalProcessingAgentCreateService to HybridDeploymentAgentCreateService

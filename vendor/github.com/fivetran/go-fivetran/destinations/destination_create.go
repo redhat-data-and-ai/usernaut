@@ -6,8 +6,6 @@ import (
     httputils "github.com/fivetran/go-fivetran/http_utils"
 )
 
-// DestinationCreateService implements the Destination Management, Create a Destination API.
-// Ref. https://fivetran.com/docs/rest-api/destinations#createadestination
 type DestinationCreateService struct {
     httputils.HttpService
     groupID                     *string
@@ -23,6 +21,7 @@ type DestinationCreateService struct {
     hybridDeploymentAgentId     *string
     networkingMethod            *string
     privateLinkId               *string
+    proxyAgentId                *string
 }
 
 func (s *DestinationCreateService) GroupID(value string) *DestinationCreateService {
@@ -85,6 +84,11 @@ func (s *DestinationCreateService) PrivateLinkId(value string) *DestinationCreat
     return s
 }
 
+func (s *DestinationCreateService) ProxyAgentId(value string) *DestinationCreateService {
+    s.proxyAgentId = &value
+    return s
+}
+
 func (s *DestinationCreateService) NetworkingMethod(value string) *DestinationCreateService {
     s.networkingMethod = &value
     return s
@@ -121,6 +125,7 @@ func (s *DestinationCreateService) request() *destinationCreateRequest {
         PrivateLinkId:                  s.privateLinkId,
         HybridDeploymentAgentId:        s.hybridDeploymentAgentId,
         NetworkingMethod:               s.networkingMethod,
+        ProxyAgentId:                   s.proxyAgentId,
     }
 }
 
@@ -138,5 +143,6 @@ func (s *DestinationCreateService) requestCustom() *destinationCreateRequest {
         PrivateLinkId:                  s.privateLinkId,
         HybridDeploymentAgentId:        s.hybridDeploymentAgentId,
         NetworkingMethod:               s.networkingMethod,
+        ProxyAgentId:                   s.proxyAgentId,
     }
 }
