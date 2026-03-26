@@ -29,7 +29,10 @@ import (
 )
 
 // snowflakeUsersPageLimit is the maximum number of users returned per API call by Snowflake
-const snowflakeUsersPageLimit = 10000
+const (
+	snowflakeUsersPageLimit = 10000
+	defaultSecondaryRoles   = "ALL"
+)
 
 // snowflakeUserToStruct converts a SnowflakeUser to a structs.User
 func snowflakeUserToStruct(user SnowflakeUser) *structs.User {
@@ -175,9 +178,15 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 		return nil, fmt.Errorf("email and username are required for Snowflake user creation")
 	}
 
+	userName := strings.ReplaceAll(user.UserName, "-", "_")
+
 	payload := map[string]interface{}{
-		"name":  user.UserName,
-		"email": user.Email,
+		"name":                    userName,
+		"email":                   user.Email,
+		"login_name":              user.UserName,
+		"first_name":              user.FirstName,
+		"last_name":               user.LastName,
+		"default_secondary_roles": defaultSecondaryRoles,
 	}
 
 	if user.DisplayName != "" {
