@@ -4,7 +4,7 @@ go 1.24.2
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
-	github.com/fivetran/go-fivetran v1.1.0
+	github.com/fivetran/go-fivetran v1.3.1
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/goccy/go-yaml v1.19.2
