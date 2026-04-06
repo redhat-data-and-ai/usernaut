@@ -210,40 +210,26 @@ func TestUninstallCertManager(t *testing.T) {
 	})
 }
 
-func TestLoadImageToKindClusterWithName(t *testing.T) {
-	t.Run("with kind cluster environment variable", func(t *testing.T) {
-		origVal, set := os.LookupEnv("KIND_CLUSTER")
-		_ = os.Setenv("KIND_CLUSTER", "test-cluster")
-		defer func() {
-			if set {
-				_ = os.Setenv("KIND_CLUSTER", origVal)
-			} else {
-				_ = os.Unsetenv("KIND_CLUSTER")
-			}
-		}()
-
-		err := LoadImageToKindClusterWithName("test-image:latest")
-		// Error is expected if kind is not installed
-		if err != nil {
-			assert.Error(t, err)
+func TestKindLoadDockerImageCommand(t *testing.T) {
+	// Do not run `kind load` here: it can hang for minutes when no cluster/Docker is
+	// available and breaks pre-commit `make test`. E2E still calls LoadImageToKindClusterWithName.
+	origVal, hadKIND := os.LookupEnv("KIND_CLUSTER")
+	t.Cleanup(func() {
+		if hadKIND {
+			_ = os.Setenv("KIND_CLUSTER", origVal)
+		} else {
+			_ = os.Unsetenv("KIND_CLUSTER")
 		}
 	})
 
-	t.Run("without kind cluster environment variable uses default", func(t *testing.T) {
-		origVal, set := os.LookupEnv("KIND_CLUSTER")
-		_ = os.Unsetenv("KIND_CLUSTER")
-		defer func() {
-			if set {
-				_ = os.Setenv("KIND_CLUSTER", origVal)
-			}
-		}()
+	require.NoError(t, os.Unsetenv("KIND_CLUSTER"))
+	cmd := kindLoadDockerImageCommand("test-image:latest")
+	require.NotNil(t, cmd)
+	assert.Equal(t, []string{"kind", "load", "docker-image", "test-image:latest", "--name", "kind"}, cmd.Args)
 
-		err := LoadImageToKindClusterWithName("test-image:latest")
-		// Error is expected if kind is not installed
-		if err != nil {
-			assert.Error(t, err)
-		}
-	})
+	require.NoError(t, os.Setenv("KIND_CLUSTER", "test-cluster"))
+	cmd = kindLoadDockerImageCommand("test-image:latest")
+	assert.Equal(t, []string{"kind", "load", "docker-image", "test-image:latest", "--name", "test-cluster"}, cmd.Args)
 }
 
 func TestWarnError(t *testing.T) {

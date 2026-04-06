@@ -103,15 +103,19 @@ func InstallCertManager() error {
 	return err
 }
 
-// LoadImageToKindClusterWithName loads a local docker image to the kind cluster
-func LoadImageToKindClusterWithName(name string) error {
+// kindLoadDockerImageCommand builds the kind CLI invocation for loading a local image.
+// It is separated from Run so unit tests can assert argv without executing kind.
+func kindLoadDockerImageCommand(name string) *exec.Cmd {
 	cluster := "kind"
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
 		cluster = v
 	}
-	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
-	cmd := exec.Command("kind", kindOptions...)
-	_, err := Run(cmd)
+	return exec.Command("kind", "load", "docker-image", name, "--name", cluster)
+}
+
+// LoadImageToKindClusterWithName loads a local docker image to the kind cluster
+func LoadImageToKindClusterWithName(name string) error {
+	_, err := Run(kindLoadDockerImageCommand(name))
 	return err
 }
 
