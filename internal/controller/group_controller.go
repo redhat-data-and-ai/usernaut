@@ -719,9 +719,7 @@ func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautd
 		// Clean up user:groups reverse index for all members of this group
 		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
 
-		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
-			return err
-		}
+		r.deleteBackendsTeam(ctx, groupCR)
 
 		controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
 		if err := r.Update(ctx, groupCR); err != nil {
@@ -758,7 +756,9 @@ func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName 
 	r.log.WithField("group", groupName).Info("cleaned up user groups index successfully")
 }
 
-func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+// deleteBackendsTeam performs best-effort backend and cache cleanup during deletion.
+// It does not return an error: failures are logged so the finalizer can still be removed.
+func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) {
 	r.log.Info("Finalizer: starting Backends team deletion cleanup")
 	groupName := groupCR.Spec.GroupName
 	hasErrors := false
@@ -823,8 +823,6 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	if hasErrors {
 		r.log.Warn("Finalizer: completed with some errors, but allowing deletion to proceed as it is a best-effort cleanup")
 	}
-
-	return nil
 }
 
 func (r *GroupReconciler) processUsers(ctx context.Context,

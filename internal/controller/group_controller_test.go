@@ -290,13 +290,14 @@ var _ = Describe("Group Controller", func() {
 			Expect(k8sClient.Create(ctx, multi)).To(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, multi) }()
 
+			// clients.New reads lowercase "apikey"/"apisecret" (see pkg/clients/client.go).
+			// Omit apisecret so client creation fails after the group is deemed configurable.
 			fivetranA := config.Backend{
 				Name:    "fivetran-a",
 				Type:    "fivetran",
 				Enabled: true,
 				Connection: map[string]interface{}{
-					keyApiKey:    "testKeyA",
-					keyApiSecret: "testSecretA",
+					"apikey": "testKeyA",
 				},
 			}
 			fivetranB := config.Backend{
@@ -304,22 +305,46 @@ var _ = Describe("Group Controller", func() {
 				Type:    "fivetran",
 				Enabled: true,
 				Connection: map[string]interface{}{
-					keyApiKey:    "testKeyB",
-					keyApiSecret: "testSecretB",
+					"apikey": "testKeyB",
 				},
 			}
-			reconciler, ldapClient := setupTestReconciler([]config.Backend{fivetranA, fivetranB})
+			withMultiGroupPattern := func(c *config.AppConfig) {
+				c.Pattern = map[string][]config.PatternEntry{
+					"fivetran": {{
+						Input:  `^test-resource-group-multi$`,
+						Output: "test_resource_group_multi",
+					}},
+				}
+			}
+			reconciler, ldapClient := setupTestReconciler([]config.Backend{fivetranA, fivetranB}, withMultiGroupPattern)
 
-			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Times(0)
+			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
+				"cn":          "Test",
+				"sn":          "User",
+				"displayName": "Test User",
+				"mail":        "testuser@gmail.com",
+				"uid":         "testuser",
+			}, nil).Times(2)
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: multiNN})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to reconcile all backends"))
 
-			// Reload the resource to inspect status
+			// Reload the resource to inspect per-backend status (clear errors for operators)
 			fresh := &usernautdevv1alpha1.Group{}
 			Expect(k8sClient.Get(ctx, multiNN, fresh)).To(Succeed())
-			// Verify the reconciliation completed without error
-			Expect(fresh.ObjectMeta.Name).To(Equal(multiName))
+			Expect(fresh.Status.BackendsStatus).To(HaveLen(2))
+
+			statuses := map[string]usernautdevv1alpha1.BackendStatus{}
+			for _, s := range fresh.Status.BackendsStatus {
+				statuses[s.Name] = s
+			}
+			Expect(statuses).To(HaveKey("fivetran-a"))
+			Expect(statuses).To(HaveKey("fivetran-b"))
+			Expect(statuses["fivetran-a"].Status).To(BeFalse())
+			Expect(statuses["fivetran-b"].Status).To(BeFalse())
+			Expect(statuses["fivetran-a"].Message).To(ContainSubstring("missing required connection parameters"))
+			Expect(statuses["fivetran-b"].Message).To(ContainSubstring("missing required connection parameters"))
 		})
 
 		It("should handle gitlab backend", func() {
@@ -368,7 +393,7 @@ var _ = Describe("Group Controller", func() {
 				Enabled: true,
 				Connection: map[string]interface{}{
 					keyUrl:           "https://gitlab.com",
-					keyParentGroupId: "",
+					keyParentGroupId: 111111,
 				},
 			}
 			reconciler, ldapClient := setupTestReconciler([]config.Backend{gitlabBackend})
@@ -394,6 +419,82 @@ var _ = Describe("Group Controller", func() {
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(condition.Reason).To(Equal("NonConfigurable"))
 			Expect(condition.Message).To(ContainSubstring("Group is not configurable"))
+		})
+
+		It("should surface gitlab connection validation on backend status when configurable", func() {
+			By("GitLab NewClient requires url and token; missing token must appear on BackendsStatus")
+
+			cleanup := setupSafeTestConfig()
+			defer cleanup()
+
+			const gitlabValName = "test-resource-gitlab-validation"
+			gitlabValNN := types.NamespacedName{Name: gitlabValName, Namespace: "default"}
+
+			gitlabValResource := &usernautdevv1alpha1.Group{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      gitlabValName,
+					Namespace: "default",
+				},
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: gitlabValName,
+					Members: usernautdevv1alpha1.Members{
+						Users: []string{"test-user-1", "test-user-2"},
+					},
+					Backends: []usernautdevv1alpha1.Backend{
+						{Name: "gitlab-main", Type: "gitlab"},
+					},
+					GroupParams: []usernautdevv1alpha1.GroupParam{
+						{
+							Backend:  "gitlab",
+							Name:     "gitlab-main",
+							Property: "projects",
+							Value:    []string{"my-group/my-project"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, gitlabValResource)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, gitlabValResource) }()
+
+			// url set but token omitted — pkg/clients/gitlab.NewClient enforces both
+			gitlabBackend := config.Backend{
+				Name:    "gitlab-main",
+				Type:    "gitlab",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyUrl:           "https://gitlab.com",
+					keyParentGroupId: 111111,
+				},
+			}
+			withGitlabValPattern := func(c *config.AppConfig) {
+				c.Pattern = map[string][]config.PatternEntry{
+					"gitlab": {{
+						Input:  `^test-resource-gitlab-validation$`,
+						Output: "test_resource_gitlab_validation",
+					}},
+				}
+			}
+			reconciler, ldapClient := setupTestReconciler([]config.Backend{gitlabBackend}, withGitlabValPattern)
+
+			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
+				"cn":          "Test",
+				"sn":          "User",
+				"displayName": "Test User",
+				"mail":        "testuser@gmail.com",
+				"uid":         "testuser",
+			}, nil).Times(2)
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: gitlabValNN})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to reconcile all backends"))
+
+			fresh := &usernautdevv1alpha1.Group{}
+			Expect(k8sClient.Get(ctx, gitlabValNN, fresh)).To(Succeed())
+			Expect(fresh.Status.BackendsStatus).To(HaveLen(1))
+			status := fresh.Status.BackendsStatus[0]
+			Expect(status.Name).To(Equal("gitlab-main"))
+			Expect(status.Status).To(BeFalse())
+			Expect(status.Message).To(ContainSubstring("missing required connection parameters"))
 		})
 	})
 })
