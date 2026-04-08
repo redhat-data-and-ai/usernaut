@@ -821,8 +821,7 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	}
 
 	if hasErrors {
-		r.log.Warn("Finalizer: completed with some errors, but allowing deletion to proceed")
-		return fmt.Errorf("finalizer completed with errors during team deletion")
+		r.log.Warn("Finalizer: completed with some errors, but allowing deletion to proceed as it is a best-effort cleanup")
 	}
 
 	return nil
