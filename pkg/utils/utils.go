@@ -7,9 +7,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
+
+// maxBackendTeamFallbackBytes caps fallback team names so cache keys and typical
+// backend APIs are not fed unbounded strings.
+const maxBackendTeamFallbackBytes = 255
 
 // standardizeNameReplacer replaces period, parenthesis, and comma with space in a single pass.
 var standardizeNameReplacer = strings.NewReplacer(".", " ", "(", " ", ")", " ", ",", " ")
@@ -299,14 +304,69 @@ func GetTransformedGroupName(cfg *config.AppConfig, typeName, inputStr string) (
 	return "", fmt.Errorf("no matching pattern found for backend type %s and input string is %s", typeName, inputStr)
 }
 
+// sanitizeGroupNameFallback produces a conservative backend-style identifier when no pattern
+// matches: lowercase ASCII letters and digits, hyphens/underscores normalized to a single
+// underscore, other runes replaced with underscores, no leading/trailing underscores,
+// names starting with a digit prefixed with "g_", and length capped for API/cache safety.
+// It returns empty if nothing usable remains (callers should skip backend/cache ops for that key).
+func sanitizeGroupNameFallback(input string) string {
+	if input == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(input))
+	for _, r := range strings.ToLower(input) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteByte('_')
+		default:
+			b.WriteByte('_')
+		}
+	}
+	s := b.String()
+	for strings.Contains(s, "__") {
+		s = strings.ReplaceAll(s, "__", "_")
+	}
+	s = strings.Trim(s, "_")
+	if s == "" {
+		return ""
+	}
+	if s[0] >= '0' && s[0] <= '9' {
+		s = "g_" + s
+	}
+	if len(s) > maxBackendTeamFallbackBytes {
+		s = truncateUTF8ToMaxBytes(s, maxBackendTeamFallbackBytes)
+		s = strings.TrimRight(s, "_")
+	}
+	if s == "" {
+		return ""
+	}
+	return s
+}
+
+func truncateUTF8ToMaxBytes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	s = s[:maxBytes]
+	// Drop trailing bytes until the prefix is valid UTF-8 (RuneStart alone is not enough:
+	// a lead byte can start an incomplete multibyte sequence at the cut boundary).
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
 // GetTransformedGroupNameOrFallback attempts to transform a group name using configured patterns.
-// If no pattern matches, it returns a sanitized version (hyphens replaced with underscores).
-// This is useful for cleanup/deletion operations where we want to be graceful.
+// If no pattern matches, it returns a sanitized identifier suitable for typical backend team
+// naming (ASCII slug, bounded length). This is useful for cleanup/deletion operations where we
+// want to be graceful without passing through invalid or oversized names.
 func GetTransformedGroupNameOrFallback(cfg *config.AppConfig, typeName, inputStr string) string {
 	transformedName, err := GetTransformedGroupName(cfg, typeName, inputStr)
 	if err != nil {
-		// No pattern matched, use sanitized fallback
-		return strings.ReplaceAll(inputStr, "-", "_")
+		return sanitizeGroupNameFallback(inputStr)
 	}
 	return transformedName
 }

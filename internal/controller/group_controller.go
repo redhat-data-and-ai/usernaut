@@ -787,8 +787,22 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		if err != nil {
 			backendLoggerInfo.WithError(err).Warn("Finalizer: error fetching team details from cache, team may not have been created")
 			hasErrors = true
-			// Continue to try TeamStore cleanup anyway
-		} else if teamID != "" {
+		}
+
+		// Same resolution order as fetchOrCreateTeam: GroupStore first, then TeamStore (preload) by transformed name
+		if teamID == "" && transformedGroupName != "" {
+			backendKey := backend.Name + "_" + backend.Type
+			teamBackends, tsErr := r.Store.Team.GetBackends(ctx, transformedGroupName)
+			if tsErr != nil {
+				backendLoggerInfo.WithError(tsErr).Warn("Finalizer: error fetching team from TeamStore during deletion")
+				hasErrors = true
+			} else if id, ok := teamBackends[backendKey]; ok && id != "" {
+				backendLoggerInfo.WithField("team_id", id).Info("Finalizer: resolved team ID from TeamStore for backend deletion")
+				teamID = id
+			}
+		}
+
+		if teamID != "" {
 			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
 
 			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
@@ -797,6 +811,16 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 				// Continue processing - best effort deletion
 			} else {
 				backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
+			}
+		} else if strings.EqualFold(backend.Type, "snowflake") && transformedGroupName != "" {
+			// Snowflake uses the role name as the REST identifier (see snowflake.CreateTeam / DeleteTeamByID).
+			roleName := strings.ToLower(transformedGroupName)
+			backendLoggerInfo.WithField("role_name", roleName).Info("Finalizer: no cached team ID; attempting Snowflake role delete by name")
+			if err := backendClient.DeleteTeamByID(ctx, roleName); err != nil {
+				backendLoggerInfo.WithError(err).Warn("Finalizer: Snowflake delete by role name failed; role may not exist or actual name may differ (e.g. pattern changed since create)")
+				hasErrors = true
+			} else {
+				backendLoggerInfo.Infof("Finalizer: Successfully deleted Snowflake role '%s'", roleName)
 			}
 		} else {
 			backendLoggerInfo.Info("Finalizer: No team ID found in cache, skipping backend deletion")

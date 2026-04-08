@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/stretchr/testify/assert"
@@ -406,6 +408,24 @@ func TestGetTransformedGroupNameOrFallback(t *testing.T) {
 			expected:     "my_test_group_name",
 			backend_Name: "fivetran",
 		},
+		{
+			name:         "fallback lowercases and strips unsafe characters",
+			input:        "My Team@Foo!",
+			expected:     "my_team_foo",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "fallback prefixes digit-leading names",
+			input:        "123-acme",
+			expected:     "g_123_acme",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "fallback empty when no alphanumeric content",
+			input:        "---@###",
+			expected:     "",
+			backend_Name: "fivetran",
+		},
 	}
 
 	for _, tt := range tests {
@@ -414,6 +434,21 @@ func TestGetTransformedGroupNameOrFallback(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestSanitizeGroupNameFallback(t *testing.T) {
+	t.Run("truncates to max bytes without breaking UTF-8", func(t *testing.T) {
+		in := strings.Repeat("a", maxBackendTeamFallbackBytes+20)
+		got := sanitizeGroupNameFallback(in)
+		assert.Equal(t, maxBackendTeamFallbackBytes, len(got))
+	})
+	t.Run("truncateUTF8ToMaxBytes handles multibyte boundary", func(t *testing.T) {
+		// 3-byte runes; cut so raw max would split a rune
+		in := strings.Repeat("世", 100)
+		got := truncateUTF8ToMaxBytes(in, 200)
+		assert.True(t, utf8.ValidString(got))
+		assert.LessOrEqual(t, len(got), 200)
+	})
 }
 
 func TestStandardizeNameForBackend(t *testing.T) {
