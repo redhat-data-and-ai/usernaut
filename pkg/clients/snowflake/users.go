@@ -178,7 +178,7 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 		return nil, fmt.Errorf("email and username are required for Snowflake user creation")
 	}
 
-	userName := strings.ReplaceAll(user.UserName, "-", "_")
+	userName := sanitizeUserNameForAPI(user.UserName)
 
 	payload := map[string]interface{}{
 		"name":                    userName,
@@ -224,7 +224,9 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 	})
 	log.Info("fetching user details by ID")
 
-	endpoint := fmt.Sprintf("/api/v2/users/%s", userID)
+	userName := sanitizeUserNameForAPI(userID)
+	endpoint := fmt.Sprintf("/api/v2/users/%s", userName)
+
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		log.WithError(err).Error("error fetching user details")
@@ -251,7 +253,9 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 	})
 
 	log.Debug("deleting user")
-	endpoint := fmt.Sprintf("/api/v2/users/%s", userID)
+
+	userName := sanitizeUserNameForAPI(userID)
+	endpoint := fmt.Sprintf("/api/v2/users/%s", userName)
 
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodDelete, nil)
 	if err != nil {
@@ -268,4 +272,9 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 		"status": status,
 	}).Info("user deleted successfully")
 	return nil
+}
+
+// sanitizeUserNameForAPI replaces characters in a username that are not allowed in Snowflake API paths.
+func sanitizeUserNameForAPI(userName string) string {
+	return strings.ReplaceAll(userName, "-", "_")
 }
