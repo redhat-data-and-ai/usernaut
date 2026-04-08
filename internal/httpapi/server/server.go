@@ -67,7 +67,6 @@ func (s *APIServer) setupRoutes() {
 	})
 
 	v1 := s.router.Group("/api/v1")
-	v1.Use(middleware.BasicAuth(s.config))
 
 	// add authenticated endpoints accordingly
 
