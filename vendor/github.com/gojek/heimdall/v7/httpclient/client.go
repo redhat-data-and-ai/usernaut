@@ -1,12 +1,12 @@
 package httpclient
 
 import (
-	"bytes"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
+	"github.com/gojek/heimdall/v7/internal"
 	"github.com/gojek/valkyrie"
 	"github.com/pkg/errors"
 )
@@ -120,15 +120,22 @@ func (c *Client) Delete(url string, headers http.Header) (*http.Response, error)
 
 // Do makes an HTTP request with the native `http.Do` interface
 func (c *Client) Do(request *http.Request) (*http.Response, error) {
-	var bodyReader *bytes.Reader
+	if origReqBody := request.Body; origReqBody != nil {
+		defer func() {
+			// close the original request body as internal.SetRequestGetBody wraps body with noop closer.
+			_ = origReqBody.Close()
+		}()
+	}
 
-	if request.Body != nil {
-		reqData, err := io.ReadAll(request.Body)
-		if err != nil {
+	var reqGetBody internal.RequestGetBody
+	var err error
+	// Only SetRequestGetBody if retry is enabled to avoid unnecessary overhead for non-retry requests
+	if c.retryCount > 0 {
+		if err = internal.SetRequestGetBody(request); err != nil {
 			return nil, err
 		}
-		bodyReader = bytes.NewReader(reqData)
-		request.Body = io.NopCloser(bodyReader) // prevents closing the body between retries
+		// keeping a local variable just in case request.GetBody gets overridden by some plugins/middlewares
+		reqGetBody = request.GetBody
 	}
 
 	multiErr := &valkyrie.MultiError{}
@@ -139,28 +146,27 @@ func (c *Client) Do(request *http.Request) (*http.Response, error) {
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
 		}
+		if i > 0 {
+			time.Sleep(c.retrier.NextInterval(i - 1)) // sleep after closing the previous response body
+
+			request, err = internal.CloneRequest(request, reqGetBody) // Clone the request to reset the body for retry
+			if err != nil {
+				return nil, err
+			}
+		}
 
 		c.reportRequestStart(request)
 		var err error
 		response, err = c.client.Do(request)
-		if bodyReader != nil {
-			// Reset the body reader after the request since at this point it's already read
-			// Note that it's safe to ignore the error here since the 0,0 position is always valid
-			_, _ = bodyReader.Seek(0, 0)
-		}
 
 		if err != nil {
 			multiErr.Push(err.Error())
 			c.reportError(request, err)
-			backoffTime := c.retrier.NextInterval(i)
-			time.Sleep(backoffTime)
 			continue
 		}
 		c.reportRequestEnd(request, response)
 
 		if response.StatusCode >= http.StatusInternalServerError {
-			backoffTime := c.retrier.NextInterval(i)
-			time.Sleep(backoffTime)
 			continue
 		}
 

@@ -1,8 +1,8 @@
 package hystrix
 
 import (
-	"bytes"
 	"context"
+	goerrors "errors"
 	"io"
 	"net/http"
 	"time"
@@ -12,6 +12,7 @@ import (
 	"github.com/afex/hystrix-go/plugins"
 	"github.com/gojek/heimdall/v7"
 	"github.com/gojek/heimdall/v7/httpclient"
+	"github.com/gojek/heimdall/v7/internal"
 	"github.com/pkg/errors"
 )
 
@@ -48,7 +49,7 @@ const (
 )
 
 var _ heimdall.Client = (*Client)(nil)
-var err5xx = errors.New("server returned 5xx status code")
+var err5xx = goerrors.New("server returned 5xx status code")
 
 // NewClient returns a new instance of hystrix Client
 func NewClient(opts ...Option) *Client {
@@ -167,56 +168,48 @@ func (hhc *Client) Delete(url string, headers http.Header) (*http.Response, erro
 
 // Do makes an HTTP request with the native `http.Do` interface
 func (hhc *Client) Do(request *http.Request) (*http.Response, error) {
-	var response *http.Response
-	var err error
-
-	var bodyReader *bytes.Reader
-
-	if request.Body != nil {
-		reqData, readErr := io.ReadAll(request.Body)
-		if readErr != nil {
-			return nil, readErr
-		}
-		bodyReader = bytes.NewReader(reqData)
-		request.Body = io.NopCloser(bodyReader) // prevents closing the body between retries
+	if origReqBody := request.Body; origReqBody != nil {
+		defer func() {
+			// close the original request body as internal.SetRequestGetBody wraps body with noop closer.
+			_ = origReqBody.Close()
+		}()
 	}
 
+	var reqGetBody internal.RequestGetBody
+	var err error
+	// Only SetRequestGetBody if retry is enabled to avoid unnecessary overhead for non-retry requests
+	if hhc.retryCount > 0 {
+		if err := internal.SetRequestGetBody(request); err != nil {
+			return nil, err
+		}
+		// keeping a local variable just in case request.GetBody gets overridden by some plugins/middlewares
+		reqGetBody = request.GetBody
+	}
+
+	var response *http.Response
 	for i := 0; i <= hhc.retryCount; i++ {
 		if response != nil {
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
 		}
 
-		err = hystrix.DoC(request.Context(), hhc.hystrixCommandName, func(_ context.Context) (err error) {
-			response, err = hhc.client.Do(request)
-			if bodyReader != nil {
-				// Reset the body reader after the request since at this point it's already read
-				// Note that it's safe to ignore the error here since the 0,0 position is always valid
-				_, _ = bodyReader.Seek(0, 0)
-			}
+		if i > 0 {
+			time.Sleep(hhc.retrier.NextInterval(i - 1)) // sleep after closing the previous response body
 
+			request, err = internal.CloneRequest(request, reqGetBody) // Clone the request to reset the body for retry
 			if err != nil {
-				return err
+				return nil, err
 			}
-
-			if response.StatusCode >= http.StatusInternalServerError {
-				return err5xx
-			}
-
-			return nil
-		}, hhc.fallbackFunc)
-
-		if err != nil {
-			backoffTime := hhc.retrier.NextInterval(i)
-			time.Sleep(backoffTime)
-			continue
 		}
 
-		break
+		response, err = hhc.hystrixDo(request)
+		if err == nil {
+			break
+		}
 	}
 
 	if err != nil {
-		if err == err5xx {
+		if errors.Is(err, err5xx) {
 			return response, nil
 		}
 
@@ -224,6 +217,27 @@ func (hhc *Client) Do(request *http.Request) (*http.Response, error) {
 	}
 
 	return response, nil
+}
+
+func (hhc *Client) hystrixDo(request *http.Request) (response *http.Response, err error) {
+	err = hystrix.DoC(request.Context(), hhc.hystrixCommandName, func(_ context.Context) error {
+		resp, doErr := hhc.client.Do(request)
+		if doErr != nil {
+			return doErr
+		}
+		response = resp
+
+		if response.StatusCode >= http.StatusInternalServerError {
+			return err5xx
+		}
+
+		return nil
+	}, hhc.fallbackFunc)
+	if err != nil && !errors.Is(err, err5xx) { // Special handling to avoid data race conditions
+		return nil, err
+	}
+
+	return response, err
 }
 
 // AddPlugin Adds plugin to client
