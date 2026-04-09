@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-ldap/ldap/v3"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
+
+const bulkLDAPBatchSize = 500
 
 var (
 	ErrNoUserFound = errors.New("no LDAP entries found for user")
@@ -90,6 +93,79 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 
 	log.Debug("fetched user LDAP data")
 	return userData, nil
+}
+
+// GetBulkUserLDAPData retrieves LDAP data for multiple users in batched OR queries,
+// returning a map keyed by uid. Users not found in LDAP are silently omitted from
+// the result. Batches are capped at bulkLDAPBatchSize to stay within server size limits.
+func (l *LDAPConn) GetBulkUserLDAPData(
+	ctx context.Context,
+	userIDs []string,
+) (map[string]map[string]interface{}, error) {
+	log := logger.Logger(ctx)
+	result := make(map[string]map[string]interface{}, len(userIDs))
+
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+
+	totalBatches := (len(userIDs) + bulkLDAPBatchSize - 1) / bulkLDAPBatchSize
+	log.WithField("total_users", len(userIDs)).WithField("batch_size", bulkLDAPBatchSize).
+		WithField("total_batches", totalBatches).Info("starting bulk LDAP fetch")
+
+	for batchStart := 0; batchStart < len(userIDs); batchStart += bulkLDAPBatchSize {
+		batchEnd := batchStart + bulkLDAPBatchSize
+		if batchEnd > len(userIDs) {
+			batchEnd = len(userIDs)
+		}
+		batch := userIDs[batchStart:batchEnd]
+		batchNum := (batchStart / bulkLDAPBatchSize) + 1
+
+		log.WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches)).
+			WithField("batch_users", len(batch)).Info("processing LDAP batch")
+
+		var uidFilters strings.Builder
+		for _, uid := range batch {
+			fmt.Fprintf(&uidFilters, "(uid=%s)", ldap.EscapeFilter(uid))
+		}
+		filter := fmt.Sprintf("(&(%s)(|%s))", l.userSearchFilter, uidFilters.String())
+
+		searchRequest := ldap.NewSearchRequest(
+			l.baseUserDN,
+			ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+			filter,
+			l.attributes,
+			nil,
+		)
+
+		conn := l.getConn()
+		if conn == nil {
+			return result, errors.New("LDAP connection is nil")
+		}
+
+		if err := conn.UnauthenticatedBind(""); err != nil {
+			return result, fmt.Errorf("failed to bind before bulk search: %w", err)
+		}
+
+		resp, err := conn.Search(searchRequest)
+		if err != nil {
+			log.WithError(err).WithField("batch_start", batchStart).Error("bulk LDAP search failed")
+			return result, err
+		}
+
+		log.WithField("batch_start", batchStart).WithField("entries", len(resp.Entries)).
+			Info("bulk LDAP batch returned")
+
+		for _, entry := range resp.Entries {
+			uid := entry.GetAttributeValue("uid")
+			if uid == "" {
+				continue
+			}
+			result[uid] = l.parseLDAPEntry(entry)
+		}
+	}
+
+	return result, nil
 }
 
 // GetUserLDAPDataByEmail retrieves user data from LDAP using the email address.

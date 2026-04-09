@@ -129,6 +129,24 @@ var _ = Describe("Group Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource-group"
 
+		// fetchLDAPData calls GetBulkUserLDAPData once; keys must match spec.members.users.
+		bulkLDAPDataOK := map[string]map[string]interface{}{
+			"test-user-1": {
+				"cn":          "Test",
+				"sn":          "User",
+				"displayName": "Test User",
+				"mail":        "testuser@gmail.com",
+				"uid":         "testuser",
+			},
+			"test-user-2": {
+				"cn":          "Test",
+				"sn":          "User",
+				"displayName": "Test User",
+				"mail":        "testuser2@gmail.com",
+				"uid":         "testuser2",
+			},
+		}
+
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
@@ -186,13 +204,7 @@ var _ = Describe("Group Controller", func() {
 			}
 			controllerReconciler, ldapClient := setupTestReconciler([]config.Backend{fivetranBackend})
 
-			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
-				"cn":          "Test",
-				"sn":          "User",
-				"displayName": "Test User",
-				"mail":        "testuser@gmail.com",
-				"uid":         "testuser",
-			}, nil).Times(2)
+			ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Return(bulkLDAPDataOK, nil).Times(1)
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -250,13 +262,7 @@ var _ = Describe("Group Controller", func() {
 			}
 			reconciler, ldapClient := setupTestReconciler([]config.Backend{fivetranA, fivetranB})
 
-			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
-				"cn":          "Test",
-				"sn":          "User",
-				"displayName": "Test User",
-				"mail":        "testuser@gmail.com",
-				"uid":         "testuser",
-			}, nil).Times(2)
+			ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Return(bulkLDAPDataOK, nil).Times(1)
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: multiNN})
 			Expect(err).To(HaveOccurred())
@@ -330,13 +336,7 @@ var _ = Describe("Group Controller", func() {
 			}
 			reconciler, ldapClient := setupTestReconciler([]config.Backend{gitlabBackend})
 
-			ldapClient.EXPECT().GetUserLDAPData(gomock.Any(), gomock.Any()).Return(map[string]interface{}{
-				"cn":          "CN-test",
-				"sn":          "SN-test",
-				"displayName": "Open Source",
-				"mail":        "opensource@email.com",
-				"uid":         "uid-test",
-			}, nil).Times(2)
+			ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Return(bulkLDAPDataOK, nil).Times(1)
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: gitlabNN})
 			Expect(err).To(HaveOccurred())

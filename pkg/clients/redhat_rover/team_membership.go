@@ -71,6 +71,8 @@ func (rC *RoverClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 	return members, nil
 }
 
+const roverBatchSize = 500
+
 func (rC *RoverClient) modify(
 	ctx context.Context,
 	spanName string,
@@ -81,38 +83,58 @@ func (rC *RoverClient) modify(
 	defer span.Finish()
 	log := logger.Logger(ctx)
 
-	var req MemberModRequest
-	switch action {
-	case "add":
-		log.Info("adding team users to the rover group")
-		req.Additions = make([]Member, 0, len(userIDs))
-		for _, id := range userIDs {
-			req.Additions = append(req.Additions, Member{ID: id, Type: MemberTypeUser})
-		}
-	case "remove":
-		log.Info("removing team users from the rover group")
-		req.Deletions = make([]Member, 0, len(userIDs))
-		for _, id := range userIDs {
-			req.Deletions = append(req.Deletions, Member{ID: id, Type: MemberTypeUser})
-		}
-	default:
+	if action != "add" && action != "remove" {
 		return fmt.Errorf("invalid action:%s", action)
 	}
 
-	_, respCode, err := rC.sendRequest(ctx,
-		rC.url+"/v1/groups/"+teamID+"/membersMod",
-		http.MethodPost,
-		req,
-		headers,
-		spanName)
-	if err != nil {
-		log.WithError(err).Errorf("failed to %s users in rover group", action)
-		return err
-	}
+	totalBatches := (len(userIDs) + roverBatchSize - 1) / roverBatchSize
+	log.WithField("action", action).WithField("total_users", len(userIDs)).
+		WithField("total_batches", totalBatches).
+		Infof("%sing users in rover group (batched)", action)
 
-	if respCode != http.StatusOK {
-		log.Errorf("failed to %s users in rover group", action)
-		return fmt.Errorf("failed to %s users in rover group with response code: %s", action, http.StatusText(respCode))
+	for batchStart := 0; batchStart < len(userIDs); batchStart += roverBatchSize {
+		batchEnd := batchStart + roverBatchSize
+		if batchEnd > len(userIDs) {
+			batchEnd = len(userIDs)
+		}
+		batch := userIDs[batchStart:batchEnd]
+		batchNum := (batchStart / roverBatchSize) + 1
+
+		log.WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches)).
+			WithField("batch_users", len(batch)).
+			Infof("processing rover %s batch", action)
+
+		members := make([]Member, 0, len(batch))
+		for _, id := range batch {
+			members = append(members, Member{ID: id, Type: MemberTypeUser})
+		}
+
+		var req MemberModRequest
+		switch action {
+		case "add":
+			req.Additions = members
+		case "remove":
+			req.Deletions = members
+		}
+
+		_, respCode, err := rC.sendRequest(ctx,
+			rC.url+"/v1/groups/"+teamID+"/membersMod",
+			http.MethodPost,
+			req,
+			headers,
+			spanName)
+		if err != nil {
+			log.WithError(err).Errorf("failed to %s users in rover group (batch %d/%d)", action, batchNum, totalBatches)
+			return err
+		}
+
+		if respCode != http.StatusOK {
+			log.Errorf("failed to %s users in rover group (batch %d/%d)", action, batchNum, totalBatches)
+			return fmt.Errorf("failed to %s users in rover group with response code: %s", action, http.StatusText(respCode))
+		}
+
+		log.WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches)).
+			Infof("rover %s batch completed", action)
 	}
 
 	return nil

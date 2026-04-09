@@ -82,6 +82,9 @@ spec:
                   type: object
                 type: array
               members:
+                description: |-
+                  Members defines how group membership is resolved. When LDAPQuery is set, Users is optional
+                  (members can come only from LDAP). When LDAPQuery is omitted, Users must be a non-empty list.
                 properties:
                   groups:
                     items:
@@ -144,9 +147,11 @@ spec:
                     items:
                       type: string
                     type: array
-                required:
-                - users
                 type: object
+                x-kubernetes-validations:
+                - message: users must be a non-empty list when ldap_query is omitted
+                  rule: has(self.ldap_query) || (has(self.users) && size(self.users)
+                    > 0)
             required:
             - backends
             - group_name

@@ -370,35 +370,38 @@ func (r *GroupReconciler) fetchLDAPData(
 	// Track current valid members (users with valid LDAP data)
 	currentMembers := make([]string, 0, len(uniqueMembers))
 
-	// Process each unique member - fetch LDAP data only
+	r.log.WithField("member_count", len(uniqueMembers)).Info("fetching LDAP data in bulk")
+
+	bulkData, err := r.LdapConn.GetBulkUserLDAPData(ctx, uniqueMembers)
+	if err != nil {
+		r.log.WithError(err).Error("error fetching bulk LDAP data")
+	}
+	if bulkData == nil {
+		bulkData = make(map[string]map[string]interface{})
+	}
+
 	for _, user := range uniqueMembers {
-		ldapUserData, err := r.LdapConn.GetUserLDAPData(ctx, user)
-		if err != nil {
-			r.log.WithError(err).Error("error fetching user data from LDAP")
-			delete(uniqueUIDs, user)
+		userData, ok := bulkData[user]
+		if !ok {
+			r.log.WithField("user", user).Warn("user not found in LDAP, skipping")
 			continue
 		}
 
 		ldapUser := &structs.LDAPUser{}
-		err = utils.MapToStruct(ldapUserData, ldapUser)
-		if err != nil {
-			r.log.WithError(err).Error("error converting LDAP user data to struct")
+		if err := utils.MapToStruct(userData, ldapUser); err != nil {
+			r.log.WithField("user", user).WithError(err).Error("error converting LDAP user data to struct")
 			continue
 		}
 
 		r.allLdapUserData[user] = ldapUser
 
-		// Only add UID if it's not already in the list
 		if !uniqueUIDs[ldapUser.GetUID()] {
 			uniqueUIDs[ldapUser.GetUID()] = true
 		}
 
-		// Track this user as a current member
-		email := ldapUser.GetEmail()
-		currentMembers = append(currentMembers, email)
+		currentMembers = append(currentMembers, ldapUser.GetEmail())
 	}
 
-	// Build list of users who are active in LDAP
 	activeUserList := make([]string, 0, len(uniqueUIDs))
 	for uid, isActive := range uniqueUIDs {
 		if isActive {
@@ -614,7 +617,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 				r.backendLogger.WithError(err).Error("error while adding users to the team")
 				return err
 			}
-			r.backendLogger.WithField("users_to_add", usersToAdd).Info("added users to team successfully")
+			r.backendLogger.WithField("num_users_to_add", len(usersToAdd)).Info("added users to team successfully")
 		}
 
 		// Remove users from team if needed
@@ -624,7 +627,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 				r.backendLogger.WithError(err).Error("error while removing users from the team")
 				return err
 			}
-			r.backendLogger.WithField("users_to_remove", usersToRemove).Info("removed users from team successfully")
+			r.backendLogger.WithField("num_users_to_remove", len(usersToRemove)).Info("removed users from team successfully")
 		}
 	}
 
@@ -894,14 +897,14 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
 			return err
 		}
-		r.backendLogger.WithField("user", user).Info("created user in backend successfully")
+		r.backendLogger.WithField("user", user).Debug("created user in backend successfully")
 
 		// Update cache with new user ID
 		if err := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, newUser.ID); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")
 			return err
 		}
-		r.backendLogger.WithField("user", user).Info("updated user details in cache successfully")
+		r.backendLogger.WithField("user", user).Debug("updated user details in cache successfully")
 	}
 	return nil
 }
