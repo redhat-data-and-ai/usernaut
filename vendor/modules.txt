@@ -227,11 +227,12 @@ github.com/goccy/go-yaml/token
 ## explicit; go 1.15
 github.com/gogo/protobuf/proto
 github.com/gogo/protobuf/sortkeys
-# github.com/gojek/heimdall/v7 v7.1.0
+# github.com/gojek/heimdall/v7 v7.1.2
 ## explicit; go 1.24
 github.com/gojek/heimdall/v7
 github.com/gojek/heimdall/v7/httpclient
 github.com/gojek/heimdall/v7/hystrix
+github.com/gojek/heimdall/v7/internal
 # github.com/gojek/valkyrie v0.0.0-20180215180059-6aee720afcdf
 ## explicit
 github.com/gojek/valkyrie
