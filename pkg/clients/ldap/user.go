@@ -161,8 +161,15 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 
 		resp, err := conn.Search(searchRequest)
 		if err != nil {
-			log.WithError(err).WithField("batch_start", batchStart).Error("bulk LDAP search failed")
-			return result, err
+			log.WithError(err).
+				WithField("batch_start", batchStart).
+				WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches)).
+				WithField("batch_user_ids", batch).
+				Error("bulk LDAP search failed")
+			return result, fmt.Errorf(
+				"bulk LDAP search failed (batch %d/%d, %d users, start offset %d): %w",
+				batchNum, totalBatches, len(batch), batchStart, err,
+			)
 		}
 
 		log.WithField("batch_start", batchStart).WithField("entries", len(resp.Entries)).

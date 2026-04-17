@@ -169,7 +169,11 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	r.log.Info("Acquired cache lock for entire reconciliation (LDAP + backends)")
 
 	// Step 1: Fetch LDAP data (does NOT update cache indexes)
-	ldapResult := r.fetchLDAPData(ctx, uniqueMembers)
+	ldapResult, err := r.fetchLDAPData(ctx, uniqueMembers)
+	if err != nil {
+		r.log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
+		return ctrl.Result{}, err
+	}
 
 	// Step 2: Process all backends (cache operations protected by lock)
 	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers)
@@ -354,13 +358,15 @@ func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string 
 	return managerUIDs
 }
 
-// fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData
-// This function does NOT update any cache indexes - it only fetches data
-// NOTE: This function assumes CacheMutex is already held by the caller
+// fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData.
+// This function does NOT update any cache indexes - it only fetches data.
+// If the bulk LDAP client returns an error (e.g. server timeout), the entire reconcile
+// should fail so members are not misclassified as missing from LDAP.
+// NOTE: This function assumes CacheMutex is already held by the caller.
 func (r *GroupReconciler) fetchLDAPData(
 	ctx context.Context,
 	uniqueMembers []string,
-) *LDAPFetchResult {
+) (*LDAPFetchResult, error) {
 	// Initialize LDAP user data map
 	r.allLdapUserData = make(map[string]*structs.LDAPUser, len(uniqueMembers))
 
@@ -375,6 +381,7 @@ func (r *GroupReconciler) fetchLDAPData(
 	bulkData, err := r.LdapConn.GetBulkUserLDAPData(ctx, uniqueMembers)
 	if err != nil {
 		r.log.WithError(err).Error("error fetching bulk LDAP data")
+		return nil, fmt.Errorf("get bulk LDAP user data: %w", err)
 	}
 	if bulkData == nil {
 		bulkData = make(map[string]map[string]interface{})
@@ -412,7 +419,7 @@ func (r *GroupReconciler) fetchLDAPData(
 	return &LDAPFetchResult{
 		CurrentMembers: currentMembers,
 		ActiveUserList: activeUserList,
-	}
+	}, nil
 }
 
 // updateCacheIndexes updates all cache indexes after successful backend reconciliation
