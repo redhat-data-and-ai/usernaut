@@ -106,7 +106,7 @@ func (r *Requester) sendRequest(httpClient heimdall.Doer, methodName string,
 		"service": serviceName,
 		"method":  methodName,
 		"url":     r.request.URL.String(),
-	}).Debug("SENDING_HTTP_REQUEST")
+	}).Info("SENDING_HTTP_REQUEST")
 
 	response, err := httpClient.Do(r.request)
 
@@ -114,7 +114,7 @@ func (r *Requester) sendRequest(httpClient heimdall.Doer, methodName string,
 		"service": serviceName,
 		"method":  methodName,
 		"url":     r.request.URL.String(),
-	}).Debug("RECEIVED_HTTP_RESPONSE")
+	}).Info("RECEIVED_HTTP_RESPONSE")
 
 	// Calculate time taken to receive response
 	durationMs := float64(time.Since(start).Nanoseconds() / 1000000)
@@ -124,7 +124,7 @@ func (r *Requester) sendRequest(httpClient heimdall.Doer, methodName string,
 		"method":     methodName,
 		"url":        r.request.URL.String(),
 		"durationMs": durationMs,
-	}).Debug("HTTP_RESPONSE_DURATION")
+	}).Info("HTTP_RESPONSE_DURATION")
 
 	if err != nil {
 		return nil, nil, err
