@@ -10,7 +10,8 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
 
-const bulkLDAPBatchSize = 500
+// bulkLDAPBatchSize caps OR-filter batch size
+var bulkLDAPBatchSize = 500
 
 var (
 	ErrNoUserFound = errors.New("no LDAP entries found for user")
@@ -68,6 +69,9 @@ func (l *LDAPConn) executeSearch(ctx context.Context,
 // GetUserLDAPData retrieves user data from LDAP using the userID (username).
 // It constructs a search request with a uid filter and performs a subtree search in baseDN.
 func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	log := logger.Logger(ctx).WithField("userID", userID)
 	log.Debug("fetching user LDAP data")
 
@@ -98,6 +102,8 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 // GetBulkUserLDAPData retrieves LDAP data for multiple users in batched OR queries,
 // returning a map keyed by uid. Users not found in LDAP are silently omitted from
 // the result. Batches are capped at bulkLDAPBatchSize to stay within server size limits.
+// If ctx is canceled or times out, the function returns any data fetched so far together
+// with ctx.Err(); it does not start further batches. An in-flight Search is not aborted.
 func (l *LDAPConn) GetBulkUserLDAPData(
 	ctx context.Context,
 	userIDs []string,
@@ -108,12 +114,18 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 	if len(userIDs) == 0 {
 		return result, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 
 	totalBatches := (len(userIDs) + bulkLDAPBatchSize - 1) / bulkLDAPBatchSize
 	log.WithField("total_users", len(userIDs)).WithField("batch_size", bulkLDAPBatchSize).
 		WithField("total_batches", totalBatches).Info("starting bulk LDAP fetch")
 
 	for batchStart := 0; batchStart < len(userIDs); batchStart += bulkLDAPBatchSize {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		batchEnd := batchStart + bulkLDAPBatchSize
 		if batchEnd > len(userIDs) {
 			batchEnd = len(userIDs)
@@ -171,6 +183,9 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 // GetUserLDAPDataByEmail retrieves user data from LDAP using the email address.
 // It constructs a search request with a mail filter and performs a subtree search in baseDN.
 func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (map[string]interface{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	log := logger.Logger(ctx).WithField("email", email)
 	log.Debug("fetching user LDAP data by email")
 

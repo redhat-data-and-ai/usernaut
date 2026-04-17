@@ -389,6 +389,88 @@ func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_NilConnection() {
 	assertions.Nil(resp)
 }
 
+func (suite *LDAPTestSuite) TestGetUserLDAPData_ContextCanceledBeforeSearch() {
+	assertions := assert.New(suite.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		userDN:           "uid=%s,ou=users,dc=example,dc=com",
+		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=uid)",
+		attributes:       []string{"mail"},
+	}
+
+	resp, err := ldapConn.GetUserLDAPData(ctx, "testuser")
+
+	assertions.ErrorIs(err, context.Canceled)
+	assertions.Nil(resp)
+}
+
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledBeforeLDAP() {
+	assertions := assert.New(suite.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail", "uid"},
+	}
+
+	out, err := ldapConn.GetBulkUserLDAPData(ctx, []string{"u1", "u2"})
+
+	assertions.ErrorIs(err, context.Canceled)
+	assertions.Empty(out)
+}
+
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledStopsAfterFirstBatch() {
+	assertions := assert.New(suite.T())
+
+	prev := bulkLDAPBatchSize
+	bulkLDAPBatchSize = 2
+	defer func() { bulkLDAPBatchSize = prev }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	entry := func(uid string) *ldap.Entry {
+		return &ldap.Entry{
+			DN: "uid=" + uid + ",ou=users,dc=example,dc=com",
+			Attributes: []*ldap.EntryAttribute{
+				{Name: "uid", Values: []string{uid}},
+				{Name: "mail", Values: []string{uid + "@example.com"}},
+			},
+		}
+	}
+
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(1)
+	suite.ldapClient.EXPECT().UnauthenticatedBind("").Return(nil).Times(1)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).DoAndReturn(
+		func(_ *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			cancel()
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry("a1")}}, nil
+		},
+	).Times(1)
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail", "uid"},
+	}
+
+	out, err := ldapConn.GetBulkUserLDAPData(ctx, []string{"a1", "a2", "b1", "b2"})
+
+	assertions.ErrorIs(err, context.Canceled)
+	assertions.Len(out, 1)
+	assertions.Contains(out, "a1")
+}
+
 func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_BindError() {
 	assertions := assert.New(suite.T())
 
