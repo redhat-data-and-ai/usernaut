@@ -27,15 +27,21 @@ go.work
 *.swo
 *~
 
-appconfig/local.yaml
-
 # Any certificate files
 *.key
 *.csr
 *.p12
 *.crt
 *.pem
+
+# Environment variables and secrets
 .env
+.env.local
+.env.*.local
+
+# Local development config with secrets
+appconfig/local*.yaml
+appconfig/.env*
 
 # Secrets
 secrets/

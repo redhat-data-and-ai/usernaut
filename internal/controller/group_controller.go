@@ -130,6 +130,28 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		"groups":         groupCR.Spec.Members.Groups,
 	})
 
+	// Check if the group is configurable (has matching patterns for its backends)
+	isConfigurable := r.isGroupConfigurable(groupCR)
+	if !isConfigurable {
+		r.log.Warn("group is not configurable - no matching patterns found for backends")
+		// Mark as non-configurable in status
+		groupCR.Status.ReconciledUsers = []string{}
+		condition := metav1.Condition{
+			Type:               usernautdevv1alpha1.GroupReadyCondition,
+			LastTransitionTime: metav1.Now(),
+			Status:             metav1.ConditionFalse,
+			Message:            "Group is not configurable - no matching patterns found in backend configuration",
+			Reason:             "NonConfigurable",
+			ObservedGeneration: groupCR.Generation,
+		}
+		r.setCondition(&groupCR.Status.Conditions, condition)
+		if err := r.Status().Update(ctx, groupCR); err != nil {
+			r.log.WithError(err).Error("error updating group status for non-configurable group")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	var err error
 	queryMembers := []string{}
 	if groupCR.Spec.Members.LDAPQuery != nil {
@@ -697,9 +719,7 @@ func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautd
 		// Clean up user:groups reverse index for all members of this group
 		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
 
-		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
-			return err
-		}
+		r.deleteBackendsTeam(ctx, groupCR)
 
 		controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
 		if err := r.Update(ctx, groupCR); err != nil {
@@ -736,12 +756,16 @@ func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName 
 	r.log.WithField("group", groupName).Info("cleaned up user groups index successfully")
 }
 
-func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+// deleteBackendsTeam performs best-effort backend and cache cleanup during deletion.
+// It does not return an error: failures are logged so the finalizer can still be removed.
+func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) {
 	r.log.Info("Finalizer: starting Backends team deletion cleanup")
 	groupName := groupCR.Spec.GroupName
+	hasErrors := false
 
 	for _, backend := range groupCR.Spec.Backends {
-		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
+		// Use graceful fallback for deletion - we want to clean up even if pattern doesn't match
+		transformedGroupName := utils.GetTransformedGroupNameOrFallback(r.AppConfig, backend.Type, groupName)
 		backendLoggerInfo := r.log.WithFields(logrus.Fields{
 			"group_name":            groupName,
 			"transformed_team_name": transformedGroupName,
@@ -749,50 +773,80 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 			"backend_type":          backend.Type,
 		})
 		backendLoggerInfo.Info("Finalizer: Deleting team from backend")
-		if err != nil {
-			backendLoggerInfo.WithError(err).Error("Finalizer: Error in transforming group name")
-			return err
-		}
 
 		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 		if err != nil {
-			backendLoggerInfo.WithError(err).Errorf("Finalizer: error creating client for backend %s", backend.Name)
-			return err
+			backendLoggerInfo.WithError(err).Warnf("Finalizer: error creating client for backend %s, skipping this backend", backend.Name)
+			hasErrors = true
+			continue // Skip this backend but continue with others
 		}
 
 		// Get team ID from consolidated group store (using original group name)
 		// NOTE: CacheMutex is already held by caller (handleDeletion)
 		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backend.Name, backend.Type)
 		if err != nil {
-			backendLoggerInfo.WithError(err).Error("Finalizer: error fetching team details from cache")
-			return err
+			backendLoggerInfo.WithError(err).Warn("Finalizer: error fetching team details from cache, team may not have been created")
+			hasErrors = true
+		}
+
+		// Same resolution order as fetchOrCreateTeam: GroupStore first, then TeamStore (preload) by transformed name
+		if teamID == "" && transformedGroupName != "" {
+			backendKey := backend.Name + "_" + backend.Type
+			teamBackends, tsErr := r.Store.Team.GetBackends(ctx, transformedGroupName)
+			if tsErr != nil {
+				backendLoggerInfo.WithError(tsErr).Warn("Finalizer: error fetching team from TeamStore during deletion")
+				hasErrors = true
+			} else if id, ok := teamBackends[backendKey]; ok && id != "" {
+				backendLoggerInfo.WithField("team_id", id).Info("Finalizer: resolved team ID from TeamStore for backend deletion")
+				teamID = id
+			}
 		}
 
 		if teamID != "" {
 			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
 
 			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
-				backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete team from the backend")
-				return err
+				backendLoggerInfo.WithError(err).Warn("Finalizer: failed to delete team from the backend, team may already be deleted")
+				hasErrors = true
+				// Continue processing - best effort deletion
+			} else {
+				backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
 			}
-			backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
+		} else if strings.EqualFold(backend.Type, "snowflake") && transformedGroupName != "" {
+			// Snowflake uses the role name as the REST identifier (see snowflake.CreateTeam / DeleteTeamByID).
+			roleName := strings.ToLower(transformedGroupName)
+			backendLoggerInfo.WithField("role_name", roleName).Info("Finalizer: no cached team ID; attempting Snowflake role delete by name")
+			if err := backendClient.DeleteTeamByID(ctx, roleName); err != nil {
+				backendLoggerInfo.WithError(err).Warn("Finalizer: Snowflake delete by role name failed; role may not exist or actual name may differ (e.g. pattern changed since create)")
+				hasErrors = true
+			} else {
+				backendLoggerInfo.Infof("Finalizer: Successfully deleted Snowflake role '%s'", roleName)
+			}
+		} else {
+			backendLoggerInfo.Info("Finalizer: No team ID found in cache, skipping backend deletion")
 		}
 
 		// Delete team entry from TeamStore (used for preload lookups)
-		if err := r.Store.Team.Delete(ctx, transformedGroupName); err != nil {
-			backendLoggerInfo.WithError(err).Warn("Finalizer: failed to delete team from TeamStore cache")
-			// Continue processing - TeamStore is secondary cache
+		if transformedGroupName != "" {
+			if err := r.Store.Team.Delete(ctx, transformedGroupName); err != nil {
+				backendLoggerInfo.WithError(err).Warn("Finalizer: failed to delete team from TeamStore cache")
+				// Continue processing - TeamStore is secondary cache
+			}
 		}
 	}
 
 	// Delete the entire group entry from cache (includes all backends and members)
 	if err := r.Store.Group.Delete(ctx, groupName); err != nil {
-		r.log.WithError(err).Error("Finalizer: failed to delete group from cache")
-		return err
+		r.log.WithError(err).Warn("Finalizer: failed to delete group from cache, may already be deleted")
+		hasErrors = true
+		// Don't return error - allow finalizer to complete
+	} else {
+		r.log.WithField("group", groupName).Info("Finalizer: Successfully deleted group from cache")
 	}
-	r.log.WithField("group", groupName).Info("Finalizer: Successfully deleted group from cache")
 
-	return nil
+	if hasErrors {
+		r.log.Warn("Finalizer: completed with some errors, but allowing deletion to proceed as it is a best-effort cleanup")
+	}
 }
 
 func (r *GroupReconciler) processUsers(ctx context.Context,
@@ -978,6 +1032,42 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	r.backendLogger.Info("updated team details in GroupStore successfully")
 
 	return newTeam.ID, nil
+}
+
+// isGroupConfigurable checks if a group has matching patterns for all its backends
+// A group is considered configurable if at least one backend has a pattern that matches the group name
+func (r *GroupReconciler) isGroupConfigurable(groupCR *usernautdevv1alpha1.Group) bool {
+	if len(groupCR.Spec.Backends) == 0 {
+		// No backends specified, consider it non-configurable
+		return false
+	}
+
+	for _, backend := range groupCR.Spec.Backends {
+		_, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupCR.Spec.GroupName)
+		if err == nil {
+			// At least one backend has a matching pattern
+			return true
+		}
+	}
+
+	// No backends have matching patterns
+	return false
+}
+
+// setCondition updates or adds a condition to the condition slice
+func (r *GroupReconciler) setCondition(conditions *[]metav1.Condition, newCondition metav1.Condition) {
+	if conditions == nil {
+		*conditions = []metav1.Condition{}
+	}
+
+	for i, cond := range *conditions {
+		if cond.Type == newCondition.Type {
+			(*conditions)[i] = newCondition
+			return
+		}
+	}
+
+	*conditions = append(*conditions, newCondition)
 }
 
 // SetupWithManager sets up the controller with the Manager.

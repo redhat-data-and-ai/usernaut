@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/stretchr/testify/assert"
@@ -338,6 +340,13 @@ func TestGetTransformGroupName(t *testing.T) {
 			backend_Name: "rover",
 			wantErr:      true,
 		},
+		{
+			name:         "assert fivetran transformation for hello-world-rupa fails without pattern",
+			input:        "hello-world-rupa",
+			output:       "",
+			backend_Name: "fivetran",
+			wantErr:      true,
+		},
 	}
 
 	for _, val := range test_data {
@@ -349,6 +358,97 @@ func TestGetTransformGroupName(t *testing.T) {
 			assert.Equal(t, val.output, returnedString)
 		})
 	}
+}
+
+func TestGetTransformedGroupNameOrFallback(t *testing.T) {
+	mockCfg := &config.AppConfig{
+		Pattern: map[string][]config.PatternEntry{
+			"default": {
+				{
+					Input:  `dataverse-platform-([a-z0-9]+)`,
+					Output: "$1_group",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		input        string
+		expected     string
+		backend_Name string
+	}{
+		{
+			name:         "matching pattern returns transformed name",
+			input:        "dataverse-platform-test",
+			expected:     "test_group",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "no matching pattern returns sanitized fallback",
+			input:        "group-name",
+			expected:     "group_name",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "no matching pattern fallback for hello-world-rupa style",
+			input:        "hello-world-rupa",
+			expected:     "hello_world_rupa",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "no hyphens returns as-is",
+			input:        "testgroup",
+			expected:     "testgroup",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "multiple hyphens all replaced",
+			input:        "my-test-group-name",
+			expected:     "my_test_group_name",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "fallback lowercases and strips unsafe characters",
+			input:        "My Team@Foo!",
+			expected:     "my_team_foo",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "fallback prefixes digit-leading names",
+			input:        "123-acme",
+			expected:     "g_123_acme",
+			backend_Name: "fivetran",
+		},
+		{
+			name:         "fallback empty when no alphanumeric content",
+			input:        "---@###",
+			expected:     "",
+			backend_Name: "fivetran",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GetTransformedGroupNameOrFallback(mockCfg, tt.backend_Name, tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSanitizeGroupNameFallback(t *testing.T) {
+	t.Run("truncates to max bytes without breaking UTF-8", func(t *testing.T) {
+		in := strings.Repeat("a", maxBackendTeamFallbackBytes+20)
+		got := sanitizeGroupNameFallback(in)
+		assert.Equal(t, maxBackendTeamFallbackBytes, len(got))
+	})
+	t.Run("truncateUTF8ToMaxBytes handles multibyte boundary", func(t *testing.T) {
+		// 3-byte runes; cut so raw max would split a rune
+		in := strings.Repeat("世", 100)
+		got := truncateUTF8ToMaxBytes(in, 200)
+		assert.True(t, utf8.ValidString(got))
+		assert.LessOrEqual(t, len(got), 200)
+	})
 }
 
 func TestStandardizeNameForBackend(t *testing.T) {
