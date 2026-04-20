@@ -61,6 +61,12 @@ const (
 	requeueAfter = 8 * time.Hour
 )
 
+type gitlabUserToVerify struct {
+	user     string
+	email    string
+	cachedID string
+}
+
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
@@ -860,6 +866,10 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	// NOTE: CacheMutex is already held by caller (Reconcile)
 	backendKey := backendName + "_" + backendType
 
+	var gitlabUsersToVerify []gitlabUserToVerify
+	var usersToCreate []string
+
+	// Identify users to verify or create (Lock held)
 	for _, user := range users {
 		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {
@@ -876,10 +886,27 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 
 		// Check if user already has ID for this backend
 		if userID, exists := userBackends[backendKey]; exists && userID != "" {
-			r.backendLogger.WithField("user", user).Debug("user already exists in cache")
-			continue
+			if backendType == "gitlab" {
+				gitlabUsersToVerify = append(gitlabUsersToVerify, gitlabUserToVerify{
+					user:     user,
+					email:    userDetails.GetEmail(),
+					cachedID: userID,
+				})
+			} else {
+				r.backendLogger.WithField("user", user).Info("user already exists in cache")
+			}
+		} else {
+			usersToCreate = append(usersToCreate, user)
 		}
+	}
 
+	if err := r.verifyAndUpdateGitLabUserCache(ctx, gitlabUsersToVerify, backendKey, backendClient); err != nil {
+		return err
+	}
+
+	// Create new users (Lock held)
+	for _, user := range usersToCreate {
+		userDetails := r.allLdapUserData[user]
 		// if user details are not found in cache, create a new user in backend
 		// Standardize first/last names for backends (e.g. Fivetran) that do not support ., (, ), or , in names
 		newUser, err := backendClient.CreateUser(ctx, &structs.User{
@@ -903,6 +930,61 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 		}
 		r.backendLogger.WithField("user", user).Info("updated user details in cache successfully")
 	}
+	return nil
+}
+
+// verifyAndUpdateGitLabUserCache verifies that cached GitLab user IDs are still
+// valid by fetching from the backend, and updates the cache if the ID has changed
+// (e.g. after a user re-login). Caller must hold CacheMutex; this method temporarily
+// releases it during network calls and re-acquires it before returning.
+func (r *GroupReconciler) verifyAndUpdateGitLabUserCache(ctx context.Context,
+	usersToVerify []gitlabUserToVerify,
+	backendKey string,
+	backendClient clients.Client) error {
+
+	if len(usersToVerify) == 0 {
+		return nil
+	}
+
+	// Release the lock before making network calls
+	r.CacheMutex.Unlock()
+
+	type verifyResult struct {
+		gitlabUserToVerify
+		fetchedID string
+		err       error
+	}
+	results := make([]verifyResult, 0, len(usersToVerify))
+
+	for _, u := range usersToVerify {
+		fetched, err := backendClient.FetchUserDetails(ctx, u.cachedID)
+		res := verifyResult{gitlabUserToVerify: u, err: err}
+		if err == nil {
+			res.fetchedID = fetched.ID
+		}
+		results = append(results, res)
+	}
+
+	r.CacheMutex.Lock()
+
+	for _, res := range results {
+		if res.err != nil {
+			r.backendLogger.WithField("user", res.user).WithError(res.err).Error("error fetching user details")
+			return res.err
+		}
+
+		if res.fetchedID == res.cachedID {
+			r.backendLogger.WithField("user", res.user).Info("user already exists in cache")
+			continue
+		}
+
+		r.backendLogger.WithField("user", res.user).Info("user has logged in, updating cache with new userID")
+		if err := r.Store.User.SetBackend(ctx, res.email, backendKey, res.fetchedID); err != nil {
+			r.backendLogger.WithField("user", res.user).WithError(err).Error("error updating user details in cache")
+			return err
+		}
+	}
+
 	return nil
 }
 

@@ -106,13 +106,12 @@ func (g *GitlabClient) FetchUserDetails(ctx context.Context, userID string) (*st
 				return nil, listErr
 			}
 			if len(users) > 0 && resp.StatusCode == http.StatusOK {
-				log.Infof("found user %s details in gitlab backend", userID)
+				log.Infof("found user %s details in gitlab backend with userID %d", userID, users[0].ID)
 				return userDetails(users[0]), nil
 			} else {
 				// this handles the case where user never logged in to gitlab
 				// so user details like userID is not found in gitlab
-				// TODO: need to handle the case when the user login in gitlab
-				log.Warnf("unable to find user %s details in gitlab backend", userID)
+				log.Warnf("user never logged in to gitlab, unable to find user %s details in gitlab backend", userID)
 				return &structs.User{
 					ID:       userID,
 					UserName: userID,
