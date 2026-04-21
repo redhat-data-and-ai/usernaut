@@ -30,6 +30,10 @@ pattern:
     - input: "^([^\\_]+)$"
       output: "$1"
 
+  astro:
+    - input: "(.*)"
+      output: "$1"
+
 
 app:
   name: "usernaut"
@@ -101,6 +105,13 @@ backends:
       url: "https://gitlab.test.com"
       token: file|/path/to/gitlab_token
       parent_group_id: 111111
+  - name: astro
+    type: "astro"
+    enabled: true
+    connection:
+      api_token: file|/path/to/astro_token
+      organization_id: "your-organization-id"
+      base_url: "https://api.astro.test.com"
 
 apiServer:
   address: "0.0.0.0:8080"
