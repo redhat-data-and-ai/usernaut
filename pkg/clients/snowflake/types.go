@@ -18,10 +18,15 @@ package snowflake
 
 import "github.com/gojek/heimdall/v7"
 
+// defaultMaxConcurrency is the default number of parallel Snowflake API calls
+// for bulk operations (grant/revoke). Tuned to stay well within Snowflake rate limits.
+const defaultMaxConcurrency = 10
+
 // SnowflakeConfig holds the configuration for Snowflake client
 type SnowflakeConfig struct {
-	PAT     string
-	BaseURL string
+	PAT            string
+	BaseURL        string
+	MaxConcurrency int
 }
 
 // SnowflakeClient is the client for interacting with Snowflake REST API
