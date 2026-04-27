@@ -64,9 +64,13 @@ type GroupSpec struct {
 	Backends    []Backend    `json:"backends"`
 }
 
+// Members defines how group membership is resolved. When LDAPQuery is set, Users is optional
+// (members can come only from LDAP). When LDAPQuery is omitted, Users must be a non-empty list.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.ldap_query) || (has(self.users) && size(self.users) > 0)",message="users must be a non-empty list when ldap_query is omitted"
 type Members struct {
 	Groups    []string   `json:"groups,omitempty"`
-	Users     []string   `json:"users"`
+	Users     []string   `json:"users,omitempty"`
 	LDAPQuery *LDAPQuery `json:"ldap_query,omitempty"`
 }
 

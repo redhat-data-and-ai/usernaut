@@ -37,6 +37,7 @@ type LDAPConn struct {
 
 type LDAPClient interface {
 	GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error)
+	GetBulkUserLDAPData(ctx context.Context, userIDs []string) (map[string]map[string]interface{}, error)
 	GetQueryMembers(ctx context.Context, query string) ([]string, error)
 	BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error)
 	GetUserLDAPDataByEmail(ctx context.Context, email string) (map[string]interface{}, error)

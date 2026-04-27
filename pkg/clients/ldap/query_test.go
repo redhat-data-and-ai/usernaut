@@ -1,6 +1,7 @@
 package ldap
 
 import (
+	"context"
 	"errors"
 
 	"github.com/go-ldap/ldap/v3"
@@ -54,6 +55,24 @@ func (suite *LDAPTestSuite) TestGetQueryMembers() {
 		assertions.Equal(query, capturedReq.Filter)
 		assertions.Equal([]string{"uid"}, capturedReq.Attributes)
 	}
+}
+
+func (suite *LDAPTestSuite) TestGetQueryMembers_ContextCanceled() {
+	assertions := assert.New(suite.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ldapConn := &LDAPConn{
+		conn:       suite.ldapClient,
+		baseUserDN: "ou=users,dc=example,dc=com",
+		server:     "ldap://ldap.com:389",
+		attributes: []string{"cn"},
+	}
+
+	resp, err := ldapConn.GetQueryMembers(ctx, "(objectClass=groupOfNames)")
+
+	assertions.ErrorIs(err, context.Canceled)
+	assertions.Nil(resp)
 }
 
 func (suite *LDAPTestSuite) TestGetQueryMembers_NoEntriesFound() {

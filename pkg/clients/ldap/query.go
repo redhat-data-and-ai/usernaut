@@ -12,6 +12,10 @@ import (
 )
 
 func (l *LDAPConn) GetQueryMembers(ctx context.Context, query string) ([]string, error) {
+	// Do not call LDAP if the request context is already cancelled or its deadline has passed
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	log := logger.Logger(ctx).WithField("query", query)
 	log.Info("fetching query members")
 
