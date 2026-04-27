@@ -876,7 +876,7 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	backendKey := backendName + "_" + backendType
 
 	// Phase 1 (sequential): read cache, collect users that need creation
-	var toCreate []userCreateRequest
+	toCreate := make([]userCreateRequest, 0, len(users))
 	for _, user := range users {
 		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {

@@ -22,7 +22,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-    "golang.org/x/sync/errgroup"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -73,6 +74,33 @@ func (c *SnowflakeClient) processGrantsPage(resp []byte, members map[string]*str
 	return nil
 }
 
+// parallelRoleModify runs endpointFn for each userID concurrently, bounded by MaxConcurrency.
+func (c *SnowflakeClient) parallelRoleModify(ctx context.Context, teamID string, userIDs []string,
+	endpointFn func(string) string, okStatuses []int, action string,
+) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(c.config.MaxConcurrency)
+
+	for _, userID := range userIDs {
+		uid := userID
+		g.Go(func() error {
+			endpoint := endpointFn(sanitizeUserNameForAPI(uid))
+			resp, status, err := c.makeRoleRequest(gctx, teamID, endpoint)
+			if err != nil {
+				return fmt.Errorf("failed to %s user %s to team %s: %w", action, uid, teamID, err)
+			}
+			for _, ok := range okStatuses {
+				if status == ok {
+					return nil
+				}
+			}
+			return fmt.Errorf("failed to %s user %s to team %s, status: %s, body: %s",
+				action, uid, teamID, http.StatusText(status), string(resp))
+		})
+	}
+	return g.Wait()
+}
+
 // AddUserToTeam adds users to a team (grants role to users) concurrently.
 // Concurrency is bounded by SnowflakeConfig.MaxConcurrency (default 10).
 func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
@@ -83,29 +111,9 @@ func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID string, user
 	})
 	log.Info("adding users to team")
 
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(c.config.MaxConcurrency)
-
-	for _, userID := range userIDs {
-		uid := userID
-		g.Go(func() error {
-			userName := sanitizeUserNameForAPI(uid)
-			endpoint := fmt.Sprintf("/api/v2/users/%s/grants", userName)
-
-			resp, status, err := c.makeRoleRequest(gctx, teamID, endpoint)
-			if err != nil {
-				return fmt.Errorf("failed to add user %s to team %s: %w", uid, teamID, err)
-			}
-
-			if status != http.StatusOK && status != http.StatusCreated {
-				return fmt.Errorf("failed to add user %s to team %s, status: %s, body: %s",
-					uid, teamID, http.StatusText(status), string(resp))
-			}
-			return nil
-		})
-	}
-
-	return g.Wait()
+	return c.parallelRoleModify(ctx, teamID, userIDs,
+		func(user string) string { return fmt.Sprintf("/api/v2/users/%s/grants", user) },
+		[]int{http.StatusOK, http.StatusCreated}, "add")
 }
 
 // RemoveUserFromTeam removes users from a team (revokes role from users) concurrently.
@@ -118,29 +126,9 @@ func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID string,
 	})
 	log.Info("removing users from team")
 
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(c.config.MaxConcurrency)
-
-	for _, userID := range userIDs {
-		uid := userID
-		g.Go(func() error {
-			userName := sanitizeUserNameForAPI(uid)
-			endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", userName)
-
-			resp, status, err := c.makeRoleRequest(gctx, teamID, endpoint)
-			if err != nil {
-				return fmt.Errorf("failed to remove user %s from team %s: %w", uid, teamID, err)
-			}
-
-			if status != http.StatusOK && status != http.StatusNoContent {
-				return fmt.Errorf("failed to remove user %s from team %s, status: %s, body: %s",
-					uid, teamID, http.StatusText(status), string(resp))
-			}
-			return nil
-		})
-	}
-
-	return g.Wait()
+	return c.parallelRoleModify(ctx, teamID, userIDs,
+		func(user string) string { return fmt.Sprintf("/api/v2/users/%s/grants:revoke", user) },
+		[]int{http.StatusOK, http.StatusNoContent}, "remove")
 }
 
 // makeRoleRequest sends a role grant/revoke request for a user
