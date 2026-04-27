@@ -69,6 +69,7 @@ func (l *LDAPConn) executeSearch(ctx context.Context,
 // GetUserLDAPData retrieves user data from LDAP using the userID (username).
 // It constructs a search request with a uid filter and performs a subtree search in baseDN.
 func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error) {
+	// Do not call LDAP if the request context is already cancelled or its deadline has passed
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -114,6 +115,7 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 	if len(userIDs) == 0 {
 		return result, nil
 	}
+	// Do not start a bulk fetch if the request context is already cancelled or its deadline has passed
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -123,6 +125,8 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 		WithField("total_batches", totalBatches).Info("starting bulk LDAP fetch")
 
 	for batchStart := 0; batchStart < len(userIDs); batchStart += bulkLDAPBatchSize {
+		// Re-check the context before each batch so we do not start new LDAP work after cancel or
+		// timeout (an in-flight Search is not bound to the context and cannot be aborted here)
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -190,6 +194,7 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 // GetUserLDAPDataByEmail retrieves user data from LDAP using the email address.
 // It constructs a search request with a mail filter and performs a subtree search in baseDN.
 func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (map[string]interface{}, error) {
+	// Do not call LDAP if the request context is already cancelled or its deadline has passed
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
