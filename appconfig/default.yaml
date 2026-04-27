@@ -91,6 +91,7 @@ backends:
     connection:
       pat: file|/path/to/SNOWFLAKE_PAT
       base_url: https://myorganization-myaccount.snowflakecomputing.com
+      max_concurrency: 10
   - name: gitlab
     type: "gitlab"
     enabled: true

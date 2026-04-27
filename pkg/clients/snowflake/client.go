@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
@@ -48,9 +49,26 @@ func NewClient(connection map[string]interface{}, poolCfg httpclient.ConnectionP
 		return nil, errors.New("missing required connection parameters for snowflake backend: pat and base_url are required")
 	}
 
+	maxConcurrency := defaultMaxConcurrency
+	switch mc := connection["max_concurrency"].(type) {
+	case int:
+		if mc > 0 {
+			maxConcurrency = mc
+		}
+	case float64:
+		if int(mc) > 0 {
+			maxConcurrency = int(mc)
+		}
+	case string:
+		if v, err := strconv.Atoi(mc); err == nil && v > 0 {
+			maxConcurrency = v
+		}
+	}
+
 	config := SnowflakeConfig{
-		PAT:     pat,
-		BaseURL: baseURL,
+		PAT:            pat,
+		BaseURL:        baseURL,
+		MaxConcurrency: maxConcurrency,
 	}
 	client, err := httpclient.InitializeClient(
 		"snowflake",

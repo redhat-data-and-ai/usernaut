@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,6 +44,7 @@ import (
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/snowflake"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -852,6 +854,19 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	return usersToAdd, usersToRemove, nil
 }
 
+// userCreateRequest holds the data needed to create a single user in a backend.
+type userCreateRequest struct {
+	userName string
+	email    string
+	user     *structs.User
+}
+
+// userCreateResult holds the outcome of a single backend CreateUser call.
+type userCreateResult struct {
+	email string
+	id    string
+}
+
 func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	users []string,
 	backendName, backendType string,
@@ -860,6 +875,8 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	// NOTE: CacheMutex is already held by caller (Reconcile)
 	backendKey := backendName + "_" + backendType
 
+	// Phase 1 (sequential): read cache, collect users that need creation
+	toCreate := make([]userCreateRequest, 0, len(users))
 	for _, user := range users {
 		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {
@@ -867,41 +884,77 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			continue
 		}
 
-		// Get user backends from cache
 		userBackends, err := r.Store.User.GetBackends(ctx, userDetails.GetEmail())
 		if err != nil {
 			r.backendLogger.WithField("user", user).WithError(err).Error("error fetching user details from cache")
 			return err
 		}
 
-		// Check if user already has ID for this backend
 		if userID, exists := userBackends[backendKey]; exists && userID != "" {
 			r.backendLogger.WithField("user", user).Debug("user already exists in cache")
 			continue
 		}
 
-		// if user details are not found in cache, create a new user in backend
-		// Standardize first/last names for backends (e.g. Fivetran) that do not support ., (, ), or , in names
-		newUser, err := backendClient.CreateUser(ctx, &structs.User{
-			Email:     userDetails.GetEmail(),
-			UserName:  user,
-			Role:      fivetran.AccountReviewerRole,
-			FirstName: utils.StandardizeNameForBackend(userDetails.GetDisplayName()),
-			LastName:  utils.StandardizeNameForBackend(userDetails.GetSN()),
+		toCreate = append(toCreate, userCreateRequest{
+			userName: user,
+			email:    userDetails.GetEmail(),
+			user: &structs.User{
+				Email:     userDetails.GetEmail(),
+				UserName:  user,
+				Role:      fivetran.AccountReviewerRole,
+				FirstName: utils.StandardizeNameForBackend(userDetails.GetDisplayName()),
+				LastName:  utils.StandardizeNameForBackend(userDetails.GetSN()),
+			},
 		})
-		if err != nil {
-			// TODO: handle the error in case user already exists in backend, we need to again populate the cache
-			r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
-			return err
-		}
-		r.backendLogger.WithField("user", user).Info("created user in backend successfully")
+	}
 
-		// Update cache with new user ID
-		if err := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, newUser.ID); err != nil {
-			r.backendLogger.Error(err, "error updating user details in cache")
+	if len(toCreate) == 0 {
+		return nil
+	}
+
+	r.backendLogger.WithField("users_to_create", len(toCreate)).Info("creating users in backend")
+
+	// Phase 2: call backend CreateUser API.
+	results := make([]userCreateResult, len(toCreate))
+
+	if sfClient, ok := backendClient.(*snowflake.SnowflakeClient); ok {
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(sfClient.GetConfig().MaxConcurrency)
+
+		for i, req := range toCreate {
+			idx := i
+			cr := req
+			g.Go(func() error {
+				newUser, err := backendClient.CreateUser(gctx, cr.user)
+				if err != nil {
+					return err
+				}
+				results[idx] = userCreateResult{email: cr.email, id: newUser.ID}
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
 			return err
 		}
-		r.backendLogger.WithField("user", user).Info("updated user details in cache successfully")
+	} else {
+		for i, req := range toCreate {
+			newUser, err := backendClient.CreateUser(ctx, req.user)
+			if err != nil {
+				return err
+			}
+			results[i] = userCreateResult{email: req.email, id: newUser.ID}
+		}
+	}
+
+	// Phase 3 (sequential): write results back to cache under the existing lock
+	for _, res := range results {
+		if res.id == "" {
+			continue
+		}
+		if err := r.Store.User.SetBackend(ctx, res.email, backendKey, res.id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
