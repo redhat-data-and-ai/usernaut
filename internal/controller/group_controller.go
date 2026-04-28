@@ -61,6 +61,17 @@ const (
 	requeueAfter = 8 * time.Hour
 )
 
+// groupCacheKey builds a namespace-scoped cache key for a Group CR.
+// This prevents accidental cache collisions when two Group CRs
+// in the same namespace share the same spec.group_name.
+// Also for the future, use namespace/metadata.name as cache key. metadata.name is unique within a
+// namespace (enforced by Kubernetes), and the namespace prefix future-proofs
+// for multi-namespace watching. spec.group_name is still used for backend
+// team naming only.
+func groupCacheKey(namespace, groupMetadataName string) string {
+	return namespace + "/" + groupMetadataName
+}
+
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
@@ -146,6 +157,27 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		r.log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
 	}
 
+	// Lock cache for all read/write operations during reconciliation
+	// This prevents race conditions when multiple Group CRs reference the same users/teams
+	// and their reconciliations run concurrently
+	r.CacheMutex.Lock()
+	defer r.CacheMutex.Unlock()
+
+	r.log.Info("Acquired cache lock for entire reconciliation (backend removal + LDAP + backends)")
+
+	// Use namespace/metadata.name as cache key. metadata.name is unique within a
+	// namespace (enforced by Kubernetes), and the namespace prefix future-proofs
+	// for multi-namespace watching. spec.group_name is still used for backend
+	// team naming only.
+	nsScopedCacheKey := groupCacheKey(groupCR.Namespace, groupCR.Name)
+
+	// Handle backend removal - if backend is removed from spec,
+	// offboard from backends that were removed from spec
+	if err := r.handleRemovedBackends(ctx, groupCR, nsScopedCacheKey); err != nil {
+		r.log.WithError(err).Error("error handling removed backends")
+		return ctrl.Result{}, err
+	}
+
 	visitedGroups := make(map[string]struct{})
 	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups)
 	if err != nil {
@@ -160,14 +192,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
-	// Lock cache for all read/write operations during reconciliation
-	// This prevents race conditions when multiple Group CRs reference the same users/teams
-	// and their reconciliations run concurrently
-	r.CacheMutex.Lock()
-	defer r.CacheMutex.Unlock()
-
-	r.log.Info("Acquired cache lock for entire reconciliation (LDAP + backends)")
-
 	// Step 1: Fetch LDAP data (does NOT update cache indexes)
 	ldapResult, err := r.fetchLDAPData(ctx, uniqueMembers)
 	if err != nil {
@@ -176,7 +200,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Step 2: Process all backends (cache operations protected by lock)
-	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers)
+	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers, nsScopedCacheKey)
 
 	// Step 3: Only update cache indexes if ALL backends succeeded (all-or-nothing)
 	hasErrors := false
@@ -189,7 +213,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if !hasErrors {
 		r.log.Info("All backends succeeded, updating cache indexes")
-		if err := r.updateCacheIndexes(ctx, groupCR.Spec.GroupName, ldapResult); err != nil {
+		if err := r.updateCacheIndexes(ctx, nsScopedCacheKey, ldapResult); err != nil {
 			r.log.WithError(err).Error("error updating cache indexes")
 			// Continue to update status - cache index errors are logged but not fatal
 		}
@@ -489,6 +513,7 @@ func (r *GroupReconciler) processAllBackends(
 	ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	uniqueMembers []string,
+	nsScopedCacheKey string,
 ) map[string]map[string]string {
 	backendErrors := make(map[string]map[string]string, 0)
 
@@ -534,7 +559,9 @@ func (r *GroupReconciler) processAllBackends(
 		})
 		backendKey := backend.Name + "_" + backend.Type
 		backendGroupParams := groupParamsByBackend[backendKey]
-		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers, backendGroupParams); err != nil {
+		if err := r.processSingleBackend(
+			ctx, groupCR, backend, uniqueMembers, backendGroupParams, nsScopedCacheKey,
+		); err != nil {
 			r.backendLogger.WithError(err).Error("error processing backend")
 			if _, ok := backendErrors[backend.Type]; !ok {
 				backendErrors[backend.Type] = make(map[string]string)
@@ -552,6 +579,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	backend usernautdevv1alpha1.Backend,
 	uniqueMembers []string,
 	backendGroupParams structs.TeamParams,
+	nsScopedCacheKey string,
 ) error {
 	// Create backend client
 	backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
@@ -562,7 +590,8 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	r.backendLogger.Debug("created backend client successfully")
 
 	isLdapSync, err := r.setupLdapSync(
-		backend.Type, backend.Name, backendClient, groupCR.Spec.GroupName, groupCR.Spec.Backends,
+		backend.Type, backend.Name, backendClient,
+		groupCR.Spec.GroupName, nsScopedCacheKey, groupCR.Spec.Backends,
 	)
 	if err != nil {
 		r.backendLogger.Errorf("failed to setup ldap sync for %s: %v", backend.Type, err)
@@ -577,7 +606,9 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 		Name: backend.Name,
 		Type: backend.Type,
 	}
-	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
+	teamID, err := r.fetchOrCreateTeam(
+		ctx, groupCR.Spec.GroupName, nsScopedCacheKey, backendClient, backendParams,
+	)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching or creating team")
 		return err
@@ -707,7 +738,8 @@ func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautd
 		// Clean up user:groups reverse index for all members of this group
 		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
 
-		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
+		nsScopedCacheKey := groupCacheKey(groupCR.Namespace, groupCR.Name)
+		if err := r.deleteBackendsTeam(ctx, groupCR, nsScopedCacheKey); err != nil {
 			return err
 		}
 
@@ -733,12 +765,11 @@ func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName 
 
 	// Remove the group from each member's user:groups index
 	for _, email := range members {
-		r.log.WithFields(logrus.Fields{
-			"user":  email,
-			"group": groupName,
-		}).Info("removing group from user's group list during deletion")
+		r.log.WithField("user", email).WithField("group", groupName).Info(
+			"removing group from user's group list during deletion")
 		if err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName); err != nil {
-			r.log.WithError(err).WithField("user", email).Error("error removing group from user's groups index during deletion")
+			r.log.WithError(err).WithField("user", email).Error(
+				"error removing group from user's groups index during deletion")
 			// Continue processing other members
 		}
 	}
@@ -746,7 +777,11 @@ func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName 
 	r.log.WithField("group", groupName).Info("cleaned up user groups index successfully")
 }
 
-func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+func (r *GroupReconciler) deleteBackendsTeam(
+	ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group,
+	cacheKey string,
+) error {
 	r.log.Info("Finalizer: starting Backends team deletion cleanup")
 	groupName := groupCR.Spec.GroupName
 
@@ -770,9 +805,9 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 			return err
 		}
 
-		// Get team ID from consolidated group store (using original group name)
+		// Get team ID from consolidated group store (using namespace-scoped cache key)
 		// NOTE: CacheMutex is already held by caller (handleDeletion)
-		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backend.Name, backend.Type)
+		teamID, err := r.Store.Group.GetBackendID(ctx, cacheKey, backend.Name, backend.Type)
 		if err != nil {
 			backendLoggerInfo.WithError(err).Error("Finalizer: error fetching team details from cache")
 			return err
@@ -795,12 +830,12 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		}
 	}
 
-	// Delete the entire group entry from cache (includes all backends and members)
-	if err := r.Store.Group.Delete(ctx, groupName); err != nil {
+	// Delete the entire group entry from cache (using namespace-scoped cache key)
+	if err := r.Store.Group.Delete(ctx, cacheKey); err != nil {
 		r.log.WithError(err).Error("Finalizer: failed to delete group from cache")
 		return err
 	}
-	r.log.WithField("group", groupName).Info("Finalizer: Successfully deleted group from cache")
+	r.log.WithField("group", cacheKey).Info("Finalizer: Successfully deleted group from cache")
 
 	return nil
 }
@@ -917,7 +952,7 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 }
 
 func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
-	groupName string, backendClient clients.Client,
+	groupName string, cacheKey string, backendClient clients.Client,
 	backendParams *structs.BackendParams) (string, error) {
 
 	backendName := backendParams.GetName()
@@ -932,8 +967,8 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 
 	backendKey := backendName + "_" + backendType
 
-	// Step 1: Check GroupStore first (using original group name)
-	teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backendName, backendType)
+	// Step 1: Check GroupStore first (using namespace-scoped cache key)
+	teamID, err := r.Store.Group.GetBackendID(ctx, cacheKey, backendName, backendType)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching team details from GroupStore")
 		return "", err
@@ -954,8 +989,8 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	if id, exists := teamBackends[backendKey]; exists && id != "" {
 		r.backendLogger.WithField("teamID", id).Info("team details found in TeamStore, migrating to GroupStore")
 
-		// Migrate data from TeamStore to GroupStore
-		if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, id); err != nil {
+		// Migrate data from TeamStore to GroupStore (using namespace-scoped cache key)
+		if err := r.Store.Group.SetBackend(ctx, cacheKey, backendName, backendType, id); err != nil {
 			r.backendLogger.WithError(err).Error("error migrating team details to GroupStore")
 			return "", err
 		}
@@ -979,8 +1014,8 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 
 	r.backendLogger.Info("created team in backend successfully")
 
-	// Store in GroupStore only - TeamStore is populated by preloadCache and used as read-only fallback
-	if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, newTeam.ID); err != nil {
+	// Store in GroupStore (using namespace-scoped cache key)
+	if err := r.Store.Group.SetBackend(ctx, cacheKey, backendName, backendType, newTeam.ID); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in GroupStore")
 		return "", err
 	}
@@ -1169,6 +1204,7 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 	backendName string,
 	backendClient clients.Client,
 	groupName string,
+	cacheKey string,
 	backends []usernautdevv1alpha1.Backend,
 ) (bool, error) {
 	switch backendType {
@@ -1180,8 +1216,8 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 			return false, nil
 		}
 
-		// Check if the dependent backend exists in cache (using original group name)
-		err := r.ldapDependantChecks(dependsOn, groupName)
+		// Check if the dependent backend exists in cache (using namespace-scoped cache key)
+		err := r.ldapDependantChecks(dependsOn, groupName, cacheKey)
 		if err != nil {
 			return false, err
 		}
@@ -1201,7 +1237,7 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 	return false, nil
 }
 
-func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupName string) error {
+func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupName string, cacheKey string) error {
 	dependantType, ok := r.AppConfig.BackendMap[dependsOn.Type]
 	if !ok {
 		return fmt.Errorf("ldap dependant type %s not found in BackendMap", dependsOn.Type)
@@ -1217,8 +1253,8 @@ func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupN
 	// Check if the group exists in cache with the dependent backend configured
 	// NOTE: This is called without holding CacheMutex (called from ldap sync)
 
-	// First check GroupStore (using original group name)
-	exists, err := r.Store.Group.BackendExists(context.Background(), groupName, dependsOn.Name, dependsOn.Type)
+	// First check GroupStore (using namespace-scoped cache key)
+	exists, err := r.Store.Group.BackendExists(context.Background(), cacheKey, dependsOn.Name, dependsOn.Type)
 	if err == nil && exists {
 		return nil
 	}
@@ -1252,4 +1288,214 @@ func isGroupCRHasDependants(backends []usernautdevv1alpha1.Backend, dependsOn co
 		}
 	}
 	return false
+}
+
+// handleRemovedBackends detects and offboards from removed backends from the spec
+func (r *GroupReconciler) handleRemovedBackends(
+	ctx context.Context, groupCR *usernautdevv1alpha1.Group, nsScopedCacheKey string,
+) error {
+	// Detect removed backends from the spec
+	removedBackends := r.detectRemovedBackends(groupCR)
+
+	if len(removedBackends) == 0 {
+		r.log.Info("no removed backends found in the spec")
+		return nil
+	}
+
+	r.log.WithField("removed_backends_count", len(removedBackends)).Info(
+		"detected removed backends, starting offboarding process")
+
+	// Offboard from the removed backends
+	return r.offboardFromRemovedBackends(ctx, groupCR, removedBackends, nsScopedCacheKey)
+}
+
+// getBackendKey creates a unique key for a backend using name and type
+func getBackendKey(name, backendType string) string {
+	return name + "_" + backendType
+}
+
+// detectRemovedBackends compares the current status against the spec to find removed backends
+func (r *GroupReconciler) detectRemovedBackends(
+	groupCR *usernautdevv1alpha1.Group) []usernautdevv1alpha1.BackendStatus {
+	var removedBackends []usernautdevv1alpha1.BackendStatus
+
+	// Create a map of current backends for quick lookup
+	currentBackends := make(map[string]bool)
+	for _, backend := range groupCR.Spec.Backends {
+		key := getBackendKey(backend.Name, backend.Type)
+		currentBackends[key] = true
+	}
+
+	// Check each backend in status to see if it still exists in spec
+	for _, statusBackend := range groupCR.Status.BackendsStatus {
+		key := getBackendKey(statusBackend.Name, statusBackend.Type)
+
+		// If backend exists in status but not in current spec, it was removed
+		if !currentBackends[key] && statusBackend.Status {
+			r.log.WithFields(logrus.Fields{
+				"backend":      statusBackend.Name,
+				"backend_type": statusBackend.Type,
+			}).Info("detected removed backend")
+			removedBackends = append(removedBackends, statusBackend)
+		}
+	}
+
+	return removedBackends
+}
+
+// offboardFromRemovedBackends performs the actual cleanup for removed backends
+// This reuses the existing deleteBackendsTeam logic but for specific backends only
+func (r *GroupReconciler) offboardFromRemovedBackends(
+	ctx context.Context, groupCR *usernautdevv1alpha1.Group,
+	removedBackends []usernautdevv1alpha1.BackendStatus, nsScopedCacheKey string,
+) error {
+	r.log.Info("starting offboarding process for removed backends")
+
+	var allErrors []error
+
+	for _, removedBackend := range removedBackends {
+		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, removedBackend.Type, groupCR.Spec.GroupName)
+		if err != nil {
+			r.log.WithFields(logrus.Fields{
+				"team_name":    groupCR.Spec.GroupName,
+				"backend":      removedBackend.Name,
+				"backend_type": removedBackend.Type,
+			}).WithError(err).Error("offboarding: error in transforming group name")
+			allErrors = append(allErrors, err)
+			continue
+		}
+
+		backendLoggerInfo := r.log.WithFields(logrus.Fields{
+			"team_name":             groupCR.Spec.GroupName,
+			"transformed_team_name": transformedGroupName,
+			"backend":               removedBackend.Name,
+			"backend_type":          removedBackend.Type,
+		})
+		backendLoggerInfo.Info("offboarding: deleting team from removed backend")
+
+		backendClient, err := clients.New(removedBackend.Name, removedBackend.Type, r.AppConfig.BackendMap)
+		if err != nil {
+			backendLoggerInfo.WithError(err).Errorf("offboarding: error creating client for backend %s", removedBackend.Name)
+			allErrors = append(allErrors, err)
+			continue
+		}
+
+		// Get team ID from GroupStore (using namespace-scoped cache key)
+		teamID, err := r.Store.Group.GetBackendID(ctx, nsScopedCacheKey, removedBackend.Name, removedBackend.Type)
+		if err != nil {
+			backendLoggerInfo.WithError(err).Error("offboarding: error fetching team details from GroupStore")
+			allErrors = append(allErrors, err)
+			continue
+		}
+
+		// Fallback: If ID is missing, try to find team by name in the backend
+		if teamID == "" {
+			backendLoggerInfo.Warn(
+				"offboarding: team ID not found in GroupStore, attempting to find by name in backend")
+
+			// Fetch all teams from backend to find a match by name
+			teams, err := backendClient.FetchAllTeams(ctx)
+			if err != nil {
+				backendLoggerInfo.WithError(err).Error("offboarding: failed to fetch teams from backend for name lookup")
+				allErrors = append(allErrors, err)
+			} else {
+				// Look for the team with the transformed name
+				for _, team := range teams {
+					if team.Name == transformedGroupName {
+						teamID = team.ID
+						backendLoggerInfo.WithField("team_id", teamID).Info("offboarding: found team by name in backend")
+						break
+					}
+				}
+
+				if teamID == "" {
+					backendLoggerInfo.Info(
+						"offboarding: team not found in backend by name, assuming it's already deleted")
+				}
+			}
+		}
+
+		if teamID != "" {
+			backendLoggerInfo.Infof("offboarding: deleting team with (ID: %s) from removed backend %s",
+				teamID, removedBackend.Type)
+
+			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
+				// Delete failed — check if the team still exists before treating as a real error.
+				// Prefer FetchTeamDetails (single-ID lookup) over FetchAllTeams (list all)
+				// for efficiency. Fall back to FetchAllTeams when FetchTeamDetails is not
+				// supported by the backend (e.g. Rover).
+				teamExists, verifyErr := r.verifyTeamExists(ctx, backendClient, teamID)
+				if verifyErr != nil {
+					backendLoggerInfo.WithError(err).Error(
+						"offboarding: failed to delete team and failed to verify existence")
+					allErrors = append(allErrors, err)
+					continue
+				}
+
+				if teamExists {
+					backendLoggerInfo.WithError(err).Error("offboarding: failed to delete team from the removed backend")
+					allErrors = append(allErrors, err)
+					continue
+				}
+
+				backendLoggerInfo.WithField("team_id", teamID).Warn(
+					"offboarding: team deletion failed but team not found in backend, assuming already deleted")
+			}
+			backendLoggerInfo.Infof("offboarding: successfully deleted team with id '%s' from removed backend %s",
+				teamID, removedBackend.Type)
+		} else {
+			backendLoggerInfo.Info("offboarding: team ID missing and not found by name, skipping deletion from backend")
+		}
+
+		// Clean up GroupStore (using namespace-scoped cache key)
+		if err := r.Store.Group.DeleteBackend(ctx,
+			nsScopedCacheKey, removedBackend.Name, removedBackend.Type); err != nil {
+			backendLoggerInfo.WithError(err).Error("offboarding: failed to delete backend from GroupStore")
+			allErrors = append(allErrors, err)
+		}
+
+		// Clean up TeamStore
+		backendKey := getBackendKey(removedBackend.Name, removedBackend.Type)
+		if err := r.Store.Team.DeleteBackend(ctx, transformedGroupName, backendKey); err != nil {
+			backendLoggerInfo.WithError(err).Warn("offboarding: failed to delete backend from TeamStore")
+			allErrors = append(allErrors, err)
+		}
+	}
+
+	if len(allErrors) > 0 {
+		r.log.WithField("error_count", len(allErrors)).Error("offboarding completed with some errors")
+		// Return the first error for reconcile retry, but log all errors
+		for i, err := range allErrors {
+			r.log.WithField("error_index", i).WithError(err).Error("offboarding error details")
+		}
+		return allErrors[0]
+	}
+
+	r.log.Info("completed offboarding process for all removed backends")
+	return nil
+}
+
+// verifyTeamExists checks whether a team still exists in the backend.
+// It tries FetchTeamDetails first (O(1) lookup). If the backend does not
+// support that call, it falls back to FetchAllTeams (O(n) scan).
+func (r *GroupReconciler) verifyTeamExists(
+	ctx context.Context, backendClient clients.Client, teamID string,
+) (bool, error) {
+	team, err := backendClient.FetchTeamDetails(ctx, teamID)
+	if err == nil && team != nil {
+		return true, nil
+	}
+
+	// FetchTeamDetails failed — this could mean "not supported" (Rover) or a
+	// transient error. Fall back to FetchAllTeams so we don't mis-classify.
+	teams, err := backendClient.FetchAllTeams(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, t := range teams {
+		if t.ID == teamID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
