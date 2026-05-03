@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"net/http"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -26,6 +27,10 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
+
+// emailRegex provides a permissive RFC 5322-style email check sufficient to reject
+// inputs that could be abused as Redis pattern-matching probes via the user store.
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
 type Handlers struct {
 	config *config.AppConfig
@@ -77,6 +82,11 @@ func (h *Handlers) GetUserGroups(c *gin.Context) {
 	email := c.Param("email")
 	if email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email parameter is required"})
+		return
+	}
+
+	if !emailRegex.MatchString(email) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid email format"})
 		return
 	}
 
