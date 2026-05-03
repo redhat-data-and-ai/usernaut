@@ -30,7 +30,7 @@ require (
 
 require (
 	cel.dev/expr v0.25.1 // indirect
-	github.com/Azure/go-ntlmssp v0.1.0 // indirect
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/DataDog/datadog-go v3.7.1+incompatible // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/afex/hystrix-go v0.0.0-20180502004556-fa1af6a1f4f5 // indirect
