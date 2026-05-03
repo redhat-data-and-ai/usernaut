@@ -24,6 +24,7 @@ import (
 
 	"github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
 
@@ -85,7 +86,7 @@ func (h *Handlers) GetUserGroups(c *gin.Context) {
 	// Get groups for the user from the reverse index
 	groups, err := h.store.UserGroups.GetGroups(ctx, email)
 	if err != nil {
-		logrus.WithField("email", email).WithError(err).Error("failed to fetch user groups")
+		logrus.WithField("email", logger.MaskEmail(email)).WithError(err).Error("failed to fetch user groups")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch user groups"})
 		return
 	}

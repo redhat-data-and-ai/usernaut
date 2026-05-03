@@ -453,7 +453,7 @@ func (r *GroupReconciler) updateCacheIndexes(
 	// Update user:groups reverse index - add this group to each current member's group list
 	for _, email := range ldapResult.CurrentMembers {
 		if err := r.Store.UserGroups.AddGroup(ctx, email, groupName); err != nil {
-			r.log.WithError(err).WithField("user", email).Error("error updating user groups index")
+			r.log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error updating user groups index")
 			errors = append(errors, fmt.Errorf("failed to add group %s to user %s: %w", groupName, email, err))
 		}
 	}
@@ -462,9 +462,9 @@ func (r *GroupReconciler) updateCacheIndexes(
 	for email := range previousMembersSet {
 		if _, stillMember := currentMembersSet[email]; !stillMember {
 			// User was removed from the group - update their user:groups index
-			r.log.WithField("user", email).WithField("group", groupName).Info("removing group from user's group list")
+			r.log.WithField("user", logger.MaskEmail(email)).WithField("group", groupName).Info("removing group from user's group list")
 			if err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName); err != nil {
-				r.log.WithError(err).WithField("user", email).Error("error removing group from user's groups index")
+				r.log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error removing group from user's groups index")
 				errors = append(errors, fmt.Errorf("failed to remove group %s from user %s: %w", groupName, email, err))
 			}
 		}
@@ -734,11 +734,11 @@ func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName 
 	// Remove the group from each member's user:groups index
 	for _, email := range members {
 		r.log.WithFields(logrus.Fields{
-			"user":  email,
+			"user":  logger.MaskEmail(email),
 			"group": groupName,
 		}).Info("removing group from user's group list during deletion")
 		if err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName); err != nil {
-			r.log.WithError(err).WithField("user", email).Error("error removing group from user's groups index during deletion")
+			r.log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error removing group from user's groups index during deletion")
 			// Continue processing other members
 		}
 	}
