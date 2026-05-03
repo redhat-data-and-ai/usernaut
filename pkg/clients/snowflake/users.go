@@ -167,8 +167,8 @@ func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context,
 // CreateUser creates a new user in Snowflake using REST API
 func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "snowflake",
-		"user":    user,
+		"service":  "snowflake",
+		"username": user.UserName,
 	})
 
 	log.Info("creating user")

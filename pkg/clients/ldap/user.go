@@ -198,7 +198,7 @@ func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (ma
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	log := logger.Logger(ctx).WithField("email", email)
+	log := logger.Logger(ctx).WithField("email", logger.MaskEmail(email))
 	log.Debug("fetching user LDAP data by email")
 
 	// Construct search filter: (&userSearchFilter (mail=email))
