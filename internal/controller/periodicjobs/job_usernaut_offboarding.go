@@ -154,19 +154,16 @@ func (uoj *UserOffboardingJob) loadExclusionList(ctx context.Context) {
 
 	// Populate the exclusion list map with normalized email addresses for O(1) lookup
 	uoj.exclusionList = make(map[string]bool, len(exclusionList.Exclusions))
-	exclusionEmails := make([]string, 0, len(exclusionList.Exclusions))
 	for _, email := range exclusionList.Exclusions {
 		normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 		if normalizedEmail != "" {
 			uoj.exclusionList[normalizedEmail] = true
-			exclusionEmails = append(exclusionEmails, normalizedEmail)
 		}
 	}
 
 	log.WithFields(logrus.Fields{
-		"exclusionPath":   configPath,
-		"exclusionCount":  len(uoj.exclusionList),
-		"exclusionEmails": exclusionEmails,
+		"exclusionPath":  configPath,
+		"exclusionCount": len(uoj.exclusionList),
 	}).Info("Loaded offboard user exclusion list")
 }
 
@@ -427,7 +424,7 @@ func (uoj *UserOffboardingJob) logJobSummary(result processingResult, totalUsers
 		"offboardedUsers": result.offboardedCount,
 		"excludedCount":   result.excludedCount,
 		"errors":          len(result.errors),
-		"removedUsers":    result.offboardedUsers,
+		"removedCount":    len(result.offboardedUsers),
 	}
 
 	uoj.logger.WithFields(fields).Info("User offboarding job completed")
@@ -531,7 +528,7 @@ func (uoj *UserOffboardingJob) isUserActiveInLDAP(ctx context.Context, userEmail
 
 	// Check if userData is empty - treat as inactive user
 	if len(userData) == 0 {
-		uoj.logger.WithField("userEmail", userEmail).Info("User data is empty, treating as inactive")
+		uoj.logger.WithField("userEmail", logger.MaskEmail(userEmail)).Info("User data is empty, treating as inactive")
 		return false, nil
 	}
 

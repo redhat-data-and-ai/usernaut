@@ -461,7 +461,7 @@ func startSnowflakeAsyncContinuation(
 
 			if err != nil {
 				failedCount++
-				log.WithError(err).WithField("email", user.GetEmail()).Warn("failed to store user in cache")
+				log.WithError(err).WithField("email", logger.MaskEmail(user.GetEmail())).Warn("failed to store user in cache")
 				continue
 			}
 			count++
