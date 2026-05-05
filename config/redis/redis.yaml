@@ -16,7 +16,7 @@ spec:
         app: redis
     spec:
       containers:
-      - image: quay.io/vinamra2807/redis:latest
+      - image: docker.io/library/redis:8.6.2
         name: redis
         ports:
         - containerPort: 6379
