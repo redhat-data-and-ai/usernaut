@@ -44,7 +44,6 @@ import (
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
-	"github.com/redhat-data-and-ai/usernaut/pkg/clients/snowflake"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -917,34 +916,24 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	// Phase 2: call backend CreateUser API.
 	results := make([]userCreateResult, len(toCreate))
 
-	if sfClient, ok := backendClient.(*snowflake.SnowflakeClient); ok {
-		g, gctx := errgroup.WithContext(ctx)
-		g.SetLimit(sfClient.GetConfig().MaxConcurrency)
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(backendClient.MaxConcurrency())
 
-		for i, req := range toCreate {
-			idx := i
-			cr := req
-			g.Go(func() error {
-				newUser, err := backendClient.CreateUser(gctx, cr.user)
-				if err != nil {
-					return err
-				}
-				results[idx] = userCreateResult{email: cr.email, id: newUser.ID}
-				return nil
-			})
-		}
-
-		if err := g.Wait(); err != nil {
-			return err
-		}
-	} else {
-		for i, req := range toCreate {
-			newUser, err := backendClient.CreateUser(ctx, req.user)
+	for i, req := range toCreate {
+		idx := i
+		cr := req
+		g.Go(func() error {
+			newUser, err := backendClient.CreateUser(gctx, cr.user)
 			if err != nil {
 				return err
 			}
-			results[i] = userCreateResult{email: req.email, id: newUser.ID}
-		}
+			results[idx] = userCreateResult{email: cr.email, id: newUser.ID}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	// Phase 3 (sequential): write results back to cache under the existing lock

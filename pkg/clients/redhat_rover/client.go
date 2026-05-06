@@ -79,6 +79,10 @@ func NewClient(roverAppConfig map[string]interface{},
 	}, nil
 }
 
+func (rC *RoverClient) MaxConcurrency() int {
+	return 1
+}
+
 func (rC *RoverClient) sendRequest(ctx context.Context, url string, method string, body interface{},
 	headers map[string]string, methodName string) ([]byte, int, error) {
 

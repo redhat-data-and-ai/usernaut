@@ -183,6 +183,20 @@ func (mr *MockClientMockRecorder) FetchUserDetails(ctx, userID interface{}) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchUserDetails", reflect.TypeOf((*MockClient)(nil).FetchUserDetails), ctx, userID)
 }
 
+// MaxConcurrency mocks base method.
+func (m *MockClient) MaxConcurrency() int {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MaxConcurrency")
+	ret0, _ := ret[0].(int)
+	return ret0
+}
+
+// MaxConcurrency indicates an expected call of MaxConcurrency.
+func (mr *MockClientMockRecorder) MaxConcurrency() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxConcurrency", reflect.TypeOf((*MockClient)(nil).MaxConcurrency))
+}
+
 // ReconcileGroupParams mocks base method.
 func (m *MockClient) ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error {
 	m.ctrl.T.Helper()

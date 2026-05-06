@@ -64,6 +64,9 @@ type Client interface {
 	AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error
 	// Removes a member from the team
 	RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error
+	// MaxConcurrency returns the maximum number of parallel API calls the backend supports.
+	// Backends that do not support parallelization should return 1.
+	MaxConcurrency() int
 }
 
 func New(backendName, backendType string, backends map[string]map[string]config.Backend) (Client, error) {

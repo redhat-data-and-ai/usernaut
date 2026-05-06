@@ -80,6 +80,10 @@ func NewClient(
 	}, nil
 }
 
+func (g *GitlabClient) MaxConcurrency() int {
+	return 1
+}
+
 func (g *GitlabClient) SetLdapSync(ldapSync bool, cn string) {
 	g.ldapSync = ldapSync
 	g.cn = cn

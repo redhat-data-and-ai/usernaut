@@ -29,3 +29,7 @@ func NewClient(apiKey, apiSecret string) *FivetranClient {
 		fivetranClient: fivetran.New(apiKey, apiSecret),
 	}
 }
+
+func (fc *FivetranClient) MaxConcurrency() int {
+	return maxConcurrentUsers
+}

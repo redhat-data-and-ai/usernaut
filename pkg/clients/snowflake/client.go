@@ -246,3 +246,7 @@ func parseLinkHeader(linkHeader, rel string) string {
 func (c *SnowflakeClient) GetConfig() *SnowflakeConfig {
 	return c.config
 }
+
+func (c *SnowflakeClient) MaxConcurrency() int {
+	return c.config.MaxConcurrency
+}
