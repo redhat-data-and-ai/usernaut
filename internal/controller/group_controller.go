@@ -920,14 +920,12 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	g.SetLimit(backendClient.MaxConcurrency())
 
 	for i, req := range toCreate {
-		idx := i
-		cr := req
 		g.Go(func() error {
-			newUser, err := backendClient.CreateUser(gctx, cr.user)
+			newUser, err := backendClient.CreateUser(gctx, req.user)
 			if err != nil {
 				return err
 			}
-			results[idx] = userCreateResult{email: cr.email, id: newUser.ID}
+			results[i] = userCreateResult{email: req.email, id: newUser.ID}
 			return nil
 		})
 	}
