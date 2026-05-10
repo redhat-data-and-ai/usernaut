@@ -35,7 +35,7 @@ app:
   name: "usernaut"
   version: "0.0.1"
   environment: "default"
-  debug: true
+  debug: false
 
 ldap:
   server: "ldap://ldap.test.com:389"
