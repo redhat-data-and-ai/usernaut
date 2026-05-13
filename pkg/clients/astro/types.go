@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -137,7 +137,7 @@ type UpdateUserRoleRequest struct {
 // Astro API constants
 const (
 	// Default pagination limit for Astro API
-	DefaultPageLimit = 100
+	DefaultPageLimit = 1000
 
 	// Default organization role for new users and teams
 	DefaultOrganizationRole = "ORGANIZATION_MEMBER"
