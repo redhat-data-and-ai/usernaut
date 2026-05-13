@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ func (c *AstroClient) FetchTeamMembersByTeamID(ctx context.Context,
 	log.Info("fetching team members by team ID")
 
 	members := make(map[string]*structs.User)
-	baseEndpoint := fmt.Sprintf("%s/teams/%s/members", c.getOrganizationEndpoint(), teamID)
+	baseEndpoint := fmt.Sprintf("/teams/%s/members", teamID)
 
 	err := c.fetchAllWithPagination(ctx, baseEndpoint, func(resp []byte) (int, error) {
 		var membersResp AstroTeamMembersResponse
@@ -93,7 +93,7 @@ func (c *AstroClient) AddUserToTeam(ctx context.Context, teamID string, userIDs 
 		return nil
 	}
 
-	endpoint := fmt.Sprintf("%s/teams/%s/members", c.getOrganizationEndpoint(), teamID)
+	endpoint := fmt.Sprintf("/teams/%s/members", teamID)
 
 	payload := AddTeamMembersRequest{
 		MemberIDs: userIDs,
@@ -130,7 +130,7 @@ func (c *AstroClient) RemoveUserFromTeam(ctx context.Context, teamID string, use
 
 	// Astro requires removing users one at a time
 	for _, userID := range userIDs {
-		endpoint := fmt.Sprintf("%s/teams/%s/members/%s", c.getOrganizationEndpoint(), teamID, userID)
+		endpoint := fmt.Sprintf("/teams/%s/members/%s", teamID, userID)
 
 		resp, status, err := c.makeRequest(ctx, endpoint, http.MethodDelete, nil)
 		if err != nil {

@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ func (c *AstroClient) FetchAllUsers(ctx context.Context) (map[string]*structs.Us
 	resultByID := make(map[string]*structs.User)
 	resultByEmail := make(map[string]*structs.User)
 
-	baseEndpoint := c.getOrganizationEndpoint() + "/users"
+	baseEndpoint := "/users"
 
 	err := c.fetchAllWithPagination(ctx, baseEndpoint, func(resp []byte) (int, error) {
 		var usersResp AstroUsersResponse
@@ -97,7 +97,7 @@ func (c *AstroClient) FetchUserDetails(ctx context.Context, userID string) (*str
 	})
 	log.Info("fetching user details by ID")
 
-	endpoint := fmt.Sprintf("%s/users/%s", c.getOrganizationEndpoint(), userID)
+	endpoint := fmt.Sprintf("/users/%s", userID)
 	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (c *AstroClient) CreateUser(ctx context.Context, user *structs.User) (*stru
 	})
 
 	log.Info("creating user (sending invitation)")
-	endpoint := c.getOrganizationEndpoint() + "/invites"
+	endpoint := "/invites"
 
 	if user.Email == "" {
 		return nil, fmt.Errorf("email is required for Astro user creation")
@@ -190,7 +190,7 @@ func (c *AstroClient) DeleteUser(ctx context.Context, userID string) error {
 	})
 
 	log.Info("deleting user (removing organization role)")
-	endpoint := fmt.Sprintf("%s/users/%s/roles", c.getOrganizationEndpoint(), userID)
+	endpoint := fmt.Sprintf("/users/%s/roles", userID)
 
 	// Set organizationRole to null to remove the user
 	payload := UpdateUserRoleRequest{

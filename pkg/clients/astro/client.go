@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -45,6 +45,9 @@ func NewClient(connection map[string]interface{}, poolCfg httpclient.ConnectionP
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
+
+	// Construct full base URL with organization ID
+	baseURL = fmt.Sprintf("%s/v1/organizations/%s", baseURL, organizationID)
 
 	config := AstroConfig{
 		APIToken:       apiToken,
@@ -156,11 +159,6 @@ func (c *AstroClient) fetchAllWithPagination(ctx context.Context,
 	}
 
 	return nil
-}
-
-// getOrganizationEndpoint returns the base endpoint for organization-scoped resources
-func (c *AstroClient) getOrganizationEndpoint() string {
-	return fmt.Sprintf("/v1/organizations/%s", c.config.OrganizationID)
 }
 
 // GetConfig returns the client configuration

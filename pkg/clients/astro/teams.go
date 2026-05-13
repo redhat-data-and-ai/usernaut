@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ func (c *AstroClient) FetchAllTeams(ctx context.Context) (map[string]structs.Tea
 	log.Info("fetching all teams")
 	teams := make(map[string]structs.Team)
 
-	baseEndpoint := c.getOrganizationEndpoint() + "/teams"
+	baseEndpoint := "/teams"
 
 	err := c.fetchAllWithPagination(ctx, baseEndpoint, func(resp []byte) (int, error) {
 		var teamsResp AstroTeamsResponse
@@ -77,7 +77,7 @@ func (c *AstroClient) FetchTeamDetails(ctx context.Context, teamID string) (*str
 
 	log.Info("fetching team details")
 
-	endpoint := fmt.Sprintf("%s/teams/%s", c.getOrganizationEndpoint(), teamID)
+	endpoint := fmt.Sprintf("/teams/%s", teamID)
 	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (c *AstroClient) CreateTeam(ctx context.Context, team *structs.Team) (*stru
 	})
 
 	log.Info("creating team")
-	endpoint := c.getOrganizationEndpoint() + "/teams"
+	endpoint := "/teams"
 
 	payload := CreateTeamRequest{
 		Name:             team.Name,
@@ -163,7 +163,7 @@ func (c *AstroClient) DeleteTeamByID(ctx context.Context, teamID string) error {
 	})
 
 	log.Info("deleting team")
-	endpoint := fmt.Sprintf("%s/teams/%s", c.getOrganizationEndpoint(), teamID)
+	endpoint := fmt.Sprintf("/teams/%s", teamID)
 
 	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodDelete, nil)
 	if err != nil {

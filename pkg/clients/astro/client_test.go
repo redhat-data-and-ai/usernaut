@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ func createTestClient(t *testing.T, handler http.Handler) (*AstroClient, *httpte
 		config: &AstroConfig{
 			APIToken:       "test-token",
 			OrganizationID: "test-org-id",
-			BaseURL:        server.URL,
+			BaseURL:        server.URL + "/v1/organizations/test-org-id",
 		},
 		client: server.Client(),
 	}
@@ -60,7 +60,7 @@ func TestNewClient(t *testing.T) {
 		assert.NotNil(t, client)
 		assert.Equal(t, "test-token", client.config.APIToken)
 		assert.Equal(t, "test-org-id", client.config.OrganizationID)
-		assert.Equal(t, DefaultBaseURL, client.config.BaseURL)
+		assert.Equal(t, DefaultBaseURL+"/v1/organizations/test-org-id", client.config.BaseURL)
 	})
 
 	t.Run("CustomBaseURL", func(t *testing.T) {
@@ -74,7 +74,7 @@ func TestNewClient(t *testing.T) {
 
 		client, err := NewClient(connection, poolCfg, hystrixCfg)
 		require.NoError(t, err)
-		assert.Equal(t, "https://custom.api.com", client.config.BaseURL)
+		assert.Equal(t, "https://custom.api.com/v1/organizations/test-org-id", client.config.BaseURL)
 	})
 
 	t.Run("MissingAPIToken", func(t *testing.T) {
