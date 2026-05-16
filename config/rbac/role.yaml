@@ -6,6 +6,12 @@ metadata:
   namespace: usernaut
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+- apiGroups:
   - operator.dataverse.redhat.com
   resources:
   - groups

@@ -80,6 +80,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var disableWebhook bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -91,6 +92,8 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.BoolVar(&disableWebhook, "disable-webhook", false,
+		"If set, webhook server will be disabled. Use --disable-webhook=true to disable webhooks.")
 	opts := zap.Options{
 		Development: false,
 	}
@@ -98,6 +101,16 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if enableWebhooksEnv := os.Getenv("ENABLE_WEBHOOKS"); enableWebhooksEnv != "" {
+		if enableWebhooksEnv == "false" {
+			disableWebhook = true
+			setupLog.Info("Webhooks disabled via ENABLE_WEBHOOKS environment variable")
+		} else if enableWebhooksEnv == "true" {
+			disableWebhook = false
+			setupLog.Info("Webhooks enabled via ENABLE_WEBHOOKS environment variable")
+		}
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -114,9 +127,15 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	webhookServer := webhook.NewServer(webhook.Options{
-		TLSOpts: tlsOpts,
-	})
+	var webhookServer webhook.Server
+	if !disableWebhook {
+		webhookServer = webhook.NewServer(webhook.Options{
+			TLSOpts:  tlsOpts,
+			CertDir:  "/tmp/k8s-webhook-server/serving-certs",
+			CertName: "tls.crt",
+			KeyName:  "tls.key",
+		})
+	}
 
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
 	// More info:
@@ -241,6 +260,13 @@ func main() {
 		setupLog.Error(err, "unable to add controller to manager", "controller", "PeriodicTasks")
 		os.Exit(1)
 	}
+	if !disableWebhook {
+		if err := usernautdevv1alpha1.SetupUnifiedWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create unified webhook")
+			os.Exit(1)
+		}
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
