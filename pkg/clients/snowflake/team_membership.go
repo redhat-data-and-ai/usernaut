@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -83,7 +85,7 @@ func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID string, user
 
 	for _, userID := range userIDs {
 		userName := sanitizeUserNameForAPI(userID)
-		endpoint := fmt.Sprintf("/api/v2/users/%s/grants", userName)
+		endpoint := fmt.Sprintf("/api/v2/users/%s/grants", quoteSnowflakeIdentifier(userName))
 
 		resp, status, err := c.makeRoleRequest(ctx, teamID, endpoint)
 		if err != nil {
@@ -110,7 +112,7 @@ func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID string,
 
 	for _, userID := range userIDs {
 		userName := sanitizeUserNameForAPI(userID)
-		endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", userName)
+		endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", quoteSnowflakeIdentifier(userName))
 
 		resp, status, err := c.makeRoleRequest(ctx, teamID, endpoint)
 		if err != nil {
@@ -138,6 +140,32 @@ func (c *SnowflakeClient) makeRoleRequest(ctx context.Context, teamID, endpoint 
 
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodPost, payload)
 	return resp, status, err
+}
+
+// quoteSnowflakeIdentifier wraps the identifier in double quotes and URL-encodes
+// it if it doesn't conform to Snowflake's unquoted identifier rules (e.g. starts
+// with a digit). See https://docs.snowflake.com/en/sql-reference/identifiers-syntax
+func quoteSnowflakeIdentifier(name string) string {
+	if needsQuoting(name) {
+		return url.PathEscape(`"` + name + `"`)
+	}
+	return name
+}
+
+func needsQuoting(name string) bool {
+	if len(name) == 0 {
+		return true
+	}
+	first := rune(name[0])
+	if !unicode.IsLetter(first) && first != '_' {
+		return true
+	}
+	for _, ch := range name[1:] {
+		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) && ch != '_' && ch != '$' {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *SnowflakeClient) ReconcileGroupParams(
