@@ -21,9 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
-	"unicode"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -140,32 +138,6 @@ func (c *SnowflakeClient) makeRoleRequest(ctx context.Context, teamID, endpoint 
 
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodPost, payload)
 	return resp, status, err
-}
-
-// quoteSnowflakeIdentifier wraps the identifier in double quotes and URL-encodes
-// it if it doesn't conform to Snowflake's unquoted identifier rules (e.g. starts
-// with a digit). See https://docs.snowflake.com/en/sql-reference/identifiers-syntax
-func quoteSnowflakeIdentifier(name string) string {
-	if needsQuoting(name) {
-		return url.PathEscape(`"` + name + `"`)
-	}
-	return name
-}
-
-func needsQuoting(name string) bool {
-	if len(name) == 0 {
-		return true
-	}
-	first := rune(name[0])
-	if !unicode.IsLetter(first) && first != '_' {
-		return true
-	}
-	for _, ch := range name[1:] {
-		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) && ch != '_' && ch != '$' {
-			return true
-		}
-	}
-	return false
 }
 
 func (c *SnowflakeClient) ReconcileGroupParams(
