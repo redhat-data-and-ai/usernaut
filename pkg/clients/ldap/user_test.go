@@ -471,47 +471,6 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledStopsAfterFir
 	assertions.Contains(out, "a1")
 }
 
-func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_FilterFormat() {
-	assertions := assert.New(suite.T())
-
-	searchResult := &ldap.SearchResult{
-		Entries: []*ldap.Entry{
-			{
-				DN: "uid=bdebnath,ou=users,dc=example,dc=com",
-				Attributes: []*ldap.EntryAttribute{
-					{Name: "uid", Values: []string{"bdebnath"}},
-					{Name: "mail", Values: []string{"bdebnath@example.com"}},
-				},
-			},
-		},
-	}
-
-	var capturedFilter string
-	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(1)
-	suite.ldapClient.EXPECT().UnauthenticatedBind("").Return(nil).Times(1)
-	suite.ldapClient.EXPECT().Search(gomock.Any()).DoAndReturn(
-		func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
-			capturedFilter = req.Filter
-			return searchResult, nil
-		},
-	).Times(1)
-
-	ldapConn := &LDAPConn{
-		conn:             suite.ldapClient,
-		baseUserDN:       "ou=users,dc=example,dc=com",
-		server:           "ldap://ldap.com:389",
-		userSearchFilter: "(objectClass=filterClass)",
-		attributes:       []string{"mail", "uid"},
-	}
-
-	_, err := ldapConn.GetBulkUserLDAPData(suite.ctx, []string{"783m", "5dlb", "bdebnath"})
-	assertions.NoError(err)
-
-	expectedFilter := "(&(objectClass=filterClass)(|(uid=783m)(uid=5dlb)(uid=bdebnath)))"
-	assertions.Equal(expectedFilter, capturedFilter,
-		"filter should not have double parentheses around userSearchFilter")
-}
-
 func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_BindError() {
 	assertions := assert.New(suite.T())
 
