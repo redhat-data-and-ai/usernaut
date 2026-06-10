@@ -83,7 +83,7 @@ func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID string, user
 
 	for _, userID := range userIDs {
 		userName := sanitizeUserNameForAPI(userID)
-		endpoint := fmt.Sprintf("/api/v2/users/%s/grants", quoteSnowflakeIdentifier(userName))
+		endpoint := fmt.Sprintf("/api/v2/users/%s/grants", quoteSnowflakeIdentifier(userName, true))
 
 		resp, status, err := c.makeRoleRequest(ctx, teamID, endpoint)
 		if err != nil {
@@ -110,7 +110,7 @@ func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID string,
 
 	for _, userID := range userIDs {
 		userName := sanitizeUserNameForAPI(userID)
-		endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", quoteSnowflakeIdentifier(userName))
+		endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", quoteSnowflakeIdentifier(userName, true))
 
 		resp, status, err := c.makeRoleRequest(ctx, teamID, endpoint)
 		if err != nil {

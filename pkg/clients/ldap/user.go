@@ -76,7 +76,7 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 	log := logger.Logger(ctx).WithField("userID", userID)
 	log.Debug("fetching user LDAP data")
 
-	filter := fmt.Sprintf("(%s)", l.userSearchFilter)
+	filter := l.userSearchFilter
 
 	searchRequest := ldap.NewSearchRequest(
 		fmt.Sprintf(l.userDN, ldap.EscapeFilter(userID)),
@@ -144,8 +144,9 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 		for _, uid := range batch {
 			fmt.Fprintf(&uidFilters, "(uid=%s)", ldap.EscapeFilter(uid))
 		}
-		filter := fmt.Sprintf("(&(%s)(|%s))", l.userSearchFilter, uidFilters.String())
+		filter := fmt.Sprintf("(&%s(|%s))", l.userSearchFilter, uidFilters.String())
 
+		log.WithField("filter", filter).Info("LDAP filter")
 		searchRequest := ldap.NewSearchRequest(
 			l.baseUserDN,
 			ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,

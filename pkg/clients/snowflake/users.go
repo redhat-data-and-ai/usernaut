@@ -181,9 +181,9 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 	userName := sanitizeUserNameForAPI(user.UserName)
 
 	payload := map[string]interface{}{
-		"name":                    userName,
+		"name":                    quoteSnowflakeIdentifier(userName, false),
 		"email":                   user.Email,
-		"login_name":              user.UserName,
+		"login_name":              quoteSnowflakeIdentifier(user.UserName, false),
 		"first_name":              user.FirstName,
 		"last_name":               user.LastName,
 		"default_secondary_roles": defaultSecondaryRoles,
@@ -225,7 +225,7 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 	log.Info("fetching user details by ID")
 
 	userName := sanitizeUserNameForAPI(userID)
-	endpoint := fmt.Sprintf("/api/v2/users/%s", userName)
+	endpoint := fmt.Sprintf("/api/v2/users/%s", quoteSnowflakeIdentifier(userName, true))
 
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodGet, nil)
 	if err != nil {

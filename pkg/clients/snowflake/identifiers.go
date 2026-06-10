@@ -21,12 +21,17 @@ import (
 	"unicode"
 )
 
-// quoteSnowflakeIdentifier wraps the identifier in double quotes and URL-encodes
-// it if it doesn't conform to Snowflake's unquoted identifier rules (e.g. starts
-// with a digit). See https://docs.snowflake.com/en/sql-reference/identifiers-syntax
-func quoteSnowflakeIdentifier(name string) string {
-	if needsQuoting(name) {
-		return url.PathEscape(`"` + name + `"`)
+// quoteSnowflakeIdentifier wraps the identifier in double quotes if it doesn't
+// conform to Snowflake's unquoted identifier rules (e.g. starts with a digit).
+// When pathEscape is true, the result is additionally URL-encoded for use in URL
+// path segments. See https://docs.snowflake.com/en/sql-reference/identifiers-syntax
+func quoteSnowflakeIdentifier(name string, pathEscape bool) string {
+	if !needsQuoting(name) {
+		quoted := "'" + name + "'"
+		if pathEscape {
+			return url.PathEscape(quoted)
+		}
+		return quoted
 	}
 	return name
 }
