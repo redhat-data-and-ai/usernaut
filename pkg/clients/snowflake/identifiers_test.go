@@ -16,6 +16,8 @@ func TestNeedsQuoting(t *testing.T) {
 		{name: "starts with special char", input: "@user", expected: true},
 		{name: "contains space", input: "john doe", expected: true},
 		{name: "all digits", input: "12345", expected: true},
+		{name: "contains non-ASCII letter", input: "johné", expected: true},
+		{name: "starts with non-ASCII letter", input: "éuser", expected: true},
 	}
 
 	for _, tt := range tests {
@@ -41,6 +43,8 @@ func TestQuoteSnowflakeIdentifier(t *testing.T) {
 		{name: "valid identifier unchanged", input: "john_doe", pathEscape: false, expected: "john_doe"},
 		{name: "valid identifier path escape unchanged", input: "john_doe", pathEscape: true, expected: "john_doe"},
 		{name: "special char uppercased", input: "@user", pathEscape: false, expected: `"@USER"`},
+		{name: "contains non-ASCII letter", input: "johné", pathEscape: false, expected: `"JOHNÉ"`},
+		{name: "starts with non-ASCII letter", input: "éuser", pathEscape: false, expected: `"ÉUSER"`},
 	}
 
 	for _, tt := range tests {

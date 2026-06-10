@@ -19,7 +19,6 @@ package snowflake
 import (
 	"net/url"
 	"strings"
-	"unicode"
 )
 
 // quoteSnowflakeIdentifier handles Snowflake identifier formatting. If the name
@@ -43,13 +42,21 @@ func needsQuoting(name string) bool {
 		return true
 	}
 	first := rune(name[0])
-	if !unicode.IsLetter(first) && first != '_' {
+	if !isASCIILetter(first) && first != '_' {
 		return true
 	}
 	for _, ch := range name[1:] {
-		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) && ch != '_' && ch != '$' {
+		if !isASCIILetter(ch) && !isASCIIDigit(ch) && ch != '_' && ch != '$' {
 			return true
 		}
 	}
 	return false
+}
+
+func isASCIILetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+func isASCIIDigit(r rune) bool {
+	return r >= '0' && r <= '9'
 }
