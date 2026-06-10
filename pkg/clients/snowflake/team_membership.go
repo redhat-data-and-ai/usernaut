@@ -19,8 +19,10 @@ package snowflake
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -74,56 +76,45 @@ func (c *SnowflakeClient) processGrantsPage(resp []byte, members map[string]*str
 
 // AddUserToTeam adds users to a team (grants role to users)
 func (c *SnowflakeClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
-	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "snowflake",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
-	})
-	log.Info("adding users to team")
-
-	for _, userID := range userIDs {
-		userName := sanitizeUserNameForAPI(userID)
-		endpoint := fmt.Sprintf("/api/v2/users/%s/grants", quoteSnowflakeIdentifier(userName, true))
-
-		resp, status, err := c.makeRoleRequest(ctx, teamID, endpoint)
-		if err != nil {
-			return fmt.Errorf("failed to add user %s to team %s: %w", userID, teamID, err)
-		}
-
-		if status != http.StatusOK && status != http.StatusCreated {
-			return fmt.Errorf("failed to add user %s to team %s, status: %s, body: %s",
-				userID, teamID, http.StatusText(status), string(resp))
-		}
-	}
-
-	return nil
+	return c.modifyTeamMembership(ctx, teamID, userIDs, "grants", "add",
+		[]int{http.StatusOK, http.StatusCreated})
 }
 
 // RemoveUserFromTeam removes users from a team (revokes role from users)
 func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
+	return c.modifyTeamMembership(ctx, teamID, userIDs, "grants:revoke", "remove",
+		[]int{http.StatusOK, http.StatusNoContent})
+}
+
+func (c *SnowflakeClient) modifyTeamMembership(ctx context.Context, teamID string,
+	userIDs []string, action, verb string, successStatuses []int) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service":    "snowflake",
 		"teamID":     teamID,
 		"user_count": len(userIDs),
 	})
-	log.Info("removing users from team")
+	log.Infof("%sing users to/from team", verb)
 
+	var errs []error
 	for _, userID := range userIDs {
 		userName := sanitizeUserNameForAPI(userID)
-		endpoint := fmt.Sprintf("/api/v2/users/%s/grants:revoke", quoteSnowflakeIdentifier(userName, true))
+		endpoint := fmt.Sprintf("/api/v2/users/%s/%s", quoteSnowflakeIdentifier(userName, true), action)
 
 		resp, status, err := c.makeRoleRequest(ctx, teamID, endpoint)
 		if err != nil {
-			return fmt.Errorf("failed to remove user %s from team %s: %w", userID, teamID, err)
+			log.WithError(err).WithField("user", userID).Errorf("failed to %s user to/from team", verb)
+			errs = append(errs, fmt.Errorf("failed to %s user %s to/from team %s: %w", verb, userID, teamID, err))
+			continue
 		}
 
-		if status != http.StatusOK && status != http.StatusNoContent {
-			return fmt.Errorf("failed to remove user %s from team %s, status: %s, body: %s",
-				userID, teamID, http.StatusText(status), string(resp))
+		if !slices.Contains(successStatuses, status) {
+			log.WithFields(logrus.Fields{"user": userID, "status": status}).Errorf("failed to %s user to/from team", verb)
+			errs = append(errs, fmt.Errorf("failed to %s user %s to/from team %s, status: %s, body: %s",
+				verb, userID, teamID, http.StatusText(status), string(resp)))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // makeRoleRequest sends a role grant/revoke request for a user

@@ -18,16 +18,18 @@ package snowflake
 
 import (
 	"net/url"
+	"strings"
 	"unicode"
 )
 
-// quoteSnowflakeIdentifier wraps the identifier in double quotes if it doesn't
-// conform to Snowflake's unquoted identifier rules (e.g. starts with a digit).
-// When pathEscape is true, the result is additionally URL-encoded for use in URL
-// path segments. See https://docs.snowflake.com/en/sql-reference/identifiers-syntax
+// quoteSnowflakeIdentifier handles Snowflake identifier formatting. If the name
+// doesn't conform to unquoted identifier rules (e.g. starts with a digit), it is
+// uppercased and wrapped in double quotes. When pathEscape is true, the result is
+// additionally URL-encoded for use in URL path segments.
+// See https://docs.snowflake.com/en/sql-reference/identifiers-syntax
 func quoteSnowflakeIdentifier(name string, pathEscape bool) string {
-	if !needsQuoting(name) {
-		quoted := "'" + name + "'"
+	if needsQuoting(name) {
+		quoted := `"` + strings.ToUpper(name) + `"`
 		if pathEscape {
 			return url.PathEscape(quoted)
 		}

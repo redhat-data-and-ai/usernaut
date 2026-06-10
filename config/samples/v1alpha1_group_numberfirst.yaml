@@ -1,0 +1,18 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: Group
+metadata:
+  labels:
+    app.kubernetes.io/name: usernaut
+    app.kubernetes.io/managed-by: kustomize
+  name: dataverse-aggregate-numberfirst
+  namespace: usernaut
+spec:
+  group_name: dataverse-aggregate-numberfirst
+  members:
+    users:
+      - 783m
+      - 5dlb
+      - bdebnath
+  backends:
+  - name: snowflake
+    type: snowflake

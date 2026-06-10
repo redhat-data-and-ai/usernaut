@@ -870,6 +870,7 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	// NOTE: CacheMutex is already held by caller (Reconcile)
 	backendKey := backendName + "_" + backendType
 
+	var errs []error
 	for _, user := range users {
 		userDetails := r.allLdapUserData[user]
 		if userDetails == nil {
@@ -881,7 +882,8 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 		userBackends, err := r.Store.User.GetBackends(ctx, userDetails.GetEmail())
 		if err != nil {
 			r.backendLogger.WithField("user", user).WithError(err).Error("error fetching user details from cache")
-			return err
+			errs = append(errs, err)
+			continue
 		}
 
 		// Check if user already has ID for this backend
@@ -900,20 +902,21 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			LastName:  utils.StandardizeNameForBackend(userDetails.GetSN()),
 		})
 		if err != nil {
-			// TODO: handle the error in case user already exists in backend, we need to again populate the cache
 			r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		r.backendLogger.WithField("user", user).Debug("created user in backend successfully")
 
 		// Update cache with new user ID
 		if err := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, newUser.ID); err != nil {
 			r.backendLogger.Error(err, "error updating user details in cache")
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		r.backendLogger.WithField("user", user).Debug("updated user details in cache successfully")
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
