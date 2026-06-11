@@ -1,0 +1,62 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package snowflake
+
+import (
+	"net/url"
+	"strings"
+)
+
+// quoteSnowflakeIdentifier handles Snowflake identifier formatting. If the name
+// doesn't conform to unquoted identifier rules (e.g. starts with a digit), it is
+// uppercased and wrapped in double quotes. When pathEscape is true, the result is
+// additionally URL-encoded for use in URL path segments.
+// See https://docs.snowflake.com/en/sql-reference/identifiers-syntax
+func quoteSnowflakeIdentifier(name string, pathEscape bool) string {
+	if needsQuoting(name) {
+		quoted := `"` + strings.ToUpper(name) + `"`
+		if pathEscape {
+			return url.PathEscape(quoted)
+		}
+		return quoted
+	}
+	return name
+}
+
+func needsQuoting(name string) bool {
+	if len(name) == 0 {
+		return true
+	}
+	first := rune(name[0])
+	if !isASCIILetter(first) && first != '_' {
+		return true
+	}
+	for _, ch := range name[1:] {
+		if !isASCIILetter(ch) && !isASCIIDigit(ch) && ch != '_' && ch != '$' {
+			return true
+		}
+	}
+	return false
+}
+
+func isASCIILetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+func isASCIIDigit(r rune) bool {
+	return r >= '0' && r <= '9'
+}

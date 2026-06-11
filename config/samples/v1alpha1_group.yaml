@@ -11,7 +11,9 @@ spec:
   members:
    users:
     - subhatta
-    - vinod
+    - bdebnath
+    - 783m
+    - 5dlb
   group_params:
     - backend: gitlab
       name: gitlab
