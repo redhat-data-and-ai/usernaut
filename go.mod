@@ -159,6 +159,7 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/google/cel-go => github.com/google/cel-go v0.22.0
-
-replace github.com/smartystreets/assertions => github.com/smartystreets/assertions v1.13.1
+replace (
+	github.com/google/cel-go => github.com/google/cel-go v0.22.0
+	github.com/smartystreets/assertions => github.com/smartystreets/assertions v1.13.1
+)
