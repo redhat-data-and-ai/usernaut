@@ -76,6 +76,14 @@ func parseUIDFromDN(dn *ldap.DN) string {
 	return ""
 }
 
+// QueryNode is an internal uniform tree representation of the typed query hierarchy.
+// Exported so the controller can walk it for manager detection and UID extraction.
+type QueryNode struct {
+	Operator string
+	Filters  []v1alpha1.LDAPFilter
+	Children []*QueryNode
+}
+
 func (l *LDAPConn) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error) {
 	log := logger.Logger(ctx).WithField("build_ldap_query", "spec")
 	log.WithField("query", query).Info("building LDAP query from spec")
@@ -83,22 +91,88 @@ func (l *LDAPConn) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.L
 	if query == nil {
 		return "", errors.New("ldap query is nil")
 	}
-	if len(query.Filters) == 0 {
-		return "", errors.New("filters are empty")
-	}
-	filters, err := buildFiltersFromSpec(query.Filters, l.baseUserDN)
+	node, err := ToQueryNode(query)
 	if err != nil {
 		return "", err
 	}
+	return buildNode(node, l.baseUserDN)
+}
 
-	op := strings.ToLower(strings.TrimSpace(query.Operator))
+// buildFromSpec is a generic helper that converts any query-like struct into a QueryNode.
+func buildFromSpec[T any](
+	operator string,
+	filters []v1alpha1.LDAPFilter,
+	queries []T,
+	convertChild func(*T) (*QueryNode, error),
+) (*QueryNode, error) {
+	if len(filters) == 0 && len(queries) == 0 {
+		return nil, errors.New("filters and queries are both empty")
+	}
+	node := &QueryNode{Operator: operator, Filters: filters}
+	for i := range queries {
+		child, err := convertChild(&queries[i])
+		if err != nil {
+			return nil, fmt.Errorf("queries[%d]: %w", i, err)
+		}
+		node.Children = append(node.Children, child)
+	}
+	return node, nil
+}
+
+// ToQueryNode converts the typed LDAPQuery hierarchy into a uniform QueryNode tree.
+func ToQueryNode(query *v1alpha1.LDAPQuery) (*QueryNode, error) {
+	if query == nil {
+		return nil, errors.New("ldap query is nil")
+	}
+	return buildFromSpec(query.Operator, query.Filters, query.Queries, subQueryToNode)
+}
+
+func subQueryToNode(query *v1alpha1.LDAPSubQuery) (*QueryNode, error) {
+	return buildFromSpec(query.Operator, query.Filters, query.Queries, leafQueryToNode)
+}
+
+func leafQueryToNode(query *v1alpha1.LDAPLeafQuery) (*QueryNode, error) {
+	return buildFromSpec(query.Operator, query.Filters, query.Queries, leafSubQueryToNode)
+}
+
+func leafSubQueryToNode(query *v1alpha1.LDAPLeafSubQuery) (*QueryNode, error) {
+	if len(query.Filters) == 0 {
+		return nil, errors.New("filters are empty")
+	}
+	return &QueryNode{Operator: query.Operator, Filters: query.Filters}, nil
+}
+
+func buildNode(node *QueryNode, baseUserDN string) (string, error) {
+	if len(node.Filters) == 0 && len(node.Children) == 0 {
+		return "", errors.New("filters and queries are both empty")
+	}
+
+	parts := make([]string, 0, len(node.Filters)+len(node.Children))
+
+	if len(node.Filters) > 0 {
+		filters, err := buildFiltersFromSpec(node.Filters, baseUserDN)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, filters...)
+	}
+
+	for i, child := range node.Children {
+		nested, err := buildNode(child, baseUserDN)
+		if err != nil {
+			return "", fmt.Errorf("queries[%d]: %w", i, err)
+		}
+		parts = append(parts, nested)
+	}
+
+	op := strings.ToLower(strings.TrimSpace(node.Operator))
 	switch op {
 	case "and":
-		return "(&" + strings.Join(filters, "") + ")", nil
+		return "(&" + strings.Join(parts, "") + ")", nil
 	case "or":
-		return "(|" + strings.Join(filters, "") + ")", nil
+		return "(|" + strings.Join(parts, "") + ")", nil
 	default:
-		return "", fmt.Errorf("unsupported operator %q", query.Operator)
+		return "", fmt.Errorf("unsupported operator %q", node.Operator)
 	}
 }
 

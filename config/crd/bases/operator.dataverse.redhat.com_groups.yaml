@@ -139,10 +139,161 @@ spec:
                           include_manager:
                             type: boolean
                         type: object
+                      queries:
+                        items:
+                          properties:
+                            filters:
+                              items:
+                                properties:
+                                  criteria:
+                                    enum:
+                                    - equals
+                                    - contains
+                                    - not
+                                    type: string
+                                  key:
+                                    enum:
+                                    - givenName
+                                    - displayName
+                                    - rhatJobTitle
+                                    - title
+                                    - employeeType
+                                    - manager
+                                    - rhatCostCenter
+                                    - rhatCostCenterDesc
+                                    - rhatGeo
+                                    - co
+                                    - st
+                                    - rhatLocation
+                                    - rhatOfficeLocation
+                                    - rhatOfficeFloor
+                                    - roomNumber
+                                    type: string
+                                  value:
+                                    type: string
+                                required:
+                                - criteria
+                                - key
+                                - value
+                                type: object
+                              type: array
+                            operator:
+                              enum:
+                              - and
+                              - or
+                              type: string
+                            queries:
+                              items:
+                                properties:
+                                  filters:
+                                    items:
+                                      properties:
+                                        criteria:
+                                          enum:
+                                          - equals
+                                          - contains
+                                          - not
+                                          type: string
+                                        key:
+                                          enum:
+                                          - givenName
+                                          - displayName
+                                          - rhatJobTitle
+                                          - title
+                                          - employeeType
+                                          - manager
+                                          - rhatCostCenter
+                                          - rhatCostCenterDesc
+                                          - rhatGeo
+                                          - co
+                                          - st
+                                          - rhatLocation
+                                          - rhatOfficeLocation
+                                          - rhatOfficeFloor
+                                          - roomNumber
+                                          type: string
+                                        value:
+                                          type: string
+                                      required:
+                                      - criteria
+                                      - key
+                                      - value
+                                      type: object
+                                    type: array
+                                  operator:
+                                    enum:
+                                    - and
+                                    - or
+                                    type: string
+                                  queries:
+                                    items:
+                                      properties:
+                                        filters:
+                                          items:
+                                            properties:
+                                              criteria:
+                                                enum:
+                                                - equals
+                                                - contains
+                                                - not
+                                                type: string
+                                              key:
+                                                enum:
+                                                - givenName
+                                                - displayName
+                                                - rhatJobTitle
+                                                - title
+                                                - employeeType
+                                                - manager
+                                                - rhatCostCenter
+                                                - rhatCostCenterDesc
+                                                - rhatGeo
+                                                - co
+                                                - st
+                                                - rhatLocation
+                                                - rhatOfficeLocation
+                                                - rhatOfficeFloor
+                                                - roomNumber
+                                                type: string
+                                              value:
+                                                type: string
+                                            required:
+                                            - criteria
+                                            - key
+                                            - value
+                                            type: object
+                                          type: array
+                                        operator:
+                                          enum:
+                                          - and
+                                          - or
+                                          type: string
+                                      required:
+                                      - filters
+                                      - operator
+                                      type: object
+                                    type: array
+                                required:
+                                - operator
+                                type: object
+                                x-kubernetes-validations:
+                                - message: at least one of filters or queries must
+                                    be specified
+                                  rule: has(self.filters) || has(self.queries)
+                              type: array
+                          required:
+                          - operator
+                          type: object
+                          x-kubernetes-validations:
+                          - message: at least one of filters or queries must be specified
+                            rule: has(self.filters) || has(self.queries)
+                        type: array
                     required:
-                    - filters
                     - operator
                     type: object
+                    x-kubernetes-validations:
+                    - message: at least one of filters or queries must be specified
+                      rule: has(self.filters) || has(self.queries)
                   users:
                     items:
                       type: string

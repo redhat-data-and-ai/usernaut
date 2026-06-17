@@ -44,11 +44,42 @@ type LDAPFilter struct {
 	Value    string `json:"value"`
 }
 
+// +kubebuilder:validation:XValidation:rule="has(self.filters) || has(self.queries)",message="at least one of filters or queries must be specified"
 type LDAPQuery struct {
+	// +kubebuilder:validation:Enum=and;or
+	Operator string `json:"operator"`
+	// +optional
+	Filters []LDAPFilter `json:"filters,omitempty"`
+	// +optional
+	Queries []LDAPSubQuery `json:"queries,omitempty"`
+	// +optional
+	Options *LDAPOptions `json:"options,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="has(self.filters) || has(self.queries)",message="at least one of filters or queries must be specified"
+type LDAPSubQuery struct {
+	// +kubebuilder:validation:Enum=and;or
+	Operator string `json:"operator"`
+	// +optional
+	Filters []LDAPFilter `json:"filters,omitempty"`
+	// +optional
+	Queries []LDAPLeafQuery `json:"queries,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="has(self.filters) || has(self.queries)",message="at least one of filters or queries must be specified"
+type LDAPLeafQuery struct {
+	// +kubebuilder:validation:Enum=and;or
+	Operator string `json:"operator"`
+	// +optional
+	Filters []LDAPFilter `json:"filters,omitempty"`
+	// +optional
+	Queries []LDAPLeafSubQuery `json:"queries,omitempty"`
+}
+
+type LDAPLeafSubQuery struct {
 	// +kubebuilder:validation:Enum=and;or
 	Operator string       `json:"operator"`
 	Filters  []LDAPFilter `json:"filters"`
-	Options  *LDAPOptions `json:"options,omitempty"`
 }
 
 type LDAPOptions struct {
