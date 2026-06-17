@@ -320,6 +320,9 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 // is replaced with managerUID. Duplicate manager filters with the same criteria and
 // value after replacement are collapsed to a single entry.
 func replaceManagerInFilters(filters []usernautdevv1alpha1.LDAPFilter, managerUID string) []usernautdevv1alpha1.LDAPFilter {
+	if len(filters) == 0 {
+		return nil
+	}
 	result := make([]usernautdevv1alpha1.LDAPFilter, 0, len(filters))
 	seenManagers := make(map[string]struct{})
 	for _, filter := range filters {

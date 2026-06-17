@@ -44,7 +44,7 @@ type LDAPFilter struct {
 	Value    string `json:"value"`
 }
 
-// +kubebuilder:validation:XValidation:rule="has(self.filters) || has(self.queries)",message="at least one of filters or queries must be specified"
+// +kubebuilder:validation:XValidation:rule="(has(self.filters) && size(self.filters) > 0) || (has(self.queries) && size(self.queries) > 0)",message="at least one of filters or queries must be specified and non-empty"
 type LDAPQuery struct {
 	// +kubebuilder:validation:Enum=and;or
 	Operator string `json:"operator"`
@@ -56,7 +56,7 @@ type LDAPQuery struct {
 	Options *LDAPOptions `json:"options,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="has(self.filters) || has(self.queries)",message="at least one of filters or queries must be specified"
+// +kubebuilder:validation:XValidation:rule="(has(self.filters) && size(self.filters) > 0) || (has(self.queries) && size(self.queries) > 0)",message="at least one of filters or queries must be specified and non-empty"
 type LDAPSubQuery struct {
 	// +kubebuilder:validation:Enum=and;or
 	Operator string `json:"operator"`
@@ -66,7 +66,7 @@ type LDAPSubQuery struct {
 	Queries []LDAPLeafQuery `json:"queries,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="has(self.filters) || has(self.queries)",message="at least one of filters or queries must be specified"
+// +kubebuilder:validation:XValidation:rule="(has(self.filters) && size(self.filters) > 0) || (has(self.queries) && size(self.queries) > 0)",message="at least one of filters or queries must be specified and non-empty"
 type LDAPLeafQuery struct {
 	// +kubebuilder:validation:Enum=and;or
 	Operator string `json:"operator"`
@@ -78,8 +78,9 @@ type LDAPLeafQuery struct {
 
 type LDAPLeafSubQuery struct {
 	// +kubebuilder:validation:Enum=and;or
-	Operator string       `json:"operator"`
-	Filters  []LDAPFilter `json:"filters"`
+	Operator string `json:"operator"`
+	// +kubebuilder:validation:MinItems=1
+	Filters []LDAPFilter `json:"filters"`
 }
 
 type LDAPOptions struct {

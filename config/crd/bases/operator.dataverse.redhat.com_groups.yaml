@@ -262,6 +262,7 @@ spec:
                                             - key
                                             - value
                                             type: object
+                                          minItems: 1
                                           type: array
                                         operator:
                                           enum:
@@ -278,22 +279,28 @@ spec:
                                 type: object
                                 x-kubernetes-validations:
                                 - message: at least one of filters or queries must
-                                    be specified
-                                  rule: has(self.filters) || has(self.queries)
+                                    be specified and non-empty
+                                  rule: (has(self.filters) && size(self.filters) >
+                                    0) || (has(self.queries) && size(self.queries)
+                                    > 0)
                               type: array
                           required:
                           - operator
                           type: object
                           x-kubernetes-validations:
                           - message: at least one of filters or queries must be specified
-                            rule: has(self.filters) || has(self.queries)
+                              and non-empty
+                            rule: (has(self.filters) && size(self.filters) > 0) ||
+                              (has(self.queries) && size(self.queries) > 0)
                         type: array
                     required:
                     - operator
                     type: object
                     x-kubernetes-validations:
                     - message: at least one of filters or queries must be specified
-                      rule: has(self.filters) || has(self.queries)
+                        and non-empty
+                      rule: (has(self.filters) && size(self.filters) > 0) || (has(self.queries)
+                        && size(self.queries) > 0)
                   users:
                     items:
                       type: string
