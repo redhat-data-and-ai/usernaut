@@ -206,7 +206,7 @@ func TestExtractManagerUIDsFromQuery(t *testing.T) {
 		{
 			name:  "nil query",
 			query: nil,
-			want:  nil,
+			want:  []string{},
 		},
 		{
 			name: "top level only",
