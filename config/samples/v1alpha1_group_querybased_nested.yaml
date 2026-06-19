@@ -13,12 +13,12 @@ spec:
       options:
         include_indirect_reports: true
         include_manager: true
-      operator: and
+      operator: and                                   # Level 0
       filters:
         - key: employeeType
           criteria: not
           value: "external employee"
-      queries:
+      sub_queries:                                    # Level 1
         - operator: or
           filters:
             - key: title
@@ -35,4 +35,19 @@ spec:
             - key: manager
               criteria: equals
               value: mgrBeta
+          leaf_queries:                               # Level 2
+            - operator: and
+              filters:
+                - key: co
+                  criteria: equals
+                  value: US
+              leaf_sub_queries:                       # Level 3
+                - operator: or
+                  filters:
+                    - key: rhatGeo
+                      criteria: equals
+                      value: NA
+                    - key: rhatGeo
+                      criteria: equals
+                      value: LATAM
   backends: []
