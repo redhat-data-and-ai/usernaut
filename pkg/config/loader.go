@@ -105,23 +105,21 @@ func (c *Config) Load(env string, config interface{}) error {
 	if err := c.loadByConfigName(env, config); err != nil {
 		return err
 	}
-	SubstituteConfigValues(reflect.ValueOf(config))
-	return nil
+	return SubstituteConfigValues(reflect.ValueOf(config))
 }
 
 // SubstituteConfigValues recursively walks through the config struct and replaces
 // string values of the form 'env|VAR' or 'file|/path' with the corresponding value.
-func SubstituteConfigValues(v reflect.Value) {
+func SubstituteConfigValues(v reflect.Value) error {
 	if !v.IsValid() {
-		return
+		return nil
 	}
 	// If it's a pointer, resolve it
 	if v.Kind() == reflect.Ptr {
 		if v.IsNil() {
-			return
+			return nil
 		}
-		SubstituteConfigValues(v.Elem())
-		return
+		return SubstituteConfigValues(v.Elem())
 	}
 	// If it's a struct, process its fields
 	if v.Kind() == reflect.Struct {
@@ -130,10 +128,12 @@ func SubstituteConfigValues(v reflect.Value) {
 			if field.CanSet() || field.Kind() == reflect.Ptr ||
 				field.Kind() == reflect.Struct || field.Kind() == reflect.Map ||
 				field.Kind() == reflect.Slice {
-				SubstituteConfigValues(field)
+				if err := SubstituteConfigValues(field); err != nil {
+					return err
+				}
 			}
 		}
-		return
+		return nil
 	}
 	// If it's a map, process its values
 	if v.Kind() == reflect.Map {
@@ -144,44 +144,58 @@ func SubstituteConfigValues(v reflect.Value) {
 			}
 			// Only settable if map value is addressable, so we replace by setting
 			if val.Kind() == reflect.String {
-				newVal := reflect.ValueOf(substituteString(val.String()))
+				substituted, err := substituteString(val.String())
+				if err != nil {
+					return err
+				}
+				newVal := reflect.ValueOf(substituted)
 				v.SetMapIndex(key, newVal)
 			} else {
 				// Recursively process nested maps/structs
 				copyVal := reflect.New(val.Type()).Elem()
 				copyVal.Set(val)
-				SubstituteConfigValues(copyVal)
+				if err := SubstituteConfigValues(copyVal); err != nil {
+					return err
+				}
 				v.SetMapIndex(key, copyVal)
 			}
 		}
-		return
+		return nil
 	}
 	// If it's a slice or array, process its elements
 	if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
 		for i := 0; i < v.Len(); i++ {
-			SubstituteConfigValues(v.Index(i))
+			if err := SubstituteConfigValues(v.Index(i)); err != nil {
+				return err
+			}
 		}
-		return
+		return nil
 	}
 	// If it's a string, substitute if needed
 	if v.Kind() == reflect.String && v.CanSet() {
-		v.SetString(substituteString(v.String()))
+		substituted, err := substituteString(v.String())
+		if err != nil {
+			return err
+		}
+		v.SetString(substituted)
 	}
+	return nil
 }
 
 // substituteString replaces 'env|VAR' and 'file|/path' patterns with their values
-func substituteString(s string) string {
+func substituteString(s string) (string, error) {
 	if len(s) > len(EnvPrefix) && s[:len(EnvPrefix)] == EnvPrefix {
-		return os.Getenv(s[len(EnvPrefix):])
+		return os.Getenv(s[len(EnvPrefix):]), nil
 	}
 	if len(s) > len(FilePrefix) && s[:len(FilePrefix)] == FilePrefix {
-		b, err := os.ReadFile(s[len(FilePrefix):])
+		configFilePath := s[len(FilePrefix):]
+		b, err := os.ReadFile(configFilePath)
 		if err != nil {
-			panic(fmt.Sprintf("ERROR: %v", err))
+			return "", fmt.Errorf("failed to read config file %s: %w", configFilePath, err)
 		}
-		return strings.TrimSpace(string(b))
+		return strings.TrimSpace(string(b)), nil
 	}
-	return s
+	return s, nil
 }
 
 // loadByConfigName reads configuration from file and unmarshalls into config.
