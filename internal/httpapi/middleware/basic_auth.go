@@ -14,6 +14,7 @@ limitations under the License.
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -36,7 +37,9 @@ func BasicAuth(cfg *config.AppConfig) gin.HandlerFunc {
 
 		authorized := false
 		for _, u := range cfg.APIServer.Auth.BasicUsers {
-			if username == u.Username && password == u.Password {
+			usernameMatches := subtle.ConstantTimeCompare([]byte(username), []byte(u.Username))
+			passwordMatches := subtle.ConstantTimeCompare([]byte(password), []byte(u.Password))
+			if usernameMatches&passwordMatches == 1 {
 				authorized = true
 				break
 			}
