@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	ldapv3 "github.com/go-ldap/ldap/v3"
@@ -25,7 +26,17 @@ type LDAPConnClient interface {
 	UnauthenticatedBind(username string) error
 }
 
+type closeableLDAPConnClient interface {
+	LDAPConnClient
+	Close() error
+}
+
+var dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+	return ldapv3.DialURL(server, ldapv3.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
+}
+
 type LDAPConn struct {
+	mu               sync.Mutex
 	conn             LDAPConnClient
 	userDN           string
 	baseDN           string
@@ -45,7 +56,7 @@ type LDAPClient interface {
 
 // InitLdap initializes a connection to the LDAP server using the provided configuration.
 func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
-	ldapConn, err := ldapv3.DialURL(ldapConfig.Server, ldapv3.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
+	ldapConn, err := dialLDAP(ldapConfig.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -70,8 +81,11 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 
 // getConn returns the underlying LDAP connection.
 func (l *LDAPConn) getConn() LDAPConnClient {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if l.conn != nil && l.conn.IsClosing() {
-		newConn, err := ldapv3.DialURL(l.server, ldapv3.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
+		newConn, err := dialLDAP(l.server)
 		if err != nil {
 			// Log the error and return the existing connection (or nil if no valid connection exists)
 			fmt.Printf("Failed to re-establish LDAP connection: %v\n", err)
