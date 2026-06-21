@@ -68,7 +68,11 @@ func TestLoadReturnsFileSubstitutionError(t *testing.T) {
 	configDir := t.TempDir()
 	missingFile := filepath.Join(configDir, "missing.txt")
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "default.yaml"), []byte("secret: default\n"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "dev.yaml"), []byte("secret: \"file|"+missingFile+"\"\n"), 0600))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(configDir, "dev.yaml"),
+		[]byte("secret: \"file|"+missingFile+"\"\n"),
+		0600,
+	))
 
 	var loaded struct {
 		Secret string
