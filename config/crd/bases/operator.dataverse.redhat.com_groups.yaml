@@ -119,13 +119,12 @@ spec:
                               - rhatOfficeFloor
                               - roomNumber
                               type: string
+                            ldap_query:
+                              x-kubernetes-preserve-unknown-fields: true
                             value:
                               type: string
-                          required:
-                          - criteria
-                          - key
-                          - value
                           type: object
+                        minItems: 1
                         type: array
                       operator:
                         enum:
@@ -139,169 +138,10 @@ spec:
                           include_manager:
                             type: boolean
                         type: object
-                      sub_queries:
-                        items:
-                          properties:
-                            filters:
-                              items:
-                                properties:
-                                  criteria:
-                                    enum:
-                                    - equals
-                                    - contains
-                                    - not
-                                    type: string
-                                  key:
-                                    enum:
-                                    - givenName
-                                    - displayName
-                                    - rhatJobTitle
-                                    - title
-                                    - employeeType
-                                    - manager
-                                    - rhatCostCenter
-                                    - rhatCostCenterDesc
-                                    - rhatGeo
-                                    - co
-                                    - st
-                                    - rhatLocation
-                                    - rhatOfficeLocation
-                                    - rhatOfficeFloor
-                                    - roomNumber
-                                    type: string
-                                  value:
-                                    type: string
-                                required:
-                                - criteria
-                                - key
-                                - value
-                                type: object
-                              type: array
-                            leaf_queries:
-                              items:
-                                properties:
-                                  filters:
-                                    items:
-                                      properties:
-                                        criteria:
-                                          enum:
-                                          - equals
-                                          - contains
-                                          - not
-                                          type: string
-                                        key:
-                                          enum:
-                                          - givenName
-                                          - displayName
-                                          - rhatJobTitle
-                                          - title
-                                          - employeeType
-                                          - manager
-                                          - rhatCostCenter
-                                          - rhatCostCenterDesc
-                                          - rhatGeo
-                                          - co
-                                          - st
-                                          - rhatLocation
-                                          - rhatOfficeLocation
-                                          - rhatOfficeFloor
-                                          - roomNumber
-                                          type: string
-                                        value:
-                                          type: string
-                                      required:
-                                      - criteria
-                                      - key
-                                      - value
-                                      type: object
-                                    type: array
-                                  leaf_sub_queries:
-                                    items:
-                                      properties:
-                                        filters:
-                                          items:
-                                            properties:
-                                              criteria:
-                                                enum:
-                                                - equals
-                                                - contains
-                                                - not
-                                                type: string
-                                              key:
-                                                enum:
-                                                - givenName
-                                                - displayName
-                                                - rhatJobTitle
-                                                - title
-                                                - employeeType
-                                                - manager
-                                                - rhatCostCenter
-                                                - rhatCostCenterDesc
-                                                - rhatGeo
-                                                - co
-                                                - st
-                                                - rhatLocation
-                                                - rhatOfficeLocation
-                                                - rhatOfficeFloor
-                                                - roomNumber
-                                                type: string
-                                              value:
-                                                type: string
-                                            required:
-                                            - criteria
-                                            - key
-                                            - value
-                                            type: object
-                                          minItems: 1
-                                          type: array
-                                        operator:
-                                          enum:
-                                          - and
-                                          - or
-                                          type: string
-                                      required:
-                                      - filters
-                                      - operator
-                                      type: object
-                                    type: array
-                                  operator:
-                                    enum:
-                                    - and
-                                    - or
-                                    type: string
-                                required:
-                                - operator
-                                type: object
-                                x-kubernetes-validations:
-                                - message: at least one of filters or leaf_sub_queries
-                                    must be specified and non-empty
-                                  rule: (has(self.filters) && size(self.filters) >
-                                    0) || (has(self.leaf_sub_queries) && size(self.leaf_sub_queries)
-                                    > 0)
-                              type: array
-                            operator:
-                              enum:
-                              - and
-                              - or
-                              type: string
-                          required:
-                          - operator
-                          type: object
-                          x-kubernetes-validations:
-                          - message: at least one of filters or leaf_queries must
-                              be specified and non-empty
-                            rule: (has(self.filters) && size(self.filters) > 0) ||
-                              (has(self.leaf_queries) && size(self.leaf_queries) >
-                              0)
-                        type: array
                     required:
+                    - filters
                     - operator
                     type: object
-                    x-kubernetes-validations:
-                    - message: at least one of filters or sub_queries must be specified
-                        and non-empty
-                      rule: (has(self.filters) && size(self.filters) > 0) || (has(self.sub_queries)
-                        && size(self.sub_queries) > 0)
                   users:
                     items:
                       type: string

@@ -13,41 +13,42 @@ spec:
       options:
         include_indirect_reports: true
         include_manager: true
-      operator: and                                   # Level 0
+      operator: and
       filters:
         - key: employeeType
           criteria: not
           value: "external employee"
-      sub_queries:                                    # Level 1
-        - operator: or
-          filters:
-            - key: title
-              criteria: contains
-              value: engineer
-            - key: title
-              criteria: contains
-              value: developer
-        - operator: or
-          filters:
-            - key: manager
-              criteria: equals
-              value: mgrAlpha
-            - key: manager
-              criteria: equals
-              value: mgrBeta
-          leaf_queries:                               # Level 2
-            - operator: and
-              filters:
-                - key: co
-                  criteria: equals
-                  value: US
-              leaf_sub_queries:                       # Level 3
-                - operator: or
+        - ldap_query:
+            operator: or
+            filters:
+              - key: title
+                criteria: contains
+                value: engineer
+              - key: title
+                criteria: contains
+                value: developer
+        - ldap_query:
+            operator: or
+            filters:
+              - key: manager
+                criteria: equals
+                value: mgrAlpha
+              - key: manager
+                criteria: equals
+                value: mgrBeta
+              - ldap_query:
+                  operator: and
                   filters:
-                    - key: rhatGeo
+                    - key: manager
                       criteria: equals
-                      value: NA
-                    - key: rhatGeo
-                      criteria: equals
-                      value: LATAM
+                      value: mgrGamma
+                    - ldap_query:
+                        operator: or
+                        filters:
+                          - key: rhatGeo
+                            criteria: equals
+                            value: na
+                          - key: rhatGeo
+                            criteria: equals
+                            value: apac
   backends: []

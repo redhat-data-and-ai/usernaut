@@ -58,24 +58,26 @@ func TestReplaceManagerInFilters_PreservesDistinctManagerCriteria(t *testing.T) 
 	assert.Equal(t, "newMgr", got[1].Value)
 }
 
-func TestReplaceManagerInSubQueries(t *testing.T) {
+func TestReplaceManagerInFilters_NestedQuery(t *testing.T) {
 	t.Parallel()
 
-	queries := []usernautdevv1alpha1.LDAPSubQuery{
+	filters := []usernautdevv1alpha1.LDAPFilter{
 		{
-			Operator: "or",
-			Filters: []usernautdevv1alpha1.LDAPFilter{
-				{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
-				{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "or",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
+					{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
+				},
 			},
-			Queries: []usernautdevv1alpha1.LDAPLeafQuery{
-				{
-					Operator: "and",
-					Filters: []usernautdevv1alpha1.LDAPFilter{
-						{Key: "manager", Criteria: "equals", Value: "mgrGamma"},
-					},
-					Queries: []usernautdevv1alpha1.LDAPLeafSubQuery{
-						{
+		},
+		{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{Key: "manager", Criteria: "equals", Value: "mgrGamma"},
+					{
+						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
 							Operator: "or",
 							Filters: []usernautdevv1alpha1.LDAPFilter{
 								{Key: "manager", Criteria: "equals", Value: "mgrDelta"},
@@ -88,27 +90,26 @@ func TestReplaceManagerInSubQueries(t *testing.T) {
 		},
 	}
 
-	got := replaceManagerInSubQueries(queries, "newMgr")
-	require.Len(t, got, 1)
+	got := replaceManagerInFilters(filters, "newMgr")
+	require.Len(t, got, 2)
 
-	assert.Len(t, got[0].Filters, 1)
-	assert.Equal(t, "newMgr", got[0].Filters[0].Value)
+	require.NotNil(t, got[0].LDAPQuery)
+	assert.Len(t, got[0].LDAPQuery.Filters, 1)
+	assert.Equal(t, "newMgr", got[0].LDAPQuery.Filters[0].Value)
 
-	require.Len(t, got[0].Queries, 1)
-	assert.Equal(t, "newMgr", got[0].Queries[0].Filters[0].Value)
-
-	require.Len(t, got[0].Queries[0].Queries, 1)
-	assert.Equal(t, "newMgr", got[0].Queries[0].Queries[0].Filters[0].Value)
-	assert.Equal(t, "US", got[0].Queries[0].Queries[0].Filters[1].Value)
+	require.NotNil(t, got[1].LDAPQuery)
+	assert.Equal(t, "newMgr", got[1].LDAPQuery.Filters[0].Value)
+	require.NotNil(t, got[1].LDAPQuery.Filters[1].LDAPQuery)
+	assert.Equal(t, "newMgr", got[1].LDAPQuery.Filters[1].LDAPQuery.Filters[0].Value)
+	assert.Equal(t, "US", got[1].LDAPQuery.Filters[1].LDAPQuery.Filters[1].Value)
 }
 
-func TestReplaceManagerInSubQueries_CollapsesDuplicateManagers(t *testing.T) {
+func TestReplaceManagerInFilters_CollapsesDuplicateManagersInNestedQuery(t *testing.T) {
 	t.Parallel()
 
-	query := &usernautdevv1alpha1.LDAPQuery{
-		Operator: "and",
-		Queries: []usernautdevv1alpha1.LDAPSubQuery{
-			{
+	filters := []usernautdevv1alpha1.LDAPFilter{
+		{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "or",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
@@ -118,10 +119,11 @@ func TestReplaceManagerInSubQueries_CollapsesDuplicateManagers(t *testing.T) {
 		},
 	}
 
-	got := replaceManagerInSubQueries(query.Queries, "newMgr")
+	got := replaceManagerInFilters(filters, "newMgr")
 	require.Len(t, got, 1)
-	require.Len(t, got[0].Filters, 1)
-	assert.Equal(t, "newMgr", got[0].Filters[0].Value)
+	require.NotNil(t, got[0].LDAPQuery)
+	require.Len(t, got[0].LDAPQuery.Filters, 1)
+	assert.Equal(t, "newMgr", got[0].LDAPQuery.Filters[0].Value)
 }
 
 func TestQueryHasManagerFilter(t *testing.T) {
@@ -151,20 +153,24 @@ func TestQueryHasManagerFilter(t *testing.T) {
 			name: "nested manager only",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
-				Queries: []usernautdevv1alpha1.LDAPSubQuery{
+				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{
-						Operator: "or",
-						Filters: []usernautdevv1alpha1.LDAPFilter{
-							{Key: "title", Criteria: "contains", Value: "engineer"},
-						},
-						Queries: []usernautdevv1alpha1.LDAPLeafQuery{
-							{
-								Operator: "and",
-								Queries: []usernautdevv1alpha1.LDAPLeafSubQuery{
-									{
-										Operator: "or",
+						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+							Operator: "or",
+							Filters: []usernautdevv1alpha1.LDAPFilter{
+								{Key: "title", Criteria: "contains", Value: "engineer"},
+								{
+									LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+										Operator: "and",
 										Filters: []usernautdevv1alpha1.LDAPFilter{
-											{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
+											{
+												LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+													Operator: "or",
+													Filters: []usernautdevv1alpha1.LDAPFilter{
+														{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
+													},
+												},
+											},
 										},
 									},
 								},
@@ -223,18 +229,20 @@ func TestExtractManagerUIDsFromQuery(t *testing.T) {
 			name: "nested and deduplicated",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
-				Queries: []usernautdevv1alpha1.LDAPSubQuery{
+				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{
-						Operator: "or",
-						Filters: []usernautdevv1alpha1.LDAPFilter{
-							{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
-						},
-						Queries: []usernautdevv1alpha1.LDAPLeafQuery{
-							{
-								Operator: "and",
-								Filters: []usernautdevv1alpha1.LDAPFilter{
-									{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
-									{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
+						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+							Operator: "or",
+							Filters: []usernautdevv1alpha1.LDAPFilter{
+								{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
+								{
+									LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+										Operator: "and",
+										Filters: []usernautdevv1alpha1.LDAPFilter{
+											{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
+											{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
+										},
+									},
 								},
 							},
 						},

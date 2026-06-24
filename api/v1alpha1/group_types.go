@@ -37,50 +37,27 @@ type Backend struct {
 }
 
 type LDAPFilter struct {
+	// +optional
 	// +kubebuilder:validation:Enum=givenName;displayName;rhatJobTitle;title;employeeType;manager;rhatCostCenter;rhatCostCenterDesc;rhatGeo;co;st;rhatLocation;rhatOfficeLocation;rhatOfficeFloor;roomNumber
-	Key string `json:"key"`
+	Key string `json:"key,omitempty"`
+	// +optional
 	// +kubebuilder:validation:Enum=equals;contains;not
-	Criteria string `json:"criteria"`
-	Value    string `json:"value"`
+	Criteria string `json:"criteria,omitempty"`
+	// +optional
+	Value string `json:"value,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	LDAPQuery *LDAPQuery `json:"ldap_query,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="(has(self.filters) && size(self.filters) > 0) || (has(self.sub_queries) && size(self.sub_queries) > 0)",message="at least one of filters or sub_queries must be specified and non-empty"
 type LDAPQuery struct {
-	// +kubebuilder:validation:Enum=and;or
-	Operator string `json:"operator"`
-	// +optional
-	Filters []LDAPFilter `json:"filters,omitempty"`
-	// +optional
-	Queries []LDAPSubQuery `json:"sub_queries,omitempty"`
-	// +optional
-	Options *LDAPOptions `json:"options,omitempty"`
-}
-
-// +kubebuilder:validation:XValidation:rule="(has(self.filters) && size(self.filters) > 0) || (has(self.leaf_queries) && size(self.leaf_queries) > 0)",message="at least one of filters or leaf_queries must be specified and non-empty"
-type LDAPSubQuery struct {
-	// +kubebuilder:validation:Enum=and;or
-	Operator string `json:"operator"`
-	// +optional
-	Filters []LDAPFilter `json:"filters,omitempty"`
-	// +optional
-	Queries []LDAPLeafQuery `json:"leaf_queries,omitempty"`
-}
-
-// +kubebuilder:validation:XValidation:rule="(has(self.filters) && size(self.filters) > 0) || (has(self.leaf_sub_queries) && size(self.leaf_sub_queries) > 0)",message="at least one of filters or leaf_sub_queries must be specified and non-empty"
-type LDAPLeafQuery struct {
-	// +kubebuilder:validation:Enum=and;or
-	Operator string `json:"operator"`
-	// +optional
-	Filters []LDAPFilter `json:"filters,omitempty"`
-	// +optional
-	Queries []LDAPLeafSubQuery `json:"leaf_sub_queries,omitempty"`
-}
-
-type LDAPLeafSubQuery struct {
 	// +kubebuilder:validation:Enum=and;or
 	Operator string `json:"operator"`
 	// +kubebuilder:validation:MinItems=1
 	Filters []LDAPFilter `json:"filters"`
+	// +optional
+	Options *LDAPOptions `json:"options,omitempty"`
 }
 
 type LDAPOptions struct {

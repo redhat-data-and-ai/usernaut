@@ -273,9 +273,6 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 
 	if hasManagerFilter && includeIndirectReports {
 		log.Info("has manager filter, fetching indirect reports")
-		nestedQuery := usernautdevv1alpha1.LDAPQuery{
-			Operator: query.Operator,
-		}
 
 		queue := make([]string, 0, len(queryMembers))
 		queue = append(queue, queryMembers...)
@@ -298,8 +295,11 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 			}
 			visited[member] = struct{}{}
 
-			nestedQuery.Filters = replaceManagerInFilters(query.Filters, member)
-			nestedQuery.Queries = replaceManagerInSubQueries(query.Queries, member)
+			nestedQuery := usernautdevv1alpha1.LDAPQuery{
+				Operator: query.Operator,
+				Filters:  replaceManagerInFilters(query.Filters, member),
+				Options:  query.Options,
+			}
 			nestedQueryMembers, err := r.fetchQueryMembers(ctx, &nestedQuery, includeIndirectReports, visited)
 			if err != nil {
 				log.WithError(err).WithField("manager", member).Error("error fetching indirect reports")
@@ -326,6 +326,14 @@ func replaceManagerInFilters(filters []usernautdevv1alpha1.LDAPFilter, managerUI
 	result := make([]usernautdevv1alpha1.LDAPFilter, 0, len(filters))
 	seenManagers := make(map[string]struct{})
 	for _, filter := range filters {
+		if filter.LDAPQuery != nil {
+			nested := replaceManagerInQuery(filter.LDAPQuery, managerUID)
+			result = append(result, usernautdevv1alpha1.LDAPFilter{
+				LDAPQuery: nested,
+			})
+			continue
+		}
+
 		value := filter.Value
 		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
 			value = managerUID
@@ -344,54 +352,23 @@ func replaceManagerInFilters(filters []usernautdevv1alpha1.LDAPFilter, managerUI
 	return result
 }
 
-// replaceManagerInSubQueries rewrites manager filter values at all nested levels.
-func replaceManagerInSubQueries(queries []usernautdevv1alpha1.LDAPSubQuery, managerUID string) []usernautdevv1alpha1.LDAPSubQuery {
-	if len(queries) == 0 {
-		return []usernautdevv1alpha1.LDAPSubQuery{}
+func replaceManagerInQuery(query *usernautdevv1alpha1.LDAPQuery, managerUID string) *usernautdevv1alpha1.LDAPQuery {
+	if query == nil {
+		return nil
 	}
-	result := make([]usernautdevv1alpha1.LDAPSubQuery, 0, len(queries))
-	for _, q := range queries {
-		result = append(result, usernautdevv1alpha1.LDAPSubQuery{
-			Operator: q.Operator,
-			Filters:  replaceManagerInFilters(q.Filters, managerUID),
-			Queries:  replaceManagerInLeafQueries(q.Queries, managerUID),
-		})
+	return &usernautdevv1alpha1.LDAPQuery{
+		Operator: query.Operator,
+		Filters:  replaceManagerInFilters(query.Filters, managerUID),
+		Options:  query.Options,
 	}
-	return result
-}
-
-func replaceManagerInLeafQueries(queries []usernautdevv1alpha1.LDAPLeafQuery, managerUID string) []usernautdevv1alpha1.LDAPLeafQuery {
-	if len(queries) == 0 {
-		return []usernautdevv1alpha1.LDAPLeafQuery{}
-	}
-	result := make([]usernautdevv1alpha1.LDAPLeafQuery, 0, len(queries))
-	for _, q := range queries {
-		result = append(result, usernautdevv1alpha1.LDAPLeafQuery{
-			Operator: q.Operator,
-			Filters:  replaceManagerInFilters(q.Filters, managerUID),
-			Queries:  replaceManagerInLeafSubQueries(q.Queries, managerUID),
-		})
-	}
-	return result
-}
-
-func replaceManagerInLeafSubQueries(queries []usernautdevv1alpha1.LDAPLeafSubQuery, managerUID string) []usernautdevv1alpha1.LDAPLeafSubQuery {
-	if len(queries) == 0 {
-		return []usernautdevv1alpha1.LDAPLeafSubQuery{}
-	}
-	result := make([]usernautdevv1alpha1.LDAPLeafSubQuery, 0, len(queries))
-	for _, q := range queries {
-		result = append(result, usernautdevv1alpha1.LDAPLeafSubQuery{
-			Operator: q.Operator,
-			Filters:  replaceManagerInFilters(q.Filters, managerUID),
-		})
-	}
-	return result
 }
 
 func filtersHaveManager(filters []usernautdevv1alpha1.LDAPFilter) bool {
 	for _, filter := range filters {
 		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+			return true
+		}
+		if filter.LDAPQuery != nil && queryHasManagerFilter(filter.LDAPQuery) {
 			return true
 		}
 	}
@@ -403,39 +380,7 @@ func queryHasManagerFilter(query *usernautdevv1alpha1.LDAPQuery) bool {
 	if query == nil {
 		return false
 	}
-	if filtersHaveManager(query.Filters) {
-		return true
-	}
-	for i := range query.Queries {
-		if subQueryHasManager(&query.Queries[i]) {
-			return true
-		}
-	}
-	return false
-}
-
-func subQueryHasManager(query *usernautdevv1alpha1.LDAPSubQuery) bool {
-	if filtersHaveManager(query.Filters) {
-		return true
-	}
-	for i := range query.Queries {
-		if leafQueryHasManager(&query.Queries[i]) {
-			return true
-		}
-	}
-	return false
-}
-
-func leafQueryHasManager(query *usernautdevv1alpha1.LDAPLeafQuery) bool {
-	if filtersHaveManager(query.Filters) {
-		return true
-	}
-	for i := range query.Queries {
-		if filtersHaveManager(query.Queries[i].Filters) {
-			return true
-		}
-	}
-	return false
+	return filtersHaveManager(query.Filters)
 }
 
 // extractManagerUIDsFromQuery returns unique manager UIDs referenced anywhere in the query tree.
@@ -446,14 +391,15 @@ func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string 
 	seen := make(map[string]struct{})
 	result := []string{}
 	collectManagerUIDsFromFilters(query.Filters, seen, &result)
-	for i := range query.Queries {
-		collectSubQueryManagerUIDs(&query.Queries[i], seen, &result)
-	}
 	return result
 }
 
 func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, seen map[string]struct{}, result *[]string) {
 	for _, filter := range filters {
+		if filter.LDAPQuery != nil {
+			collectManagerUIDsFromFilters(filter.LDAPQuery.Filters, seen, result)
+			continue
+		}
 		if !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
 			continue
 		}
@@ -466,20 +412,6 @@ func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, see
 		}
 		seen[uid] = struct{}{}
 		*result = append(*result, uid)
-	}
-}
-
-func collectSubQueryManagerUIDs(query *usernautdevv1alpha1.LDAPSubQuery, seen map[string]struct{}, result *[]string) {
-	collectManagerUIDsFromFilters(query.Filters, seen, result)
-	for i := range query.Queries {
-		collectLeafQueryManagerUIDs(&query.Queries[i], seen, result)
-	}
-}
-
-func collectLeafQueryManagerUIDs(query *usernautdevv1alpha1.LDAPLeafQuery, seen map[string]struct{}, result *[]string) {
-	collectManagerUIDsFromFilters(query.Filters, seen, result)
-	for i := range query.Queries {
-		collectManagerUIDsFromFilters(query.Queries[i].Filters, seen, result)
 	}
 }
 
