@@ -29,7 +29,7 @@ import (
 )
 
 // astroUserToStruct converts an AstroUser to a structs.User
-func astroUserToStruct(user AstroUser) *structs.User {
+func astroUserToStruct(user *AstroUser) *structs.User {
 	// Extract first and last name from full name if available
 	firstName := ""
 	lastName := ""
@@ -70,8 +70,8 @@ func (c *AstroClient) FetchAllUsers(ctx context.Context) (map[string]*structs.Us
 			return 0, fmt.Errorf("failed to parse users response: %w", err)
 		}
 
-		for _, user := range usersResp.Users {
-			structUser := astroUserToStruct(user)
+		for i := range usersResp.Users {
+			structUser := astroUserToStruct(&usersResp.Users[i])
 			resultByID[structUser.ID] = structUser
 			if structUser.Email != "" {
 				resultByEmail[structUser.Email] = structUser
@@ -117,7 +117,7 @@ func (c *AstroClient) FetchUserDetails(ctx context.Context, userID string) (*str
 	}
 
 	log.Info("successfully fetched user details")
-	return astroUserToStruct(user), nil
+	return astroUserToStruct(&user), nil
 }
 
 // CreateUser creates a new user in Astro by sending an invitation
