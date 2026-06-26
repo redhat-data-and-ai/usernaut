@@ -577,7 +577,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 		Name: backend.Name,
 		Type: backend.Type,
 	}
-	teamID, teamName, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
+	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching or creating team")
 		return err
@@ -586,7 +586,12 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 
 	// Independent reconciliation of Group Params for each backend
 	if backendGroupParams.Property != "" {
-		err = backendClient.ReconcileGroupParams(ctx, teamID, teamName, backendGroupParams)
+		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupCR.Spec.GroupName)
+		if err != nil {
+			r.backendLogger.WithError(err).Error("error transforming group name for reconciling group params")
+			return err
+		}
+		err = backendClient.ReconcileGroupParams(ctx, teamID, transformedGroupName, backendGroupParams)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error reconciling group params")
 			return err
@@ -918,19 +923,18 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	return errors.Join(errs...)
 }
 
-// fetchOrCreateTeam fetches or creates a team and returns both teamID and teamName (transformed group name)
+// fetchOrCreateTeam fetches or creates a team and returns the teamID.
 func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	groupName string, backendClient clients.Client,
-	backendParams *structs.BackendParams) (string, string, error) {
+	backendParams *structs.BackendParams) (string, error) {
 
 	backendName := backendParams.GetName()
 	backendType := backendParams.GetType()
 
-	// Get transformed group name for backend API calls (team name in backend system)
 	transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backendType, groupName)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error transforming the group Name")
-		return "", "", err
+		return "", err
 	}
 
 	backendKey := backendName + "_" + backendType
@@ -939,19 +943,19 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backendName, backendType)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching team details from GroupStore")
-		return "", "", err
+		return "", err
 	}
 
 	if teamID != "" {
 		r.backendLogger.WithField("teamID", teamID).Info("team details found in GroupStore")
-		return teamID, transformedGroupName, nil
+		return teamID, nil
 	}
 
 	// Step 2: Fallback to TeamStore (using transformed name, populated during preload)
 	teamBackends, err := r.Store.Team.GetBackends(ctx, transformedGroupName)
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error fetching team details from TeamStore")
-		return "", "", err
+		return "", err
 	}
 
 	if id, exists := teamBackends[backendKey]; exists && id != "" {
@@ -960,24 +964,24 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		// Migrate data from TeamStore to GroupStore
 		if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, id); err != nil {
 			r.backendLogger.WithError(err).Error("error migrating team details to GroupStore")
-			return "", "", err
+			return "", err
 		}
 
 		r.backendLogger.Info("successfully migrated team details from TeamStore to GroupStore")
-		return id, transformedGroupName, nil
+		return id, nil
 	}
 
 	// Step 3: Team not found in either store, create a new team
 	r.backendLogger.Info("team details not found in cache, creating a new team")
 
 	newTeam, err := backendClient.CreateTeam(ctx, &structs.Team{
-		Name:        transformedGroupName, // Use transformed name for backend API
+		Name:        transformedGroupName,
 		Description: "team for " + groupName,
 		Role:        fivetran.AccountReviewerRole,
 	})
 	if err != nil {
 		r.backendLogger.WithError(err).Error("error creating team in backend")
-		return "", "", err
+		return "", err
 	}
 
 	r.backendLogger.Info("created team in backend successfully")
@@ -985,12 +989,12 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Store in GroupStore only - TeamStore is populated by preloadCache and used as read-only fallback
 	if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, newTeam.ID); err != nil {
 		r.backendLogger.WithError(err).Error("error updating team details in GroupStore")
-		return "", "", err
+		return "", err
 	}
 
 	r.backendLogger.Info("updated team details in GroupStore successfully")
 
-	return newTeam.ID, transformedGroupName, nil
+	return newTeam.ID, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
