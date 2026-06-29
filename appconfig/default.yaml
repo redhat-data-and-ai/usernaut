@@ -30,10 +30,6 @@ pattern:
     - input: "^([^\\_]+)$"
       output: "$1"
 
-  astro:
-    - input: "^([^\\_]+)$"
-      output: "$1"
-
 
 app:
   name: "usernaut"
