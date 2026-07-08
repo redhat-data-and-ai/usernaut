@@ -115,7 +115,14 @@ func buildQueryFromSpec(query *v1alpha1.LDAPQuery, baseUserDN string, depth int)
 }
 
 func buildFilterItem(filter v1alpha1.LDAPFilter, baseUserDN string, depth int) (string, error) {
-	if filter.LDAPQuery != nil {
+	hasSimple := filter.Key != "" || filter.Criteria != "" || filter.Value != ""
+	hasNested := filter.LDAPQuery != nil
+
+	if hasSimple && hasNested {
+		return "", errors.New("filter item cannot have both key/criteria/value and ldap_query")
+	}
+
+	if hasNested {
 		return buildQueryFromSpec(filter.LDAPQuery, baseUserDN, depth+1)
 	}
 	return buildSimpleFilter(filter, baseUserDN)
