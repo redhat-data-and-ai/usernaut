@@ -509,6 +509,37 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_EmptyNestedFilters() {
 	assertions.Contains(err.Error(), "filters are empty")
 }
 
+// TestBuildLDAPQueryFromSpec_BothSimpleAndNestedOnSameFilter verifies buildFilterItem rejects
+// a filter item that sets both key/criteria/value and ldap_query.
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_BothSimpleAndNestedOnSameFilter() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "title",
+				Criteria: "contains",
+				Value:    "engineer",
+				LDAPQuery: &v1alpha1.LDAPQuery{
+					Operator: "or",
+					Filters: []v1alpha1.LDAPFilter{
+						{Key: "rhatGeo", Criteria: "equals", Value: "APAC"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	assertions.Error(err)
+	assertions.Contains(err.Error(), "filter item cannot have both key/criteria/value and ldap_query")
+}
+
 func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_FourLevelNesting() {
 	assertions := assert.New(suite.T())
 
