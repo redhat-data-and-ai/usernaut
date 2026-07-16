@@ -86,7 +86,7 @@ func (l *LDAPConn) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.L
 	if len(query.Filters) == 0 {
 		return "", errors.New("filters are empty")
 	}
-	filters, err := buildFiltersFromSpec(query.Filters, l.baseUserDN)
+	filters, err := buildFiltersFromSpec(query.Filters, l.baseUserDN, l.baseDN)
 	if err != nil {
 		return "", err
 	}
@@ -102,10 +102,10 @@ func (l *LDAPConn) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.L
 	}
 }
 
-func buildFiltersFromSpec(filters []v1alpha1.LDAPFilter, baseUserDN string) ([]string, error) {
+func buildFiltersFromSpec(filters []v1alpha1.LDAPFilter, baseUserDN, baseDN string) ([]string, error) {
 	results := make([]string, 0, len(filters))
 	for _, filter := range filters {
-		result, err := buildFilterFromSpec(filter, baseUserDN)
+		result, err := buildFilterFromSpec(filter, baseUserDN, baseDN)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +114,7 @@ func buildFiltersFromSpec(filters []v1alpha1.LDAPFilter, baseUserDN string) ([]s
 	return results, nil
 }
 
-func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string, error) {
+func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN, baseDN string) (string, error) {
 	op := strings.ToLower(strings.TrimSpace(filter.Criteria))
 
 	if baseUserDN == "" {
@@ -137,6 +137,13 @@ func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string,
 
 	if strings.EqualFold(key, "manager") {
 		value = "uid=" + value + "," + baseUserDN
+	}
+
+	if strings.EqualFold(key, "memberOf") {
+		if baseDN == "" {
+			return "", errors.New("base DN is empty; required for memberOf expansion")
+		}
+		value = "cn=" + value + "," + baseDN
 	}
 
 	switch op {

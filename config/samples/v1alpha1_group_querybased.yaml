@@ -14,13 +14,18 @@ spec:
         include_indirect_reports: true
         include_manager: true
       operator: and
-      filters:  # key: LDAP attribute (e.g. manager, title, givenName, employeeType, rhatGeo, co, st). See DEVELOPMENT.md for full list.
+      filters:  # key: LDAP attribute (e.g. manager, title, givenName, employeeType, rhatGeo, co, st, memberOf). See DEVELOPMENT.md for full list.
         - key: manager
           criteria: equals
           value: pbhattac  # user ID only (expanded to uid=pbhattac,<baseUserDN>)
         - key: co
           criteria: equals
           value: "IND"
+        # memberOf derives membership from an existing LDAP/Rover group.
+        # value is expanded to cn=<value>,<baseDN>.
+        # - key: memberOf
+        #   criteria: equals
+        #   value: my-rover-group
     users:
       - subhatta
       - arijroy

@@ -285,3 +285,116 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MixOperator() {
 	assertions.NoError(err)
 	assertions.Equal("(&(manager=uid=ticramer,ou=users,dc=redhat,dc=com)(!(employeeType=external employee)))", filter)
 }
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MemberOfEquals() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+		baseDN:     "ou=adhoc,ou=managedGroups,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "memberOf",
+				Criteria: "equals",
+				Value:    "interested-parties-users",
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.NoError(err)
+	assertions.Equal("(&(memberOf=cn=interested-parties-users,ou=adhoc,ou=managedGroups,dc=redhat,dc=com))", filter)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MemberOfNot() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+		baseDN:     "ou=adhoc,ou=managedGroups,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "manager",
+				Criteria: "equals",
+				Value:    "pbhattac",
+			},
+			{
+				Key:      "memberOf",
+				Criteria: "not",
+				Value:    "excluded-group",
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.NoError(err)
+	assertions.Equal("(&(manager=uid=pbhattac,ou=users,dc=redhat,dc=com)(!(memberOf=cn=excluded-group,ou=adhoc,ou=managedGroups,dc=redhat,dc=com)))", filter)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MemberOfOrOperator() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+		baseDN:     "ou=adhoc,ou=managedGroups,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "or",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "memberOf",
+				Criteria: "equals",
+				Value:    "team-alpha",
+			},
+			{
+				Key:      "memberOf",
+				Criteria: "equals",
+				Value:    "team-beta",
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.NoError(err)
+	assertions.Equal(
+		"(|(memberOf=cn=team-alpha,ou=adhoc,ou=managedGroups,dc=redhat,dc=com)(memberOf=cn=team-beta,ou=adhoc,ou=managedGroups,dc=redhat,dc=com))",
+		filter,
+	)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MemberOfEmptyBaseDN() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+		baseDN:     "",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "memberOf",
+				Criteria: "equals",
+				Value:    "some-group",
+			},
+		},
+	}
+
+	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+
+	assertions.Error(err)
+	assertions.Contains(err.Error(), "base DN is empty")
+}
