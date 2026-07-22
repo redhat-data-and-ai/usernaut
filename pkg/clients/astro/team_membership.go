@@ -47,16 +47,7 @@ func (c *AstroClient) FetchTeamMembersByTeamID(ctx context.Context,
 		}
 
 		for _, member := range membersResp.TeamMembers {
-			// Extract first and last name from full name if available
-			firstName := ""
-			lastName := ""
-			if member.FullName != "" {
-				parts := strings.SplitN(member.FullName, " ", 2)
-				firstName = parts[0]
-				if len(parts) > 1 {
-					lastName = parts[1]
-				}
-			}
+			firstName, lastName := splitFullName(member.FullName)
 
 			members[member.UserID] = &structs.User{
 				ID:          member.UserID,

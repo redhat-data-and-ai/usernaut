@@ -20,9 +20,8 @@ import "github.com/gojek/heimdall/v7"
 
 // AstroConfig holds the configuration for Astro client
 type AstroConfig struct {
-	APIToken       string
-	OrganizationID string
-	BaseURL        string
+	APIToken string
+	BaseURL  string
 }
 
 // AstroClient is the client for interacting with Astro REST API
@@ -35,55 +34,26 @@ type AstroClient struct {
 type AstroUser struct {
 	ID               string `json:"id"`
 	Username         string `json:"username"`
-	Status           string `json:"status,omitempty"`
 	FullName         string `json:"fullName,omitempty"`
-	AvatarURL        string `json:"avatarUrl,omitempty"`
-	CreatedAt        string `json:"createdAt,omitempty"`
-	UpdatedAt        string `json:"updatedAt,omitempty"`
 	OrganizationRole string `json:"organizationRole,omitempty"`
 }
 
 // AstroUsersResponse represents the response from list users API
 type AstroUsersResponse struct {
-	Users      []AstroUser `json:"users"`
-	Offset     int         `json:"offset,omitempty"`
-	Limit      int         `json:"limit,omitempty"`
-	TotalCount int         `json:"totalCount,omitempty"`
+	Users []AstroUser `json:"users"`
 }
 
 // AstroTeam represents a team object from Astro API response
 type AstroTeam struct {
-	ID               string           `json:"id"`
-	Name             string           `json:"name"`
-	OrganizationID   string           `json:"organizationId,omitempty"`
-	OrganizationRole string           `json:"organizationRole,omitempty"`
-	Description      string           `json:"description,omitempty"`
-	IsIdpManaged     bool             `json:"isIdpManaged,omitempty"`
-	WorkspaceRoles   []WorkspaceRole  `json:"workspaceRoles,omitempty"`
-	DeploymentRoles  []DeploymentRole `json:"deploymentRoles,omitempty"`
-	RolesCount       int              `json:"rolesCount,omitempty"`
-	CreatedAt        string           `json:"createdAt,omitempty"`
-	UpdatedAt        string           `json:"updatedAt,omitempty"`
-}
-
-// WorkspaceRole represents a workspace role assignment
-type WorkspaceRole struct {
-	WorkspaceID string `json:"workspaceId"`
-	Role        string `json:"role"`
-}
-
-// DeploymentRole represents a deployment role assignment
-type DeploymentRole struct {
-	DeploymentID string `json:"deploymentId"`
-	Role         string `json:"role"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	OrganizationRole string `json:"organizationRole,omitempty"`
+	Description      string `json:"description,omitempty"`
 }
 
 // AstroTeamsResponse represents the response from list teams API
 type AstroTeamsResponse struct {
-	Teams      []AstroTeam `json:"teams"`
-	Offset     int         `json:"offset,omitempty"`
-	Limit      int         `json:"limit,omitempty"`
-	TotalCount int         `json:"totalCount,omitempty"`
+	Teams []AstroTeam `json:"teams"`
 }
 
 // AstroTeamMember represents a team member from Astro API response
@@ -96,17 +66,13 @@ type AstroTeamMember struct {
 // AstroTeamMembersResponse represents the response from list team members API
 type AstroTeamMembersResponse struct {
 	TeamMembers []AstroTeamMember `json:"teamMembers"`
-	Offset      int               `json:"offset,omitempty"`
-	Limit       int               `json:"limit,omitempty"`
-	TotalCount  int               `json:"totalCount,omitempty"`
 }
 
 // CreateTeamRequest represents the request body for creating a team
 type CreateTeamRequest struct {
-	Name             string   `json:"name"`
-	Description      string   `json:"description,omitempty"`
-	MemberIDs        []string `json:"memberIds,omitempty"`
-	OrganizationRole string   `json:"organizationRole,omitempty"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	OrganizationRole string `json:"organizationRole,omitempty"`
 }
 
 // CreateInviteRequest represents the request body for inviting a user
@@ -118,10 +84,6 @@ type CreateInviteRequest struct {
 // CreateInviteResponse represents the response from invite user API
 type CreateInviteResponse struct {
 	UserID string `json:"userId"`
-	Invite struct {
-		ID           string `json:"id"`
-		InviteeEmail string `json:"inviteeEmail"`
-	} `json:"invite,omitempty"`
 }
 
 // AddTeamMembersRequest represents the request body for adding members to a team
