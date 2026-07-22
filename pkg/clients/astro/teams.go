@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -101,6 +103,39 @@ func (c *AstroClient) FetchTeamDetails(ctx context.Context, teamID string) (*str
 	return &result, nil
 }
 
+// fetchTeamByName looks up a team by name using the Astro names filter.
+func (c *AstroClient) fetchTeamByName(ctx context.Context, name string) (*structs.Team, error) {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"service":  "astro",
+		"teamName": name,
+	})
+
+	endpoint := fmt.Sprintf("/teams?names=%s&limit=1", url.QueryEscape(name))
+	resp, status, err := c.makeRequest(ctx, endpoint, http.MethodGet, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch team by name %s: status %s, body: %s",
+			name, http.StatusText(status), string(resp))
+	}
+
+	var teamsResp AstroTeamsResponse
+	if err := json.Unmarshal(resp, &teamsResp); err != nil {
+		return nil, fmt.Errorf("failed to parse teams response: %w", err)
+	}
+
+	for _, team := range teamsResp.Teams {
+		if team.Name == name {
+			result := astroTeamToStruct(team)
+			log.WithField("teamID", result.ID).Info("found existing team by name")
+			return &result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("team not found by name: %s", name)
+}
+
 // CreateTeam creates a new team in Astro
 func (c *AstroClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
@@ -123,20 +158,11 @@ func (c *AstroClient) CreateTeam(ctx context.Context, team *structs.Team) (*stru
 		return nil, err
 	}
 
-	// Handle conflict - team might already exist
-	if status == http.StatusConflict {
-		log.Info("team already exists, fetching existing team")
-		// Try to find the team by name
-		teams, fetchErr := c.FetchAllTeams(ctx)
-		if fetchErr != nil {
-			return nil, fetchErr
-		}
-		for _, existingTeam := range teams {
-			if existingTeam.Name == team.Name {
-				return &existingTeam, nil
-			}
-		}
-		return nil, fmt.Errorf("team conflict but couldn't find existing team: %s", team.Name)
+	// Astro returns 400 with "already exists" for duplicate team names.
+	if status == http.StatusConflict ||
+		(status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(resp)), "already exists")) {
+		log.Info("team already exists, fetching existing team by name")
+		return c.fetchTeamByName(ctx, team.Name)
 	}
 
 	if status != http.StatusOK && status != http.StatusCreated {

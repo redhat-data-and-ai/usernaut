@@ -28,18 +28,22 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// splitFullName splits a display name into first and last name on the first space.
+func splitFullName(fullName string) (firstName, lastName string) {
+	if fullName == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(fullName, " ", 2)
+	firstName = parts[0]
+	if len(parts) > 1 {
+		lastName = parts[1]
+	}
+	return firstName, lastName
+}
+
 // astroUserToStruct converts an AstroUser to a structs.User
 func astroUserToStruct(user *AstroUser) *structs.User {
-	// Extract first and last name from full name if available
-	firstName := ""
-	lastName := ""
-	if user.FullName != "" {
-		parts := strings.SplitN(user.FullName, " ", 2)
-		firstName = parts[0]
-		if len(parts) > 1 {
-			lastName = parts[1]
-		}
-	}
+	firstName, lastName := splitFullName(user.FullName)
 
 	return &structs.User{
 		ID:          user.ID,
@@ -172,11 +176,12 @@ func (c *AstroClient) CreateUser(ctx context.Context, user *structs.User) (*stru
 
 	log.WithField("userID", inviteResp.UserID).Info("user invitation sent successfully")
 
+	email := strings.ToLower(user.Email)
 	// Return the created user with the ID from the response
 	return &structs.User{
 		ID:       inviteResp.UserID,
-		Email:    user.Email,
-		UserName: user.Email,
+		Email:    email,
+		UserName: email,
 		Role:     DefaultOrganizationRole,
 	}, nil
 }

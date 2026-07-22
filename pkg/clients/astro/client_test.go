@@ -36,9 +36,8 @@ func createTestClient(t *testing.T, handler http.Handler) (*AstroClient, *httpte
 
 	client := &AstroClient{
 		config: &AstroConfig{
-			APIToken:       "test-token",
-			OrganizationID: "test-org-id",
-			BaseURL:        server.URL + "/v1/organizations/test-org-id",
+			APIToken: "test-token",
+			BaseURL:  server.URL + "/v1/organizations/test-org-id",
 		},
 		client: server.Client(),
 	}
@@ -59,7 +58,6 @@ func TestNewClient(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, client)
 		assert.Equal(t, "test-token", client.config.APIToken)
-		assert.Equal(t, "test-org-id", client.config.OrganizationID)
 		assert.Equal(t, DefaultBaseURL+"/v1/organizations/test-org-id", client.config.BaseURL)
 	})
 
@@ -112,14 +110,12 @@ func TestFetchAllUsers(t *testing.T) {
 					ID:               "user-1",
 					Username:         "user1@redhat.com",
 					FullName:         "User One",
-					Status:           "ACTIVE",
 					OrganizationRole: "ORGANIZATION_MEMBER",
 				},
 				{
 					ID:               "user-2",
 					Username:         "user2@redhat.com",
 					FullName:         "User Two",
-					Status:           "ACTIVE",
 					OrganizationRole: "ORGANIZATION_MEMBER",
 				},
 			},
@@ -329,6 +325,41 @@ func TestCreateTeam(t *testing.T) {
 		assert.Equal(t, "new-team-id", created.ID)
 		assert.Equal(t, "new-team", created.Name)
 	})
+
+	t.Run("AlreadyExistsFetchesByName", func(t *testing.T) {
+		existingTeam := AstroTeam{
+			ID:               "existing-team-id",
+			Name:             "existing-team",
+			Description:      "Existing team",
+			OrganizationRole: "ORGANIZATION_MEMBER",
+		}
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost:
+				w.WriteHeader(http.StatusBadRequest)
+				body := `{"message":"Invalid request: Team with name 'existing-team' already exists in the organization",` +
+					`"statusCode":400,"requestId":"test-req"}`
+				_, _ = w.Write([]byte(body))
+			case r.Method == http.MethodGet:
+				assert.Equal(t, "existing-team", r.URL.Query().Get("names"))
+				_ = json.NewEncoder(w).Encode(AstroTeamsResponse{
+					Teams: []AstroTeam{existingTeam},
+				})
+			default:
+				t.Fatalf("unexpected method %s", r.Method)
+			}
+		})
+
+		client, server := createTestClient(t, handler)
+		defer server.Close()
+
+		created, err := client.CreateTeam(ctx, &structs.Team{Name: "existing-team"})
+		require.NoError(t, err)
+		assert.Equal(t, "existing-team-id", created.ID)
+		assert.Equal(t, "existing-team", created.Name)
+	})
 }
 
 func TestDeleteTeamByID(t *testing.T) {
@@ -477,15 +508,13 @@ func TestReconcileGroupParams(t *testing.T) {
 func TestGetConfig(t *testing.T) {
 	client := &AstroClient{
 		config: &AstroConfig{
-			APIToken:       "test-token",
-			OrganizationID: "test-org",
-			BaseURL:        "https://api.test.com",
+			APIToken: "test-token",
+			BaseURL:  "https://api.test.com",
 		},
 	}
 
 	config := client.GetConfig()
 	assert.Equal(t, "test-token", config.APIToken)
-	assert.Equal(t, "test-org", config.OrganizationID)
 	assert.Equal(t, "https://api.test.com", config.BaseURL)
 }
 

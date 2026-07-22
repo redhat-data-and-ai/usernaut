@@ -50,9 +50,8 @@ func NewClient(connection map[string]interface{}, poolCfg httpclient.ConnectionP
 	baseURL = fmt.Sprintf("%s/v1/organizations/%s", baseURL, organizationID)
 
 	config := AstroConfig{
-		APIToken:       apiToken,
-		OrganizationID: organizationID,
-		BaseURL:        baseURL,
+		APIToken: apiToken,
+		BaseURL:  baseURL,
 	}
 
 	client, err := httpclient.InitializeClient(
