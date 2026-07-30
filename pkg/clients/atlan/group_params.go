@@ -27,24 +27,24 @@ import (
 // ReconcileGroupParams reconciles backend-specific parameters for a group/team in Atlan.
 // For Atlan, this handles persona assignment based on the group_params configuration.
 func (ac *AtlanClient) ReconcileGroupParams(
-	ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams,
+	ctx context.Context, teamID string, groupParams structs.TeamParams,
 ) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service":  "atlan",
 		"teamID":   teamID,
-		"teamName": teamName,
+		"teamName": groupParams.TeamName,
 		"property": groupParams.Property,
 	})
 	log.Info("reconciling group params for Atlan")
 
-	if teamName == "" {
+	if groupParams.TeamName == "" {
 		log.Warn("team name is empty, cannot reconcile group params")
 		return nil
 	}
 
 	// Convert to Atlan's internal name format (lowercase, underscores instead of dashes/spaces)
 	// This matches the transformation done in CreateTeam
-	atlanGroupName := ToAtlanInternalName(teamName)
+	atlanGroupName := ToAtlanInternalName(groupParams.TeamName)
 	log.WithField("atlanGroupName", atlanGroupName).Debug("converted team name to Atlan internal format")
 
 	switch groupParams.Property {

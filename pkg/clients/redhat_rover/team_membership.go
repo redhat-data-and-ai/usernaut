@@ -151,7 +151,7 @@ func (rC *RoverClient) RemoveUserFromTeam(ctx context.Context, teamID string, us
 }
 
 func (rC *RoverClient) ReconcileGroupParams(
-	ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams,
+	ctx context.Context, teamID string, groupParams structs.TeamParams,
 ) error {
 	// Red Hat Rover does not support group parameter reconciliation
 	return nil

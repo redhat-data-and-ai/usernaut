@@ -60,8 +60,8 @@ type Client interface {
 	// Returns the list of users present under a team
 	FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error)
 	// ReconcileGroupParams reconciles backend-specific parameters for a group/team.
-	// teamName is the transformed group name used in the backend system.
-	ReconcileGroupParams(ctx context.Context, teamID string, teamName string, groupParams structs.TeamParams) error
+	// Backends that need the team name can read it from groupParams.TeamName.
+	ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error
 	// Adds a member to the team
 	AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error
 	// Removes a member from the team

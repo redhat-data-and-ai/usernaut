@@ -593,7 +593,9 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 			r.backendLogger.WithError(err).Error("error transforming group name for reconciling group params")
 			return err
 		}
-		if err := backendClient.ReconcileGroupParams(ctx, teamID, transformedGroupName, backendGroupParams); err != nil {
+		// Set TeamName in params for backends that need it (e.g., Atlan for persona assignment)
+		backendGroupParams.TeamName = transformedGroupName
+		if err := backendClient.ReconcileGroupParams(ctx, teamID, backendGroupParams); err != nil {
 			r.backendLogger.WithError(err).Error("error reconciling group params")
 			return err
 		}
