@@ -584,15 +584,16 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	}
 	r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
 
-	// Independent reconciliation of Group Params for each backend
-	if backendGroupParams.Property != "" {
+	// Reconcile group params for backends that need it
+	// - Call when Property is explicitly specified in group_params, OR
+	// - Call for Atlan backend (which may assign default persona even without explicit params)
+	if backendGroupParams.Property != "" || backend.Type == "atlan" {
 		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupCR.Spec.GroupName)
 		if err != nil {
 			r.backendLogger.WithError(err).Error("error transforming group name for reconciling group params")
 			return err
 		}
-		err = backendClient.ReconcileGroupParams(ctx, teamID, transformedGroupName, backendGroupParams)
-		if err != nil {
+		if err := backendClient.ReconcileGroupParams(ctx, teamID, transformedGroupName, backendGroupParams); err != nil {
 			r.backendLogger.WithError(err).Error("error reconciling group params")
 			return err
 		}

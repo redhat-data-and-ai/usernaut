@@ -1,3 +1,19 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package atlan
 
 import (
@@ -13,29 +29,45 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// ToAtlanInternalName converts a group name to Atlan's internal format.
+// Atlan requires group names to be lowercase with underscores instead of spaces/dashes.
+func ToAtlanInternalName(name string) string {
+	internalName := strings.ToLower(strings.ReplaceAll(name, " ", "_"))
+	return strings.ReplaceAll(internalName, "-", "_")
+}
+
 func (ac *AtlanClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
 	log := logger.Logger(ctx).WithField("service", "atlan")
 	log.Info("fetching all teams from Atlan")
 
-	url := fmt.Sprintf("%s/api/service/v2/groups?columns=name", ac.url)
-	response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchAllTeams")
-	if err != nil {
-		log.WithError(err).Error("failed to fetch teams from Atlan")
-		return nil, fmt.Errorf("failed to fetch teams from Atlan: %w", err)
-	}
-
-	var apiResponse AtlanGroupsResponse
-	if err := json.Unmarshal(response, &apiResponse); err != nil {
-		log.WithError(err).Error("failed to parse teams response from Atlan")
-		return nil, fmt.Errorf("failed to parse response from Atlan: %w", err)
-	}
-
 	teams := make(map[string]structs.Team)
-	for _, group := range apiResponse.Records {
-		teams[group.ID] = structs.Team{
-			ID:   group.ID,
-			Name: group.Name,
+	offset := 0
+
+	for {
+		url := fmt.Sprintf("%s/api/service/v2/groups?columns=name&limit=%d&offset=%d", ac.url, ac.paginationLimit, offset)
+		response, err := ac.sendRequest(ctx, url, http.MethodGet, nil, "FetchAllTeams")
+		if err != nil {
+			log.WithError(err).Error("failed to fetch teams from Atlan")
+			return nil, fmt.Errorf("failed to fetch teams from Atlan: %w", err)
 		}
+
+		var apiResponse AtlanGroupsResponse
+		if err := json.Unmarshal(response, &apiResponse); err != nil {
+			log.WithError(err).Error("failed to parse teams response from Atlan")
+			return nil, fmt.Errorf("failed to parse response from Atlan: %w", err)
+		}
+
+		for _, group := range apiResponse.Records {
+			teams[group.ID] = structs.Team{
+				ID:   group.ID,
+				Name: group.Name,
+			}
+		}
+
+		if len(apiResponse.Records) < ac.paginationLimit {
+			break
+		}
+		offset += ac.paginationLimit
 	}
 
 	log.WithField("team_count", len(teams)).Info("successfully fetched teams from Atlan")
@@ -51,8 +83,7 @@ func (ac *AtlanClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 
 	url := fmt.Sprintf("%s/api/service/groups", ac.url)
 
-	internalName := strings.ToLower(strings.ReplaceAll(team.Name, " ", "_"))
-	internalName = strings.ReplaceAll(internalName, "-", "_")
+	internalName := ToAtlanInternalName(team.Name)
 
 	requestBody := map[string]interface{}{
 		"group": map[string]interface{}{
