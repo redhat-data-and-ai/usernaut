@@ -14,6 +14,7 @@ limitations under the License.
 package middleware
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"net/http"
 
@@ -37,8 +38,13 @@ func BasicAuth(cfg *config.AppConfig) gin.HandlerFunc {
 
 		authorized := false
 		for _, u := range cfg.APIServer.Auth.BasicUsers {
-			usernameMatches := subtle.ConstantTimeCompare([]byte(username), []byte(u.Username))
-			passwordMatches := subtle.ConstantTimeCompare([]byte(password), []byte(u.Password))
+			usernameHash := sha256.Sum256([]byte(username))
+			uUsernameHash := sha256.Sum256([]byte(u.Username))
+			passwordHash := sha256.Sum256([]byte(password))
+			uPasswordHash := sha256.Sum256([]byte(u.Password))
+
+			usernameMatches := subtle.ConstantTimeCompare(usernameHash[:], uUsernameHash[:])
+			passwordMatches := subtle.ConstantTimeCompare(passwordHash[:], uPasswordHash[:])
 			if usernameMatches&passwordMatches == 1 {
 				authorized = true
 				break
