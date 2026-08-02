@@ -36,8 +36,9 @@ var dialLDAP = func(server string) (closeableLDAPConnClient, error) {
 }
 
 type LDAPConn struct {
-	mu               sync.Mutex
+	mu               sync.RWMutex
 	conn             LDAPConnClient
+	connGeneration   uint64
 	userDN           string
 	baseDN           string
 	baseUserDN       string
@@ -81,10 +82,23 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 
 // getConn returns the underlying LDAP connection.
 func (l *LDAPConn) getConn() LDAPConnClient {
+	l.mu.RLock()
+	conn := l.conn
+	connGeneration := l.connGeneration
+	if conn != nil && !conn.IsClosing() {
+		l.mu.RUnlock()
+		return conn
+	}
+	l.mu.RUnlock()
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.conn != nil && l.conn.IsClosing() {
+	if l.connGeneration != connGeneration {
+		return l.conn
+	}
+
+	if l.conn != nil {
 		newConn, err := dialLDAP(l.server)
 		if err != nil {
 			// Log the error and return the existing connection (or nil if no valid connection exists)
@@ -99,6 +113,7 @@ func (l *LDAPConn) getConn() LDAPConnClient {
 			return nil
 		}
 		l.conn = newConn
+		l.connGeneration++
 	}
 
 	return l.conn
