@@ -14,13 +14,34 @@ limitations under the License.
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
+
+// compareKey is a per-process random key. It never leaves the process and is
+// not used to store anything; it exists so credential comparison happens over
+// keyed tags rather than bare digests of the secrets themselves.
+var compareKey = func() []byte {
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		panic("usernaut: cannot initialise basic-auth compare key: " + err.Error())
+	}
+	return k
+}()
+
+// credentialTag returns a fixed-length keyed tag for s. Comparing tags with
+// hmac.Equal is constant time and, unlike comparing the raw values, does not
+// leak length. The tag is ephemeral and never persisted.
+func credentialTag(s string) []byte {
+	mac := hmac.New(sha256.New, compareKey)
+	mac.Write([]byte(s))
+	return mac.Sum(nil)
+}
 
 func BasicAuth(cfg *config.AppConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -38,14 +59,9 @@ func BasicAuth(cfg *config.AppConfig) gin.HandlerFunc {
 
 		authorized := false
 		for _, u := range cfg.APIServer.Auth.BasicUsers {
-			usernameHash := sha256.Sum256([]byte(username))
-			uUsernameHash := sha256.Sum256([]byte(u.Username))
-			passwordHash := sha256.Sum256([]byte(password))
-			uPasswordHash := sha256.Sum256([]byte(u.Password))
-
-			usernameMatches := subtle.ConstantTimeCompare(usernameHash[:], uUsernameHash[:])
-			passwordMatches := subtle.ConstantTimeCompare(passwordHash[:], uPasswordHash[:])
-			if usernameMatches&passwordMatches == 1 {
+			usernameMatches := hmac.Equal(credentialTag(username), credentialTag(u.Username))
+			passwordMatches := hmac.Equal(credentialTag(password), credentialTag(u.Password))
+			if usernameMatches && passwordMatches {
 				authorized = true
 				break
 			}
