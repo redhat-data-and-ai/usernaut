@@ -1,7 +1,6 @@
 package hystrix
 
 import (
-	"context"
 	"time"
 
 	"github.com/afex/hystrix-go/plugins"
@@ -63,16 +62,6 @@ func WithErrorPercentThreshold(errorPercentThreshold int) Option {
 
 // WithFallbackFunc sets the fallback function
 func WithFallbackFunc(fn fallbackFunc) Option {
-	if fn == nil {
-		return func(_ *Client) {}
-	}
-	return WithFallbackCtxFunc(func(_ context.Context, err error) error {
-		return fn(err)
-	})
-}
-
-// WithFallbackCtxFunc sets the fallback function with context support
-func WithFallbackCtxFunc(fn fallbackCtxFunc) Option {
 	return func(c *Client) {
 		c.fallbackFunc = fn
 	}

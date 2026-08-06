@@ -166,6 +166,6 @@ func (fc *FivetranClient) RemoveUserFromTeam(ctx context.Context, teamID string,
 
 func (fc *FivetranClient) ReconcileGroupParams(
 	ctx context.Context, teamID string, groupParams structs.TeamParams) error {
-	// TODO: Implement group parameter reconciliation for Fivetran if applicable.
+	// Fivetran does not support group parameter reconciliation
 	return nil
 }
