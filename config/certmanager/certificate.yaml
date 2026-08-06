@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/name: certificate
+    app.kubernetes.io/instance: webhook-serving-cert
+    app.kubernetes.io/component: certificate
+    app.kubernetes.io/created-by: usernaut
+    app.kubernetes.io/part-of: usernaut
+    app.kubernetes.io/managed-by: kustomize
+    paas.redhat.com/appcode: usernaut
+  name: webhook-serving-cert
+  namespace: system
+spec:
+  dnsNames:
+  - webhook-service.system.svc
+  - webhook-service.system.svc.cluster.local
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: rhcs-issuer-host
+  secretName: webhook-serving-cert
+  literalSubject: UID=mpp:ddis-asteroid:usernaut,OU=serviceaccounts,O=mpaas
+  emailAddresses:
+    - dataverse-platform-admin@redhat.com
