@@ -37,18 +37,27 @@ type Backend struct {
 }
 
 type LDAPFilter struct {
+	// +optional
 	// +kubebuilder:validation:Enum=givenName;displayName;rhatJobTitle;title;employeeType;manager;rhatCostCenter;rhatCostCenterDesc;rhatGeo;co;st;rhatLocation;rhatOfficeLocation;rhatOfficeFloor;roomNumber
-	Key string `json:"key"`
+	Key string `json:"key,omitempty"`
+	// +optional
 	// +kubebuilder:validation:Enum=equals;contains;not
-	Criteria string `json:"criteria"`
-	Value    string `json:"value"`
+	Criteria string `json:"criteria,omitempty"`
+	// +optional
+	Value string `json:"value,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	LDAPQuery *LDAPQuery `json:"ldap_query,omitempty"`
 }
 
 type LDAPQuery struct {
 	// +kubebuilder:validation:Enum=and;or
-	Operator string       `json:"operator"`
-	Filters  []LDAPFilter `json:"filters"`
-	Options  *LDAPOptions `json:"options,omitempty"`
+	Operator string `json:"operator"`
+	// +kubebuilder:validation:MinItems=1
+	Filters []LDAPFilter `json:"filters"`
+	// +optional
+	Options *LDAPOptions `json:"options,omitempty"`
 }
 
 type LDAPOptions struct {
