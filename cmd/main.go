@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -147,6 +148,9 @@ func main() {
 		watchedNs = "usernaut"
 	}
 
+	leaseDuration := 60 * time.Second
+	renewDeadline := 40 * time.Second
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
@@ -154,6 +158,8 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dd1e5158.operator.dataverse.redhat.com",
+		LeaseDuration:          &leaseDuration,
+		RenewDeadline:          &renewDeadline,
 		Cache: k8sCache.Options{
 			DefaultNamespaces: map[string]k8sCache.Config{
 				watchedNs: {},
