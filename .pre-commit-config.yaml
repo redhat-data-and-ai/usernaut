@@ -2,10 +2,6 @@
 #
 # Install: pip install pre-commit && pre-commit install
 # Run manually: pre-commit run --all-files
-#
-# Do not add rh-pre-commit here: it is associate-only and Red Hat recommends
-# the global install for open source repos instead of committing it to
-# .pre-commit-config.yaml. See the rh-pre-commit FAQ (source.redhat.com).
 
 repos:
   # Generic file and repo hygiene (pre-commit/pre-commit-hooks)
