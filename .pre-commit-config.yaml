@@ -3,6 +3,8 @@
 # Install: pip install pre-commit && pre-commit install
 # Run manually: pre-commit run --all-files
 
+exclude: ^vendor/
+
 repos:
   # Generic file and repo hygiene (pre-commit/pre-commit-hooks)
   - repo: https://github.com/pre-commit/pre-commit-hooks
