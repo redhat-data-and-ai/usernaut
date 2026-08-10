@@ -1,0 +1,27 @@
+# Pre-commit hooks for usernaut (whole repo).
+#
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# Do not add rh-pre-commit here: it is associate-only and Red Hat recommends
+# the global install for open source repos instead of committing it to
+# .pre-commit-config.yaml. See the rh-pre-commit FAQ (source.redhat.com).
+
+repos:
+  # Generic file and repo hygiene (pre-commit/pre-commit-hooks)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+        exclude: ^CODEOWNERS$  # script + CI validate; avoid pre-commit changing trailing newlines
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: detect-private-key
+      - id: check-merge-conflict
+
+  # Secret detection (requires Go >= 1.23.8; run: brew upgrade go)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
