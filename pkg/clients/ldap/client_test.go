@@ -1,11 +1,15 @@
 package ldap
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	ldapv3 "github.com/go-ldap/ldap/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,6 +55,74 @@ func TestInitLdap_Success(t *testing.T) {
 	}
 }
 
+func TestGetLdapConnection_ConcurrentReconnect(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	initialConn := newTestLDAPConn(true)
+	reconnectedConn := newTestLDAPConn(false)
+	var dialCount atomic.Int32
+
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		dialCount.Add(1)
+		return reconnectedConn, nil
+	}
+
+	ldapConn := &LDAPConn{
+		conn:   initialConn,
+		server: "ldap://ldap.com:389",
+	}
+
+	const goroutines = 50
+	start := make(chan struct{})
+	results := make(chan LDAPConnClient, goroutines)
+	var wg sync.WaitGroup
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- ldapConn.getConn()
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	for conn := range results {
+		assert.Same(t, reconnectedConn, conn, "Expected every caller to receive the reconnected LDAP connection")
+	}
+	assert.Equal(t, int32(1), dialCount.Load(), "Expected exactly one reconnect")
+	assert.Equal(t, int32(1), reconnectedConn.bindCount.Load(), "Expected exactly one bind on the reconnected connection")
+	assert.Same(t, reconnectedConn, ldapConn.conn, "Expected LDAPConn to store the reconnected connection")
+}
+
+func TestGetLdapConnection_ReconnectFailureKeepsExistingConnection(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	initialConn := newTestLDAPConn(true)
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		return nil, errors.New("dial failed")
+	}
+
+	ldapConn := &LDAPConn{
+		conn:   initialConn,
+		server: "ldap://ldap.com:389",
+	}
+
+	conn := ldapConn.getConn()
+
+	assert.Nil(t, conn, "Expected nil when reconnect dial fails")
+	assert.Same(t, initialConn, ldapConn.conn, "Expected failed reconnect to leave the existing connection unchanged")
+}
+
 // startMockLDAPServer starts a simple mock LDAP server for testing purposes.
 func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -83,4 +155,34 @@ func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 		close(done)
 		_ = ln.Close()
 	}
+}
+
+type testLDAPConn struct {
+	closing    atomic.Bool
+	bindCount  atomic.Int32
+	closeCount atomic.Int32
+}
+
+func newTestLDAPConn(closing bool) *testLDAPConn {
+	conn := &testLDAPConn{}
+	conn.closing.Store(closing)
+	return conn
+}
+
+func (c *testLDAPConn) IsClosing() bool {
+	return c.closing.Load()
+}
+
+func (c *testLDAPConn) Search(*ldapv3.SearchRequest) (*ldapv3.SearchResult, error) {
+	return &ldapv3.SearchResult{}, nil
+}
+
+func (c *testLDAPConn) UnauthenticatedBind(username string) error {
+	c.bindCount.Add(1)
+	return nil
+}
+
+func (c *testLDAPConn) Close() error {
+	c.closeCount.Add(1)
+	return nil
 }
