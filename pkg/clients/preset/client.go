@@ -30,9 +30,10 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
+	"github.com/sirupsen/logrus"
 )
 
-// NewClient creates a new Preset client with JWT-based authentication
+// NewClient creates a new Preset client with SCIM token authentication
 func NewClient(presetAppConfig map[string]interface{},
 	connectionPoolConfig httpclient.ConnectionPoolConfig,
 	hystrixResiliencyConfig httpclient.HystrixResiliencyConfig) (*PresetClient, error) {
@@ -48,15 +49,8 @@ func NewClient(presetAppConfig map[string]interface{},
 	if presetConfig.TeamSlug == "" {
 		return nil, fmt.Errorf("preset configuration is missing required field: team_slug")
 	}
-
-	// Validate auth: either scim_token OR (api_token + api_secret) must be provided
-	if presetConfig.SCIMToken == "" && (presetConfig.APIToken == "" || presetConfig.APISecret == "") {
-		return nil, fmt.Errorf("preset configuration requires either scim_token or both api_token and api_secret")
-	}
-
-	apiURL := presetConfig.APIURL
-	if apiURL == "" {
-		apiURL = "https://api.app.preset.io"
+	if presetConfig.SCIMToken == "" {
+		return nil, fmt.Errorf("preset configuration is missing required field: scim_token")
 	}
 
 	client, err := httpclient.InitializeClient(
@@ -73,9 +67,6 @@ func NewClient(presetAppConfig map[string]interface{},
 	return &PresetClient{
 		client:    client,
 		baseURL:   presetConfig.BaseURL,
-		apiURL:    apiURL,
-		apiToken:  presetConfig.APIToken,
-		apiSecret: presetConfig.APISecret,
 		scimToken: presetConfig.SCIMToken,
 		teamSlug:  presetConfig.TeamSlug,
 	}, nil
@@ -91,12 +82,9 @@ func (pc *PresetClient) scimURL() string {
 func (pc *PresetClient) sendRequest(
 	ctx context.Context, url string, method string, body interface{},
 ) ([]byte, int, error) {
-	log := logger.Logger(ctx).WithField("service", "preset")
-
-	token, err := pc.getJWTToken(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get JWT token: %w", err)
-	}
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"service": "preset",
+	})
 
 	var reqBody io.Reader
 	if body != nil {
@@ -112,7 +100,7 @@ func (pc *PresetClient) sendRequest(
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+pc.scimToken)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
@@ -128,9 +116,17 @@ func (pc *PresetClient) sendRequest(
 	}
 
 	if !slices.Contains([]int{http.StatusOK, http.StatusCreated, http.StatusNoContent}, resp.StatusCode) {
-		log.WithField("status_code", resp.StatusCode).
-			WithField("response", string(respBody)).
-			Debug("unexpected response from Preset API")
+		const maxLogBodyLen = 512
+		responseBodyPreview := string(respBody)
+		if len(responseBodyPreview) > maxLogBodyLen {
+			responseBodyPreview = responseBodyPreview[:maxLogBodyLen] + "...(truncated)"
+		}
+
+		log.WithFields(logrus.Fields{
+			"status_code":           resp.StatusCode,
+			"response_body_preview": responseBodyPreview,
+			"response_body_size":    len(respBody),
+		}).Debug("unexpected response from Preset API")
 		return respBody, resp.StatusCode, fmt.Errorf(
 			"unexpected status code: %d, response: %s", resp.StatusCode, string(respBody))
 	}

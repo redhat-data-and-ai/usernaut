@@ -18,7 +18,6 @@ package preset
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -35,41 +34,30 @@ func (pc *PresetClient) FetchTeamMembersByTeamID(ctx context.Context, teamID str
 	})
 	log.Info("fetching SCIM group members from Preset")
 
-	reqURL := fmt.Sprintf("%s/Groups/%s", pc.scimURL(), teamID)
-	response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+	group, err := pc.fetchSCIMGroup(ctx, teamID)
 	if err != nil {
+		log.WithError(err).Error("failed to fetch SCIM group members from Preset")
 		return nil, fmt.Errorf("failed to fetch SCIM group members from Preset: %w", err)
 	}
 
-	var group scimGroup
-	if err := json.Unmarshal(response, &group); err != nil {
-		return nil, fmt.Errorf("failed to parse SCIM group response: %w", err)
-	}
-
-	members := make(map[string]*structs.User)
-	for _, m := range group.Members {
-		members[m.Value] = &structs.User{
-			ID:          m.Value,
-			DisplayName: m.Display,
-		}
-	}
-
-	log.WithField("member_count", len(members)).Info("fetched SCIM group members from Preset")
+	members := scimMembersToUserMap(group)
+	log.WithFields(logrus.Fields{
+		"member_count": len(members),
+	}).Info("fetched SCIM group members from Preset")
 	return members, nil
 }
 
 // AddUserToTeam adds users to a SCIM group via PATCH operation
 func (pc *PresetClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service":    "preset",
 		"teamID":     teamID,
 		"user_count": len(userIDs),
 	})
-
-	if len(userIDs) == 0 {
-		return nil
-	}
-
 	log.Info("adding users to SCIM group in Preset")
 
 	members := make([]scimMemberValue, 0, len(userIDs))
@@ -78,19 +66,16 @@ func (pc *PresetClient) AddUserToTeam(ctx context.Context, teamID string, userID
 	}
 
 	patchReq := scimPatchRequest{
-		Schemas: []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"},
+		Schemas: []string{scimPatchSchema},
 		Operations: []scimPatchOperation{
-			{
-				Op:    "add",
-				Path:  "members",
-				Value: members,
-			},
+			{Op: "add", Path: "members", Value: members},
 		},
 	}
 
 	reqURL := fmt.Sprintf("%s/Groups/%s", pc.scimURL(), teamID)
 	_, _, err := pc.sendRequest(ctx, reqURL, http.MethodPatch, patchReq)
 	if err != nil {
+		log.WithError(err).Error("failed to add users to SCIM group in Preset")
 		return fmt.Errorf("failed to add users to SCIM group in Preset: %w", err)
 	}
 
@@ -101,16 +86,15 @@ func (pc *PresetClient) AddUserToTeam(ctx context.Context, teamID string, userID
 // RemoveUserFromTeam removes users from a SCIM group via PATCH operation.
 // Each user is removed individually using the path filter format required by Preset.
 func (pc *PresetClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service":    "preset",
 		"teamID":     teamID,
 		"user_count": len(userIDs),
 	})
-
-	if len(userIDs) == 0 {
-		return nil
-	}
-
 	log.Info("removing users from SCIM group in Preset")
 
 	operations := make([]scimPatchOperation, 0, len(userIDs))
@@ -122,16 +106,24 @@ func (pc *PresetClient) RemoveUserFromTeam(ctx context.Context, teamID string, u
 	}
 
 	patchReq := scimPatchRequest{
-		Schemas:    []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"},
+		Schemas:    []string{scimPatchSchema},
 		Operations: operations,
 	}
 
 	reqURL := fmt.Sprintf("%s/Groups/%s", pc.scimURL(), teamID)
 	_, _, err := pc.sendRequest(ctx, reqURL, http.MethodPatch, patchReq)
 	if err != nil {
+		log.WithError(err).Error("failed to remove users from SCIM group in Preset")
 		return fmt.Errorf("failed to remove users from SCIM group in Preset: %w", err)
 	}
 
 	log.Info("successfully removed users from SCIM group in Preset")
+	return nil
+}
+
+// ReconcileGroupParams is a no-op for the Preset backend.
+func (pc *PresetClient) ReconcileGroupParams(
+	ctx context.Context, teamID string, groupParams structs.TeamParams,
+) error {
 	return nil
 }

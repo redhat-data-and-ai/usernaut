@@ -17,42 +17,22 @@ limitations under the License.
 package preset
 
 import (
-	"sync"
-	"time"
-
 	"github.com/gojek/heimdall/v7"
 )
 
 // PresetClient is the HTTP client for Preset SCIM API
 type PresetClient struct {
 	client    heimdall.Doer
-	baseURL   string // manage.app.preset.io - for SCIM and Manager API operations
-	apiURL    string // api.app.preset.io - for JWT authentication
-	apiToken  string
-	apiSecret string
-	scimToken string // SCIM bearer token (preferred auth; used directly, skips JWT exchange)
+	baseURL   string
+	scimToken string
 	teamSlug  string
-	jwtToken  string
-	jwtExpiry time.Time
-	mu        sync.Mutex
 }
 
 // PresetConfig holds the configuration needed to connect to Preset
 type PresetConfig struct {
-	APIToken  string `json:"api_token"`
-	APISecret string `json:"api_secret"`
-	SCIMToken string `json:"scim_token"` // direct SCIM Bearer token (alternative to JWT)
-	BaseURL   string `json:"base_url"`   // https://manage.app.preset.io
-	APIURL    string `json:"api_url"`    // https://api.app.preset.io (for JWT auth)
+	SCIMToken string `json:"scim_token"`
+	BaseURL   string `json:"base_url"`
 	TeamSlug  string `json:"team_slug"`
-}
-
-// authResponse represents the JWT auth response from Preset API
-type authResponse struct {
-	AccessToken string `json:"access_token"`
-	Payload     struct {
-		Exp int64 `json:"exp"`
-	} `json:"payload"`
 }
 
 // scimUser represents a user in SCIM format
