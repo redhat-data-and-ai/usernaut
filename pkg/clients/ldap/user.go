@@ -40,12 +40,6 @@ func (l *LDAPConn) executeSearch(ctx context.Context,
 		return nil, errors.New("LDAP connection is nil")
 	}
 
-	// Ensure connection is bound before search (some LDAP servers require this)
-	err := conn.UnauthenticatedBind("")
-	if err != nil {
-		return nil, fmt.Errorf("failed to bind before search: %w", err)
-	}
-
 	resp, err := conn.Search(searchRequest)
 	if err != nil {
 		// Handle LDAP "No Such Object" error (code 32)
@@ -157,10 +151,6 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 		conn := l.getConn()
 		if conn == nil {
 			return result, errors.New("LDAP connection is nil")
-		}
-
-		if err := conn.UnauthenticatedBind(""); err != nil {
-			return result, fmt.Errorf("failed to bind before bulk search: %w", err)
 		}
 
 		resp, err := conn.Search(searchRequest)
