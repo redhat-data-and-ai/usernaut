@@ -101,6 +101,13 @@ backends:
       url: "https://gitlab.test.com"
       token: file|/path/to/gitlab_token
       parent_group_id: 111111
+  - name: preset
+    type: "preset"
+    enabled: true
+    connection:
+      base_url: "https://manage.app.preset.io"
+      team_slug: "your-team-slug"
+      scim_token: file|path/to/preset_scim_token
 
 apiServer:
   address: "0.0.0.0:8080"
