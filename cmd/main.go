@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -147,13 +148,22 @@ func main() {
 		watchedNs = "usernaut"
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	cfg := ctrl.GetConfigOrDie()
+
+	leaseDuration := 60 * time.Second
+	renewDeadline := 40 * time.Second
+	retryPeriod := 5 * time.Second
+
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dd1e5158.operator.dataverse.redhat.com",
+		LeaseDuration:          &leaseDuration,
+		RenewDeadline:          &renewDeadline,
+		RetryPeriod:            &retryPeriod,
 		Cache: k8sCache.Options{
 			DefaultNamespaces: map[string]k8sCache.Config{
 				watchedNs: {},
