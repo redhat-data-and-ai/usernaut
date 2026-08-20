@@ -36,6 +36,20 @@ func (m *MockLDAPConnClient) EXPECT() *MockLDAPConnClientMockRecorder {
 	return m.recorder
 }
 
+// Bind mocks base method.
+func (m *MockLDAPConnClient) Bind(username, password string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Bind", username, password)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Bind indicates an expected call of Bind.
+func (mr *MockLDAPConnClientMockRecorder) Bind(username, password interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Bind", reflect.TypeOf((*MockLDAPConnClient)(nil).Bind), username, password)
+}
+
 // IsClosing mocks base method.
 func (m *MockLDAPConnClient) IsClosing() bool {
 	m.ctrl.T.Helper()
