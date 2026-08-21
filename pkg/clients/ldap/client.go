@@ -76,6 +76,8 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 		baseUserDN:       ldapConfig.BaseUserDN,
 		userSearchFilter: ldapConfig.UserSearchFilter,
 		attributes:       ldapConfig.Attributes,
+		bindUsername:     ldapConfig.BindUsername,
+		bindPassword:     ldapConfig.BindPassword,
 	}, nil
 }
 
