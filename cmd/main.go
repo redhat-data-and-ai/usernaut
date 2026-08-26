@@ -21,7 +21,10 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -57,6 +60,8 @@ import (
 	// +kubebuilder:scaffold:imports
 	"github.com/redhat-data-and-ai/usernaut/internal/httpapi/server"
 )
+
+const defaultWatchedNamespace = "usernaut"
 
 var (
 	scheme   = runtime.NewScheme()
@@ -142,10 +147,8 @@ func main() {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
-	watchedNs := os.Getenv("WATCHED_NAMESPACE")
-	if watchedNs == "" {
-		watchedNs = "usernaut"
-	}
+	watchedNamespaces := parseWatchedNamespaces(os.Getenv("WATCHED_NAMESPACE"))
+	setupLog.Info("watching namespaces", "namespaces", slices.Sorted(maps.Keys(watchedNamespaces)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
@@ -155,9 +158,7 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dd1e5158.operator.dataverse.redhat.com",
 		Cache: k8sCache.Options{
-			DefaultNamespaces: map[string]k8sCache.Config{
-				watchedNs: {},
-			},
+			DefaultNamespaces: watchedNamespaces,
 		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -264,6 +265,24 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// parseWatchedNamespaces parses a comma separated list of namespaces into the cache
+// configuration consumed by the manager. It falls back to the "usernaut" namespace when
+// no usable value is provided.
+func parseWatchedNamespaces(value string) map[string]k8sCache.Config {
+	namespaces := make(map[string]k8sCache.Config)
+	for _, ns := range strings.Split(value, ",") {
+		if ns = strings.TrimSpace(ns); ns != "" {
+			namespaces[ns] = k8sCache.Config{}
+		}
+	}
+
+	if len(namespaces) == 0 {
+		namespaces[defaultWatchedNamespace] = k8sCache.Config{}
+	}
+
+	return namespaces
 }
 
 // storeUsersInCache stores users in the cache and returns an error if any user fails to be stored
