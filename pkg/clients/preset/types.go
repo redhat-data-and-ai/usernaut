@@ -35,16 +35,21 @@ type PresetConfig struct {
 	TeamSlug  string `json:"team_slug"`
 }
 
+const scimPageSize = 100
+
+const (
+	scimUserSchema  = "urn:ietf:params:scim:schemas:core:2.0:User"
+	scimGroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group"
+	scimPatchSchema = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+)
+
 // scimUser represents a user in SCIM format
 type scimUser struct {
-	ID       string `json:"id"`
-	UserName string `json:"userName"`
-	Emails   []struct {
-		Value   string `json:"value"`
-		Primary bool   `json:"primary"`
-	} `json:"emails"`
-	DisplayName string `json:"displayName"`
-	Active      bool   `json:"active"`
+	ID          string           `json:"id"`
+	UserName    string           `json:"userName"`
+	Emails      []scimEmailValue `json:"emails"`
+	DisplayName string           `json:"displayName"`
+	Active      bool             `json:"active"`
 }
 
 // scimUsersResponse represents the SCIM Users list response
@@ -76,12 +81,9 @@ type scimName struct {
 
 // scimGroup represents a group in SCIM format
 type scimGroup struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
-	Members     []struct {
-		Value   string `json:"value"`
-		Display string `json:"display"`
-	} `json:"members"`
+	ID          string       `json:"id"`
+	DisplayName string       `json:"displayName"`
+	Members     []scimMember `json:"members"`
 }
 
 // scimGroupsResponse represents the SCIM Groups list response
@@ -100,7 +102,7 @@ type scimGroupCreateRequest struct {
 type scimPatchOperation struct {
 	Op    string      `json:"op"`
 	Path  string      `json:"path"`
-	Value interface{} `json:"value"`
+	Value interface{} `json:"value,omitempty"`
 }
 
 // scimPatchRequest represents a SCIM PATCH request body
@@ -109,7 +111,8 @@ type scimPatchRequest struct {
 	Operations []scimPatchOperation `json:"Operations"`
 }
 
-// scimMemberValue represents a member reference in SCIM PATCH operations
-type scimMemberValue struct {
-	Value string `json:"value"`
+// scimMember is a SCIM group member (GET) or member reference (PATCH).
+type scimMember struct {
+	Value   string `json:"value"`
+	Display string `json:"display,omitempty"`
 }

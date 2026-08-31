@@ -19,13 +19,17 @@ package preset
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
 )
+
+var errGroupNotFound = errors.New("group not found")
 
 // FetchAllTeams retrieves all SCIM groups from Preset
 func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
@@ -36,7 +40,8 @@ func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.T
 
 	teams := make(map[string]structs.Team)
 
-	for startIndex := 1; ; startIndex += scimPageSize {
+	startIndex := 1
+	for {
 		reqURL := fmt.Sprintf("%s/Groups?startIndex=%d&count=%d", pc.scimURL(), startIndex, scimPageSize)
 		response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 		if err != nil {
@@ -50,7 +55,8 @@ func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.T
 			return nil, fmt.Errorf("failed to parse SCIM groups response: %w", err)
 		}
 
-		if len(scimResp.Resources) == 0 {
+		returned := len(scimResp.Resources)
+		if returned == 0 {
 			break
 		}
 
@@ -59,7 +65,8 @@ func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.T
 			teams[team.ID] = *team
 		}
 
-		if startIndex+scimPageSize > scimResp.TotalResults {
+		startIndex += returned
+		if startIndex > scimResp.TotalResults {
 			break
 		}
 	}
@@ -88,6 +95,27 @@ func (pc *PresetClient) FetchTeamDetails(ctx context.Context, teamID string) (*s
 	return scimGroupToTeam(group), nil
 }
 
+func (pc *PresetClient) fetchSCIMGroup(ctx context.Context, teamID string) (*scimGroup, error) {
+	reqURL := fmt.Sprintf("%s/Groups/%s", pc.scimURL(), teamID)
+	response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var group scimGroup
+	if err := json.Unmarshal(response, &group); err != nil {
+		return nil, fmt.Errorf("failed to parse SCIM group response: %w", err)
+	}
+	return &group, nil
+}
+
+func scimGroupToTeam(g *scimGroup) *structs.Team {
+	return &structs.Team{
+		ID:   g.ID,
+		Name: g.DisplayName,
+	}
+}
+
 // CreateTeam creates a new SCIM group in Preset.
 // If a group with the same displayName already exists, returns the existing group.
 func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
@@ -97,11 +125,20 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 	})
 	log.Info("creating SCIM group in Preset")
 
-	if existing, err := pc.findGroupByDisplayName(ctx, team.Name); err == nil {
+	if strings.TrimSpace(team.Name) == "" {
+		return nil, fmt.Errorf("team name is required for Preset group creation")
+	}
+
+	existing, err := pc.findGroupByDisplayName(ctx, team.Name)
+	if err == nil {
 		log.WithFields(logrus.Fields{
 			"team_id": existing.ID,
 		}).Info("SCIM group already exists in Preset")
 		return existing, nil
+	}
+	if !errors.Is(err, errGroupNotFound) {
+		log.WithError(err).Error("failed to check if SCIM group exists in Preset")
+		return nil, fmt.Errorf("failed to check if group exists: %w", err)
 	}
 
 	reqURL := fmt.Sprintf("%s/Groups", pc.scimURL())
@@ -121,8 +158,8 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 
 	var createdGroup scimGroup
 	if err := json.Unmarshal(response, &createdGroup); err != nil {
-		log.WithError(err).Error("failed to parse created SCIM group response")
-		return nil, fmt.Errorf("failed to parse created SCIM group response: %w", err)
+		log.WithError(err).Warn("failed to parse created SCIM group response")
+		return pc.requireGroupByDisplayName(ctx, team.Name, "failed to parse SCIM group creation response")
 	}
 
 	log.WithFields(logrus.Fields{
@@ -160,7 +197,7 @@ func (pc *PresetClient) findGroupByDisplayName(ctx context.Context, displayName 
 		"team_name": displayName,
 	})
 
-	filter := fmt.Sprintf(`displayName eq "%s"`, displayName)
+	filter := fmt.Sprintf(`displayName eq "%s"`, escapeSCIMLiteral(displayName))
 	response, err := pc.querySCIMByFilter(ctx, "Groups", filter, "team_name", displayName)
 	if err != nil {
 		return nil, err
@@ -174,7 +211,7 @@ func (pc *PresetClient) findGroupByDisplayName(ctx context.Context, displayName 
 
 	if len(scimResp.Resources) == 0 {
 		log.Warn("SCIM group not found by displayName")
-		return nil, fmt.Errorf("SCIM group not found: %s", displayName)
+		return nil, fmt.Errorf("%w: %s", errGroupNotFound, displayName)
 	}
 
 	return scimGroupToTeam(&scimResp.Resources[0]), nil

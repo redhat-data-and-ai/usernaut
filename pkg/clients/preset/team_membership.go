@@ -47,6 +47,17 @@ func (pc *PresetClient) FetchTeamMembersByTeamID(ctx context.Context, teamID str
 	return members, nil
 }
 
+func scimMembersToUserMap(group *scimGroup) map[string]*structs.User {
+	members := make(map[string]*structs.User, len(group.Members))
+	for _, m := range group.Members {
+		members[m.Value] = &structs.User{
+			ID:          m.Value,
+			DisplayName: m.Display,
+		}
+	}
+	return members
+}
+
 // AddUserToTeam adds users to a SCIM group via PATCH operation
 func (pc *PresetClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
 	if len(userIDs) == 0 {
@@ -60,9 +71,9 @@ func (pc *PresetClient) AddUserToTeam(ctx context.Context, teamID string, userID
 	})
 	log.Info("adding users to SCIM group in Preset")
 
-	members := make([]scimMemberValue, 0, len(userIDs))
+	members := make([]scimMember, 0, len(userIDs))
 	for _, uid := range userIDs {
-		members = append(members, scimMemberValue{Value: uid})
+		members = append(members, scimMember{Value: uid})
 	}
 
 	patchReq := scimPatchRequest{
@@ -101,7 +112,7 @@ func (pc *PresetClient) RemoveUserFromTeam(ctx context.Context, teamID string, u
 	for _, uid := range userIDs {
 		operations = append(operations, scimPatchOperation{
 			Op:   "remove",
-			Path: fmt.Sprintf(`members[value eq "%s"]`, uid),
+			Path: fmt.Sprintf(`members[value eq "%s"]`, escapeSCIMLiteral(uid)),
 		})
 	}
 

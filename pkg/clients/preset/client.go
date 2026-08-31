@@ -23,7 +23,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
@@ -66,7 +68,7 @@ func NewClient(presetAppConfig map[string]interface{},
 
 	return &PresetClient{
 		client:    client,
-		baseURL:   presetConfig.BaseURL,
+		baseURL:   strings.TrimRight(presetConfig.BaseURL, "/"),
 		scimToken: presetConfig.SCIMToken,
 		teamSlug:  presetConfig.TeamSlug,
 	}, nil
@@ -80,7 +82,7 @@ func (pc *PresetClient) scimURL() string {
 
 // sendRequest makes an authenticated HTTP request to the Preset API
 func (pc *PresetClient) sendRequest(
-	ctx context.Context, url string, method string, body interface{},
+	ctx context.Context, reqURL string, method string, body interface{},
 ) ([]byte, int, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service": "preset",
@@ -95,7 +97,7 @@ func (pc *PresetClient) sendRequest(
 		reqBody = bytes.NewReader(jsonBody)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, reqBody)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -132,4 +134,27 @@ func (pc *PresetClient) sendRequest(
 	}
 
 	return respBody, resp.StatusCode, nil
+}
+
+func escapeSCIMLiteral(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+func (pc *PresetClient) querySCIMByFilter(
+	ctx context.Context, resource string, filter string, fieldKey string, fieldValue string,
+) ([]byte, error) {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"service": "preset",
+		fieldKey:  fieldValue,
+	})
+
+	reqURL := fmt.Sprintf("%s/%s?filter=%s", pc.scimURL(), resource, url.QueryEscape(filter))
+	response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+	if err != nil {
+		log.WithError(err).Errorf("failed to query SCIM %s by filter", resource)
+		return nil, err
+	}
+	return response, nil
 }
