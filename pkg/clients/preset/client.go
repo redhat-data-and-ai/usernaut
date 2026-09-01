@@ -17,19 +17,17 @@ limitations under the License.
 package preset
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
+	"github.com/redhat-data-and-ai/usernaut/pkg/request"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -80,7 +78,7 @@ func (pc *PresetClient) scimURL() string {
 	return fmt.Sprintf("%s/api/v1/teams/%s/scim/v2", pc.baseURL, pc.teamSlug)
 }
 
-// sendRequest makes an authenticated HTTP request to the Preset API
+// sendRequest makes an authenticated HTTP request to the Preset API using pkg/request.
 func (pc *PresetClient) sendRequest(
 	ctx context.Context, reqURL string, method string, body interface{},
 ) ([]byte, int, error) {
@@ -88,36 +86,32 @@ func (pc *PresetClient) sendRequest(
 		"service": "preset",
 	})
 
-	var reqBody io.Reader
+	var requestBody []byte
 	if body != nil {
-		jsonBody, err := json.Marshal(body)
+		var err error
+		requestBody, err = json.Marshal(body)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		reqBody = bytes.NewReader(jsonBody)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, reqURL, reqBody)
+	req, err := request.NewRequest(ctx, method, reqURL, requestBody)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+pc.scimToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	req.SetHeaders(map[string]string{
+		"Authorization": "Bearer " + pc.scimToken,
+		"Content-Type":  "application/json",
+		"Accept":        "application/json",
+	})
 
-	resp, err := pc.client.Do(req)
+	respBody, statusCode, err := req.MakeRequest(pc.client, method, "preset")
 	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
+		return nil, statusCode, fmt.Errorf("request failed: %w", err)
 	}
 
-	if !slices.Contains([]int{http.StatusOK, http.StatusCreated, http.StatusNoContent}, resp.StatusCode) {
+	if statusCode != http.StatusOK && statusCode != http.StatusCreated && statusCode != http.StatusNoContent {
 		const maxLogBodyLen = 512
 		responseBodyPreview := string(respBody)
 		if len(responseBodyPreview) > maxLogBodyLen {
@@ -125,15 +119,15 @@ func (pc *PresetClient) sendRequest(
 		}
 
 		log.WithFields(logrus.Fields{
-			"status_code":           resp.StatusCode,
+			"status_code":           statusCode,
 			"response_body_preview": responseBodyPreview,
 			"response_body_size":    len(respBody),
 		}).Debug("unexpected response from Preset API")
-		return respBody, resp.StatusCode, fmt.Errorf(
-			"unexpected status code: %d, response: %s", resp.StatusCode, string(respBody))
+		return respBody, statusCode, fmt.Errorf(
+			"unexpected status code: %d, response: %s", statusCode, string(respBody))
 	}
 
-	return respBody, resp.StatusCode, nil
+	return respBody, statusCode, nil
 }
 
 func escapeSCIMLiteral(s string) string {
