@@ -287,7 +287,8 @@ status:
   conditions: # Standard Kubernetes conditions
     - type: GroupReadyCondition
       status: "True"
-      message: "Group reconciled successfully"
+      reason: SuccessfullyReconciled # SuccessfullyReconciled | PartiallyReconciled | ReconcileFailed
+      message: "Group reconciled successfully" # PartiallyReconciled when some members are missing from LDAP or fail to process
   backends: # Per-backend status
     - name: fivetran
       type: fivetran

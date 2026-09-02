@@ -648,7 +648,11 @@ if err := r.Status().Update(ctx, groupCR); err != nil {
 
 // Update status with results
 groupCR.Status.BackendsStatus = backendStatus
-groupCR.UpdateStatus(hasErrors)
+reason := usernautdevv1alpha1.SuccessfullyReconciled
+if hasErrors {
+    reason = usernautdevv1alpha1.ReconcileFailed
+}
+groupCR.UpdateStatus(reason, "")
 if err := r.Status().Update(ctx, groupCR); err != nil {
     return ctrl.Result{}, err
 }

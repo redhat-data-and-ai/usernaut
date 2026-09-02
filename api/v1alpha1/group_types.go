@@ -143,20 +143,31 @@ func (c *Group) SetWaiting() {
 	c.Status.Conditions = append(c.Status.Conditions, condition)
 }
 
-func (c *Group) UpdateStatus(isError bool) {
+func (c *Group) UpdateStatus(reason, message string) {
 	condition := metav1.Condition{
 		Type:               GroupReadyCondition,
 		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
 	}
-	if !isError {
+	switch reason {
+	case SuccessfullyReconciled:
 		condition.Status = metav1.ConditionTrue
-		condition.Message = "Group reconciled successfully"
-		condition.Reason = SuccessfullyReconciled
-
+		if condition.Message == "" {
+			condition.Message = "Group reconciled successfully"
+		}
 		c.Status.LastAppliedGeneration = c.Generation
-	} else {
+	case PartiallyReconciled:
+		condition.Status = metav1.ConditionTrue
+		if condition.Message == "" {
+			condition.Message = "Group partially reconciled"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	default:
 		condition.Status = metav1.ConditionFalse
-		condition.Message = "Group reconcile failed"
+		if condition.Message == "" {
+			condition.Message = "Group reconcile failed"
+		}
 		condition.Reason = ReconcileFailed
 	}
 	for i, currentCondition := range c.Status.Conditions {
