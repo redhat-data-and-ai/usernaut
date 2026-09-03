@@ -1,0 +1,14 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    app.kubernetes.io/name: validatingwebhookconfiguration
+    app.kubernetes.io/instance: usernaut-validating-webhook-configuration
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/created-by: usernaut
+    app.kubernetes.io/part-of: usernaut
+    app.kubernetes.io/managed-by: kustomize
+  name: usernaut-validating-webhook-configuration
+  namespace: system
+  annotations:
+    cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME
