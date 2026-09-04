@@ -50,7 +50,32 @@ type APIServerConfig struct {
 
 // ControllerConfig represents controller-specific configuration
 type ControllerConfig struct {
-	MaxConcurrentReconciles int `yaml:"maxConcurrentReconciles"`
+	MaxConcurrentReconciles int                       `yaml:"maxConcurrentReconciles"`
+	SpecValidationRules     SpecValidationRulesConfig `yaml:"specValidationRules"`
+}
+
+// SpecValidationRulesConfig holds reconcile-time spec validation rules keyed by namespace.
+type SpecValidationRulesConfig map[string]ValidationRules
+
+// ValidationRules holds resource validation rules for a single namespace.
+type ValidationRules struct {
+	Group GroupSpecValidationRules `yaml:"group"`
+}
+
+// GroupSpecValidationRules holds Group CR spec field validation rules.
+type GroupSpecValidationRules struct {
+	GroupName GroupNameValidationConfig `yaml:"groupName"`
+	Backends  BackendsValidationConfig  `yaml:"backends"`
+}
+
+// GroupNameValidationConfig defines group_name validation rules for Group CRs.
+type GroupNameValidationConfig struct {
+	Prefix string `yaml:"prefix"`
+}
+
+// BackendsValidationConfig holds backend validation rules for Group CRs.
+type BackendsValidationConfig struct {
+	AllowedBackendTypes []string `yaml:"allowedBackendTypes"`
 }
 
 type CORSConfig struct {
