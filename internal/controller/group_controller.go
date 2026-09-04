@@ -109,6 +109,16 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
+		r.log.WithError(err).Warn("spec validation failed")
+		groupCR.UpdateStatus(true)
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			r.log.WithError(statusErr).Error("error updating status after spec validation failure")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// set owner reference to the group CR
 	if err := r.setOwnerReference(ctx, groupCR); err != nil {
 		r.log.WithError(err).Error("error setting owner reference")
