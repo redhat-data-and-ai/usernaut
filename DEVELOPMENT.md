@@ -136,7 +136,7 @@ Welcome to Usernaut! This guide provides a comprehensive overview of the project
 ### Architecture Highlights
 
 - **Controller Pattern**: Follows the Kubernetes controller pattern - watch, reconcile, update status
-- **Namespace-Scoped**: Watches only the `usernaut` namespace by default (configurable via `WATCHED_NAMESPACE` env var)
+- **Namespace-Scoped**: Watches only the `usernaut` namespace by default (configurable via the `WATCHED_NAMESPACE` env var, which accepts a comma separated list of namespaces, e.g. `usernaut,dataverse`)
 - **Shared Cache Mutex**: A `sync.RWMutex` shared between controllers prevents race conditions during cache read/write operations
 - **All-or-Nothing Cache Updates**: Cache indexes (user:groups, group members, user_list) are only updated if ALL backends succeed. If any backend fails, no cache indexes are updated to maintain consistency. Individual user/team cache entries are updated per-backend during processing.
 - **Finalizers**: Ensure proper cleanup when Group CRs are deleted
