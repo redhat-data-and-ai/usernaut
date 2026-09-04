@@ -126,8 +126,10 @@ func (c *SnowflakeClient) makeRequestWithPolling(ctx context.Context, endpoint,
 	if location == "" {
 		return nil, nil, status, fmt.Errorf("received 202 response but no Location header found")
 	}
-
-	return c.pollForResults(ctx, location)
+	
+	pollCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	return c.pollForResults(pollCtx, location)
 }
 
 // pollForResults polls every 10 seconds until the endpoint returns 200
