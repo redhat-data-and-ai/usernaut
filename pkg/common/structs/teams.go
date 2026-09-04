@@ -10,6 +10,7 @@ type Team struct {
 type TeamParams struct {
 	Property string   `json:"property"`
 	Value    []string `json:"value"`
+	TeamName string   `json:"team_name,omitempty"` // Set by controller for backends that need it
 }
 
 func (t *Team) GetID() string {

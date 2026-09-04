@@ -1,9 +1,9 @@
 package hystrix
 
 import (
-	"context"
-	goerrors "errors"
+	"bytes"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -12,12 +12,10 @@ import (
 	"github.com/afex/hystrix-go/plugins"
 	"github.com/gojek/heimdall/v7"
 	"github.com/gojek/heimdall/v7/httpclient"
-	"github.com/gojek/heimdall/v7/internal"
 	"github.com/pkg/errors"
 )
 
 type fallbackFunc func(error) error
-type fallbackCtxFunc func(context.Context, error) error
 
 // Client is the hystrix client implementation
 type Client struct {
@@ -32,7 +30,7 @@ type Client struct {
 	errorPercentThreshold  int
 	retryCount             int
 	retrier                heimdall.Retriable
-	fallbackFunc           func(ctx context.Context, err error) error
+	fallbackFunc           func(err error) error
 	statsD                 *plugins.StatsdCollectorConfig
 }
 
@@ -50,7 +48,7 @@ const (
 )
 
 var _ heimdall.Client = (*Client)(nil)
-var err5xx = goerrors.New("server returned 5xx status code")
+var err5xx = errors.New("server returned 5xx status code")
 
 // NewClient returns a new instance of hystrix Client
 func NewClient(opts ...Option) *Client {
@@ -169,77 +167,54 @@ func (hhc *Client) Delete(url string, headers http.Header) (*http.Response, erro
 
 // Do makes an HTTP request with the native `http.Do` interface
 func (hhc *Client) Do(request *http.Request) (*http.Response, error) {
-	if origReqBody := request.Body; origReqBody != nil {
-		defer func() {
-			// close the original request body as internal.SetRequestGetBody wraps body with noop closer.
-			_ = origReqBody.Close()
-		}()
-	}
-
-	var reqGetBody internal.RequestGetBody
+	var response *http.Response
 	var err error
-	// Only SetRequestGetBody if retry is enabled to avoid unnecessary overhead for non-retry requests
-	if hhc.retryCount > 0 {
-		if err := internal.SetRequestGetBody(request); err != nil {
+
+	var bodyReader *bytes.Reader
+
+	if request.Body != nil {
+		reqData, err := ioutil.ReadAll(request.Body)
+		if err != nil {
 			return nil, err
 		}
-		// keeping a local variable just in case request.GetBody gets overridden by some plugins/middlewares
-		reqGetBody = request.GetBody
+		bodyReader = bytes.NewReader(reqData)
+		request.Body = ioutil.NopCloser(bodyReader) // prevents closing the body between retries
 	}
 
-	var response *http.Response
 	for i := 0; i <= hhc.retryCount; i++ {
 		if response != nil {
-			_, _ = io.Copy(io.Discard, response.Body)
-			_ = response.Body.Close()
+			response.Body.Close()
 		}
 
-		if i > 0 {
-			err = internal.SleepInterruptible(request.Context(), hhc.retrier.NextInterval(i-1))
-			if err != nil {
-				return nil, err
+		err = hystrix.Do(hhc.hystrixCommandName, func() error {
+			response, err = hhc.client.Do(request)
+			if bodyReader != nil {
+				// Reset the body reader after the request since at this point it's already read
+				// Note that it's safe to ignore the error here since the 0,0 position is always valid
+				_, _ = bodyReader.Seek(0, 0)
 			}
 
-			request, err = internal.CloneRequest(request, reqGetBody) // Clone the request to reset the body for retry
 			if err != nil {
-				return nil, err
+				return err
 			}
+
+			if response.StatusCode >= http.StatusInternalServerError {
+				return err5xx
+			}
+			return nil
+		}, hhc.fallbackFunc)
+
+		if err != nil {
+			backoffTime := hhc.retrier.NextInterval(i)
+			time.Sleep(backoffTime)
+			continue
 		}
 
-		response, err = hhc.hystrixDo(request)
-		if err == nil || internal.IsCtxDone(request.Context()) {
-			break
-		}
+		break
 	}
 
-	if err != nil {
-		if errors.Is(err, err5xx) {
-			return response, nil
-		}
-
-		return nil, err
-	}
-
-	return response, nil
-}
-
-func (hhc *Client) hystrixDo(request *http.Request) (*http.Response, error) {
-	var response *http.Response
-	err := hystrix.DoC(request.Context(), hhc.hystrixCommandName, func(_ context.Context) error {
-		resp, doErr := hhc.client.Do(request)
-		if doErr != nil {
-			return doErr
-		}
-		response = resp
-
-		if response.StatusCode >= http.StatusInternalServerError {
-			return err5xx
-		}
-
-		return nil
-	}, hhc.fallbackFunc)
-	if err != nil && !errors.Is(err, err5xx) { // Special handling to avoid data race conditions
-		return nil, err
+	if err == err5xx {
+		return response, nil
 	}
 
 	return response, err

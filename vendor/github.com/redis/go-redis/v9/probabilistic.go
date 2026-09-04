@@ -225,9 +225,8 @@ type ScanDumpCmd struct {
 func newScanDumpCmd(ctx context.Context, args ...interface{}) *ScanDumpCmd {
 	return &ScanDumpCmd{
 		baseCmd: baseCmd{
-			ctx:     ctx,
-			args:    args,
-			cmdType: CmdTypeScanDump,
+			ctx:  ctx,
+			args: args,
 		},
 	}
 }
@@ -271,13 +270,6 @@ func (cmd *ScanDumpCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
-func (cmd *ScanDumpCmd) Clone() Cmder {
-	return &ScanDumpCmd{
-		baseCmd: cmd.cloneBaseCmd(),
-		val:     cmd.val, // ScanDump is a simple struct, can be copied directly
-	}
-}
-
 // Returns information about a Bloom filter.
 // For more information - https://redis.io/commands/bf.info/
 func (c cmdable) BFInfo(ctx context.Context, key string) *BFInfoCmd {
@@ -304,9 +296,8 @@ type BFInfoCmd struct {
 func NewBFInfoCmd(ctx context.Context, args ...interface{}) *BFInfoCmd {
 	return &BFInfoCmd{
 		baseCmd: baseCmd{
-			ctx:     ctx,
-			args:    args,
-			cmdType: CmdTypeBFInfo,
+			ctx:  ctx,
+			args: args,
 		},
 	}
 }
@@ -395,13 +386,6 @@ func (cmd *BFInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
-}
-
-func (cmd *BFInfoCmd) Clone() Cmder {
-	return &BFInfoCmd{
-		baseCmd: cmd.cloneBaseCmd(),
-		val:     cmd.val, // BFInfo is a simple struct, can be copied directly
-	}
 }
 
 // BFInfoCapacity returns information about the capacity of a Bloom filter.
@@ -641,9 +625,8 @@ type CFInfoCmd struct {
 func NewCFInfoCmd(ctx context.Context, args ...interface{}) *CFInfoCmd {
 	return &CFInfoCmd{
 		baseCmd: baseCmd{
-			ctx:     ctx,
-			args:    args,
-			cmdType: CmdTypeCFInfo,
+			ctx:  ctx,
+			args: args,
 		},
 	}
 }
@@ -707,13 +690,6 @@ func (cmd *CFInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
-}
-
-func (cmd *CFInfoCmd) Clone() Cmder {
-	return &CFInfoCmd{
-		baseCmd: cmd.cloneBaseCmd(),
-		val:     cmd.val, // CFInfo is a simple struct, can be copied directly
-	}
 }
 
 // CFInfo returns information about a Cuckoo filter.
@@ -811,9 +787,8 @@ type CMSInfoCmd struct {
 func NewCMSInfoCmd(ctx context.Context, args ...interface{}) *CMSInfoCmd {
 	return &CMSInfoCmd{
 		baseCmd: baseCmd{
-			ctx:     ctx,
-			args:    args,
-			cmdType: CmdTypeCMSInfo,
+			ctx:  ctx,
+			args: args,
 		},
 	}
 }
@@ -866,13 +841,6 @@ func (cmd *CMSInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
-}
-
-func (cmd *CMSInfoCmd) Clone() Cmder {
-	return &CMSInfoCmd{
-		baseCmd: cmd.cloneBaseCmd(),
-		val:     cmd.val, // CMSInfo is a simple struct, can be copied directly
-	}
 }
 
 // CMSInfo returns information about a Count-Min Sketch filter.
@@ -1012,9 +980,8 @@ type TopKInfoCmd struct {
 func NewTopKInfoCmd(ctx context.Context, args ...interface{}) *TopKInfoCmd {
 	return &TopKInfoCmd{
 		baseCmd: baseCmd{
-			ctx:     ctx,
-			args:    args,
-			cmdType: CmdTypeTopKInfo,
+			ctx:  ctx,
+			args: args,
 		},
 	}
 }
@@ -1069,13 +1036,6 @@ func (cmd *TopKInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
-}
-
-func (cmd *TopKInfoCmd) Clone() Cmder {
-	return &TopKInfoCmd{
-		baseCmd: cmd.cloneBaseCmd(),
-		val:     cmd.val, // TopKInfo is a simple struct, can be copied directly
-	}
 }
 
 // TopKInfo returns information about a Top-K filter.
@@ -1267,9 +1227,8 @@ type TDigestInfoCmd struct {
 func NewTDigestInfoCmd(ctx context.Context, args ...interface{}) *TDigestInfoCmd {
 	return &TDigestInfoCmd{
 		baseCmd: baseCmd{
-			ctx:     ctx,
-			args:    args,
-			cmdType: CmdTypeTDigestInfo,
+			ctx:  ctx,
+			args: args,
 		},
 	}
 }
@@ -1334,13 +1293,6 @@ func (cmd *TDigestInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
-}
-
-func (cmd *TDigestInfoCmd) Clone() Cmder {
-	return &TDigestInfoCmd{
-		baseCmd: cmd.cloneBaseCmd(),
-		val:     cmd.val, // TDigestInfo is a simple struct, can be copied directly
-	}
 }
 
 // TDigestInfo returns information about a t-Digest data structure.
