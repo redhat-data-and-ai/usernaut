@@ -218,6 +218,18 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default/overlays/${USERNAUT_ENV} | $(KUBECTL) apply -f -
 
+.PHONY: deploy-additional-namespace
+deploy-additional-namespace: kustomize ## Deploy RBAC (Role, RoleBinding) to an additional namespace. Usage: make deploy-additional-namespace ADDITIONAL_NS=<ns> CONTROLLER_NS=<ns>
+	cd config/rbac-additional-namespace && $(KUSTOMIZE) edit set namespace $(ADDITIONAL_NS)
+	$(KUSTOMIZE) build --load-restrictor LoadRestrictionsNone config/rbac-additional-namespace | \
+		yq '(select(.kind == "RoleBinding") | .subjects[0].namespace) = "$(CONTROLLER_NS)"' | $(KUBECTL) apply -f -
+
+.PHONY: undeploy-additional-namespace
+undeploy-additional-namespace: kustomize ## Undeploy RBAC (Role, RoleBinding) to an additional namespace. Usage: make undeploy-additional-namespace ADDITIONAL_NS=<ns> CONTROLLER_NS=<ns>
+	cd config/rbac-additional-namespace && $(KUSTOMIZE) edit set namespace $(ADDITIONAL_NS)
+	$(KUSTOMIZE) build --load-restrictor LoadRestrictionsNone config/rbac-additional-namespace | \
+		yq '(select(.kind == "RoleBinding") | .subjects[0].namespace) = "$(CONTROLLER_NS)"' | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default/overlays/${USERNAUT_ENV} | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
