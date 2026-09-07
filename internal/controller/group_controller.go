@@ -80,9 +80,9 @@ type GroupReconciler struct {
 }
 
 //nolint:lll
-// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=usernaut,resources=groups/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,resources=groups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,resources=groups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,resources=groups/finalizers,verbs=update
 
 func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	ctx = logger.WithRequestId(ctx, controller.ReconcileIDFromContext(ctx))
