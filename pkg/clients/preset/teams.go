@@ -116,6 +116,7 @@ func (pc *PresetClient) fetchSCIMGroupMembers(ctx context.Context, teamID string
 	})
 
 	members := make([]scimMember, 0)
+	seenMemberIDs := make(map[string]struct{})
 	startIndex := 1
 	totalResults := 0
 
@@ -145,7 +146,30 @@ func (pc *PresetClient) fetchSCIMGroupMembers(ctx context.Context, teamID string
 			break
 		}
 
-		members = append(members, group.Members...)
+		added := 0
+		for _, member := range group.Members {
+			if member.Value == "" {
+				continue
+			}
+			if _, exists := seenMemberIDs[member.Value]; exists {
+				continue
+			}
+			seenMemberIDs[member.Value] = struct{}{}
+			members = append(members, member)
+			added++
+		}
+
+		if added == 0 {
+			log.WithFields(logrus.Fields{
+				"returned_count": returned,
+				"start_index":    startIndex,
+			}).Error("SCIM group member pagination returned no new members")
+			return nil, fmt.Errorf(
+				"SCIM group member pagination stuck: page returned %d members but none were new",
+				returned,
+			)
+		}
+
 		startIndex += returned
 
 		if totalResults > 0 && startIndex > totalResults {

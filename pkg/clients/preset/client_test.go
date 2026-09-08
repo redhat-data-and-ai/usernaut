@@ -490,6 +490,26 @@ func TestFetchSCIMGroupMembers_paginates(t *testing.T) {
 	assert.Equal(t, "user-last", members[len(members)-1].Value)
 }
 
+func TestFetchSCIMGroupMembers_stuckOnDuplicatePage(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		requests++
+		page := make([]scimMember, scimGroupMemberPageSize)
+		for i := range page {
+			page[i] = scimMember{Value: fmt.Sprintf("user-%d", i)}
+		}
+		_ = json.NewEncoder(w).Encode(scimGroup{ID: "group-1", Members: page})
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	_, err := pc.fetchSCIMGroupMembers(context.Background(), "group-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pagination stuck")
+	assert.Equal(t, 2, requests)
+}
+
 func TestFetchAllTeams_paginates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
