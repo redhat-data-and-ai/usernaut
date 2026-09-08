@@ -19,9 +19,11 @@ package preset
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,82 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
+
+// apiError represents a non-success HTTP response from the Preset SCIM API.
+type apiError struct {
+	StatusCode int
+	Body       []byte
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("unexpected status code: %d, response: %s", e.StatusCode, string(e.Body))
+}
+
+func responseStatus(err error) int {
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode
+	}
+	return 0
+}
+
+func isResponseStatus(err error, statusCode int) bool {
+	return responseStatus(err) == statusCode
+}
+
+const presetHTTPRetryAttempts = 3
+
+// presetHTTPRetryBackoff is longer than other backends to reduce Preset SCIM rate-limit pressure.
+var presetHTTPRetryBackoff = 5 * time.Second
+
+const (
+	presetRateLimitRetryAttempts  = 3
+	presetRateLimitDefaultBackoff = 5 * time.Second
+	presetRateLimitMaxBackoff     = 60 * time.Second
+)
+
+func rateLimitBackoff(headers http.Header) time.Duration {
+	retryAfter := strings.TrimSpace(headers.Get("Retry-After"))
+	if retryAfter == "" {
+		return presetRateLimitDefaultBackoff
+	}
+
+	if seconds, err := strconv.Atoi(retryAfter); err == nil {
+		backoff := time.Duration(seconds) * time.Second
+		return capRateLimitBackoff(backoff)
+	}
+
+	if retryAt, err := http.ParseTime(retryAfter); err == nil {
+		return capRateLimitBackoff(time.Until(retryAt))
+	}
+
+	return presetRateLimitDefaultBackoff
+}
+
+func capRateLimitBackoff(backoff time.Duration) time.Duration {
+	if backoff < 0 {
+		return 0
+	}
+	if backoff > presetRateLimitMaxBackoff {
+		return presetRateLimitMaxBackoff
+	}
+	return backoff
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
 
 // NewClient creates a new Preset client with SCIM token authentication
 func NewClient(presetAppConfig map[string]interface{},
@@ -57,8 +135,8 @@ func NewClient(presetAppConfig map[string]interface{},
 		"preset",
 		connectionPoolConfig,
 		hystrixResiliencyConfig,
-		heimdall.NewRetrier(heimdall.NewConstantBackoff(100*time.Millisecond, 50*time.Millisecond)),
-		3,
+		heimdall.NewRetrier(heimdall.NewConstantBackoff(presetHTTPRetryBackoff, 0)),
+		presetHTTPRetryAttempts,
 		nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize http client: %w", err)
@@ -75,13 +153,21 @@ func NewClient(presetAppConfig map[string]interface{},
 // scimURL returns the base SCIM v2 endpoint URL including the team slug.
 // Format: {baseURL}/api/v1/teams/{teamSlug}/scim/v2
 func (pc *PresetClient) scimURL() string {
-	return fmt.Sprintf("%s/api/v1/teams/%s/scim/v2", pc.baseURL, pc.teamSlug)
+	return fmt.Sprintf("%s/api/v1/teams/%s/scim/v2", pc.baseURL, url.PathEscape(pc.teamSlug))
+}
+
+func (pc *PresetClient) userURL(userID string) string {
+	return fmt.Sprintf("%s/Users/%s", pc.scimURL(), url.PathEscape(userID))
+}
+
+func (pc *PresetClient) groupURL(teamID string) string {
+	return fmt.Sprintf("%s/Groups/%s", pc.scimURL(), url.PathEscape(teamID))
 }
 
 // sendRequest makes an authenticated HTTP request to the Preset API using pkg/request.
 func (pc *PresetClient) sendRequest(
 	ctx context.Context, reqURL string, method string, body interface{},
-) ([]byte, int, error) {
+) ([]byte, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service": "preset",
 	})
@@ -91,27 +177,45 @@ func (pc *PresetClient) sendRequest(
 		var err error
 		requestBody, err = json.Marshal(body)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to marshal request body: %w", err)
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
 	}
 
-	req, err := request.NewRequest(ctx, method, reqURL, requestBody)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.SetHeaders(map[string]string{
+	reqHeaders := map[string]string{
 		"Authorization": "Bearer " + pc.scimToken,
 		"Content-Type":  "application/json",
 		"Accept":        "application/json",
-	})
-
-	respBody, statusCode, err := req.MakeRequest(pc.client, method, "preset")
-	if err != nil {
-		return nil, statusCode, fmt.Errorf("request failed: %w", err)
 	}
 
-	if statusCode != http.StatusOK && statusCode != http.StatusCreated && statusCode != http.StatusNoContent {
+	for attempt := 0; ; attempt++ {
+		req, err := request.NewRequest(ctx, method, reqURL, requestBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.SetHeaders(reqHeaders)
+
+		respBody, respHeaders, statusCode, err := req.MakeRequestWithHeader(pc.client, method, "preset")
+		if err != nil {
+			return nil, fmt.Errorf("request failed: %w", err)
+		}
+
+		if statusCode == http.StatusOK || statusCode == http.StatusCreated || statusCode == http.StatusNoContent {
+			return respBody, nil
+		}
+
+		if statusCode == http.StatusTooManyRequests && attempt < presetRateLimitRetryAttempts {
+			backoff := rateLimitBackoff(respHeaders)
+			log.WithFields(logrus.Fields{
+				"attempt":      attempt + 1,
+				"max_attempts": presetRateLimitRetryAttempts,
+				"backoff_ms":   backoff.Milliseconds(),
+			}).Warn("Preset API rate limit exceeded, retrying after backoff")
+			if err := sleepWithContext(ctx, backoff); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
 		const maxLogBodyLen = 512
 		responseBodyPreview := string(respBody)
 		if len(responseBodyPreview) > maxLogBodyLen {
@@ -123,11 +227,8 @@ func (pc *PresetClient) sendRequest(
 			"response_body_preview": responseBodyPreview,
 			"response_body_size":    len(respBody),
 		}).Debug("unexpected response from Preset API")
-		return respBody, statusCode, fmt.Errorf(
-			"unexpected status code: %d, response: %s", statusCode, string(respBody))
+		return nil, &apiError{StatusCode: statusCode, Body: respBody}
 	}
-
-	return respBody, statusCode, nil
 }
 
 func escapeSCIMLiteral(s string) string {
@@ -145,7 +246,7 @@ func (pc *PresetClient) querySCIMByFilter(
 	})
 
 	reqURL := fmt.Sprintf("%s/%s?filter=%s", pc.scimURL(), resource, url.QueryEscape(filter))
-	response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+	response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 	if err != nil {
 		log.WithError(err).Errorf("failed to query SCIM %s by filter", resource)
 		return nil, err

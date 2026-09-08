@@ -37,6 +37,12 @@ type PresetConfig struct {
 
 const scimPageSize = 100
 
+// scimGroupMemberPageSize caps members returned per GET /Groups/{id} page.
+const scimGroupMemberPageSize = 1000
+
+// scimMembershipBatchSize caps users per SCIM group membership PATCH request.
+const scimMembershipBatchSize = 500
+
 const (
 	scimUserSchema  = "urn:ietf:params:scim:schemas:core:2.0:User"
 	scimGroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group"
@@ -81,9 +87,10 @@ type scimName struct {
 
 // scimGroup represents a group in SCIM format
 type scimGroup struct {
-	ID          string       `json:"id"`
-	DisplayName string       `json:"displayName"`
-	Members     []scimMember `json:"members"`
+	ID           string       `json:"id"`
+	DisplayName  string       `json:"displayName"`
+	TotalResults int          `json:"totalResults"`
+	Members      []scimMember `json:"members"`
 }
 
 // scimGroupsResponse represents the SCIM Groups list response

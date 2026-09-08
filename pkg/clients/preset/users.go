@@ -44,7 +44,7 @@ func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.
 	startIndex := 1
 	for {
 		reqURL := fmt.Sprintf("%s/Users?startIndex=%d&count=%d", pc.scimURL(), startIndex, scimPageSize)
-		response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+		response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 		if err != nil {
 			log.WithError(err).Error("failed to fetch SCIM users from Preset")
 			return nil, nil, fmt.Errorf("failed to fetch SCIM users from Preset: %w", err)
@@ -89,8 +89,8 @@ func (pc *PresetClient) FetchUserDetails(ctx context.Context, userID string) (*s
 	})
 	log.Info("fetching user details from Preset")
 
-	reqURL := fmt.Sprintf("%s/Users/%s", pc.scimURL(), userID)
-	response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+	reqURL := pc.userURL(userID)
+	response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 	if err != nil {
 		log.WithError(err).Error("failed to fetch user details from Preset")
 		return nil, fmt.Errorf("failed to fetch user details from Preset: %w", err)
@@ -170,9 +170,9 @@ func (pc *PresetClient) CreateUser(ctx context.Context, u *structs.User) (*struc
 		Active: true,
 	}
 
-	response, statusCode, err := pc.sendRequest(ctx, reqURL, http.MethodPost, reqBody)
+	response, err := pc.sendRequest(ctx, reqURL, http.MethodPost, reqBody)
 	if err != nil {
-		if statusCode == http.StatusConflict {
+		if isResponseStatus(err, http.StatusConflict) {
 			return pc.requireUserByEmail(ctx, u.Email, "SCIM user conflict but lookup failed")
 		}
 		log.WithError(err).Error("failed to create SCIM user in Preset")
@@ -199,10 +199,10 @@ func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 	})
 	log.Info("deleting SCIM user from Preset")
 
-	reqURL := fmt.Sprintf("%s/Users/%s", pc.scimURL(), userID)
-	_, statusCode, err := pc.sendRequest(ctx, reqURL, http.MethodDelete, nil)
+	reqURL := pc.userURL(userID)
+	_, err := pc.sendRequest(ctx, reqURL, http.MethodDelete, nil)
 	if err != nil {
-		if statusCode == http.StatusNotFound {
+		if isResponseStatus(err, http.StatusNotFound) {
 			log.Info("SCIM user does not exist in Preset, nothing to delete")
 			return nil
 		}

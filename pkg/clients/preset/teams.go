@@ -43,7 +43,7 @@ func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.T
 	startIndex := 1
 	for {
 		reqURL := fmt.Sprintf("%s/Groups?startIndex=%d&count=%d", pc.scimURL(), startIndex, scimPageSize)
-		response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+		response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 		if err != nil {
 			log.WithError(err).Error("failed to fetch SCIM groups from Preset")
 			return nil, fmt.Errorf("failed to fetch SCIM groups from Preset: %w", err)
@@ -96,8 +96,8 @@ func (pc *PresetClient) FetchTeamDetails(ctx context.Context, teamID string) (*s
 }
 
 func (pc *PresetClient) fetchSCIMGroup(ctx context.Context, teamID string) (*scimGroup, error) {
-	reqURL := fmt.Sprintf("%s/Groups/%s", pc.scimURL(), teamID)
-	response, _, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+	reqURL := pc.groupURL(teamID)
+	response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +107,67 @@ func (pc *PresetClient) fetchSCIMGroup(ctx context.Context, teamID string) (*sci
 		return nil, fmt.Errorf("failed to parse SCIM group response: %w", err)
 	}
 	return &group, nil
+}
+
+func (pc *PresetClient) fetchSCIMGroupMembers(ctx context.Context, teamID string) ([]scimMember, error) {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"service": "preset",
+		"teamID":  teamID,
+	})
+
+	members := make([]scimMember, 0)
+	startIndex := 1
+	totalResults := 0
+
+	for {
+		reqURL := fmt.Sprintf(
+			"%s?startIndex=%d&count=%d",
+			pc.groupURL(teamID), startIndex, scimGroupMemberPageSize,
+		)
+		response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
+		if err != nil {
+			log.WithError(err).Error("failed to fetch SCIM group members from Preset")
+			return nil, fmt.Errorf("failed to fetch SCIM group members from Preset: %w", err)
+		}
+
+		var group scimGroup
+		if err := json.Unmarshal(response, &group); err != nil {
+			log.WithError(err).Error("failed to parse SCIM group members response")
+			return nil, fmt.Errorf("failed to parse SCIM group members response: %w", err)
+		}
+
+		if totalResults == 0 && group.TotalResults > 0 {
+			totalResults = group.TotalResults
+		}
+
+		returned := len(group.Members)
+		if returned == 0 {
+			break
+		}
+
+		members = append(members, group.Members...)
+		startIndex += returned
+
+		if totalResults > 0 && startIndex > totalResults {
+			break
+		}
+		if totalResults == 0 && returned < scimGroupMemberPageSize {
+			break
+		}
+	}
+
+	if totalResults > 0 && len(members) != totalResults {
+		log.WithFields(logrus.Fields{
+			"expected_total_results": totalResults,
+			"fetched_member_count":   len(members),
+		}).Error("SCIM group member pagination returned incomplete results")
+		return nil, fmt.Errorf(
+			"SCIM group member pagination incomplete: fetched %d of %d members from Preset",
+			len(members), totalResults,
+		)
+	}
+
+	return members, nil
 }
 
 func scimGroupToTeam(g *scimGroup) *structs.Team {
@@ -147,9 +208,9 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 		DisplayName: team.Name,
 	}
 
-	response, statusCode, err := pc.sendRequest(ctx, reqURL, http.MethodPost, reqBody)
+	response, err := pc.sendRequest(ctx, reqURL, http.MethodPost, reqBody)
 	if err != nil {
-		if statusCode == http.StatusConflict {
+		if isResponseStatus(err, http.StatusConflict) {
 			return pc.requireGroupByDisplayName(ctx, team.Name, "SCIM group conflict but lookup failed")
 		}
 		log.WithError(err).Error("failed to create SCIM group in Preset")
@@ -176,10 +237,10 @@ func (pc *PresetClient) DeleteTeamByID(ctx context.Context, teamID string) error
 	})
 	log.Info("deleting SCIM group from Preset")
 
-	reqURL := fmt.Sprintf("%s/Groups/%s", pc.scimURL(), teamID)
-	_, statusCode, err := pc.sendRequest(ctx, reqURL, http.MethodDelete, nil)
+	reqURL := pc.groupURL(teamID)
+	_, err := pc.sendRequest(ctx, reqURL, http.MethodDelete, nil)
 	if err != nil {
-		if statusCode == http.StatusNotFound {
+		if isResponseStatus(err, http.StatusNotFound) {
 			log.Info("SCIM group does not exist in Preset, nothing to delete")
 			return nil
 		}
