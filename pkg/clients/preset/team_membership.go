@@ -18,6 +18,7 @@ package preset
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -27,7 +28,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// FetchTeamMembersByTeamID retrieves all members of a SCIM group
+// FetchTeamMembersByTeamID retrieves all members of a SCIM group via GET /Groups/{id}.
 func (pc *PresetClient) FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service": "preset",
@@ -35,28 +36,31 @@ func (pc *PresetClient) FetchTeamMembersByTeamID(ctx context.Context, teamID str
 	})
 	log.Info("fetching SCIM group members from Preset")
 
-	memberList, err := pc.fetchSCIMGroupMembers(ctx, teamID)
+	reqURL := pc.groupURL(teamID)
+	response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 	if err != nil {
 		log.WithError(err).Error("failed to fetch SCIM group members from Preset")
 		return nil, fmt.Errorf("failed to fetch SCIM group members from Preset: %w", err)
 	}
 
-	members := scimMembersToUserMap(memberList)
-	log.WithFields(logrus.Fields{
-		"member_count": len(members),
-	}).Info("fetched SCIM group members from Preset")
-	return members, nil
-}
+	var group scimGroup
+	if err := json.Unmarshal(response, &group); err != nil {
+		log.WithError(err).Error("failed to parse SCIM group members response")
+		return nil, fmt.Errorf("failed to parse SCIM group members response: %w", err)
+	}
 
-func scimMembersToUserMap(memberList []scimMember) map[string]*structs.User {
-	members := make(map[string]*structs.User, len(memberList))
-	for _, m := range memberList {
+	members := make(map[string]*structs.User, len(group.Members))
+	for _, m := range group.Members {
 		members[m.Value] = &structs.User{
 			ID:          m.Value,
 			DisplayName: m.Display,
 		}
 	}
-	return members
+
+	log.WithFields(logrus.Fields{
+		"member_count": len(members),
+	}).Info("fetched SCIM group members from Preset")
+	return members, nil
 }
 
 // AddUserToTeam adds users to a SCIM group via batched PATCH operations.

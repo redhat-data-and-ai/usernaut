@@ -77,7 +77,7 @@ func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.T
 	return teams, nil
 }
 
-// FetchTeamDetails retrieves a specific SCIM group by ID
+// FetchTeamDetails retrieves a specific SCIM group by ID.
 func (pc *PresetClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		"service": "preset",
@@ -85,113 +85,21 @@ func (pc *PresetClient) FetchTeamDetails(ctx context.Context, teamID string) (*s
 	})
 	log.Info("fetching SCIM group details from Preset")
 
-	group, err := pc.fetchSCIMGroup(ctx, teamID)
+	reqURL := pc.groupURL(teamID)
+	response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 	if err != nil {
 		log.WithError(err).Error("failed to fetch SCIM group from Preset")
 		return nil, fmt.Errorf("failed to fetch SCIM group from Preset: %w", err)
 	}
 
-	log.Info("successfully fetched SCIM group details from Preset")
-	return scimGroupToTeam(group), nil
-}
-
-func (pc *PresetClient) fetchSCIMGroup(ctx context.Context, teamID string) (*scimGroup, error) {
-	reqURL := pc.groupURL(teamID)
-	response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
-	if err != nil {
-		return nil, err
-	}
-
 	var group scimGroup
 	if err := json.Unmarshal(response, &group); err != nil {
+		log.WithError(err).Error("failed to parse SCIM group response")
 		return nil, fmt.Errorf("failed to parse SCIM group response: %w", err)
 	}
-	return &group, nil
-}
 
-func (pc *PresetClient) fetchSCIMGroupMembers(ctx context.Context, teamID string) ([]scimMember, error) {
-	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		"teamID":  teamID,
-	})
-
-	members := make([]scimMember, 0)
-	seenMemberIDs := make(map[string]struct{})
-	startIndex := 1
-	totalResults := 0
-
-	for {
-		reqURL := fmt.Sprintf(
-			"%s?startIndex=%d&count=%d",
-			pc.groupURL(teamID), startIndex, scimGroupMemberPageSize,
-		)
-		response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
-		if err != nil {
-			log.WithError(err).Error("failed to fetch SCIM group members from Preset")
-			return nil, fmt.Errorf("failed to fetch SCIM group members from Preset: %w", err)
-		}
-
-		var group scimGroup
-		if err := json.Unmarshal(response, &group); err != nil {
-			log.WithError(err).Error("failed to parse SCIM group members response")
-			return nil, fmt.Errorf("failed to parse SCIM group members response: %w", err)
-		}
-
-		if totalResults == 0 && group.TotalResults > 0 {
-			totalResults = group.TotalResults
-		}
-
-		returned := len(group.Members)
-		if returned == 0 {
-			break
-		}
-
-		added := 0
-		for _, member := range group.Members {
-			if member.Value == "" {
-				continue
-			}
-			if _, exists := seenMemberIDs[member.Value]; exists {
-				continue
-			}
-			seenMemberIDs[member.Value] = struct{}{}
-			members = append(members, member)
-			added++
-		}
-
-		if added == 0 {
-			log.WithFields(logrus.Fields{
-				"returned_count": returned,
-				"start_index":    startIndex,
-			}).Error("SCIM group member pagination returned no new members")
-			return nil, fmt.Errorf(
-				"SCIM group member pagination stuck: page returned %d members but none were new",
-				returned,
-			)
-		}
-
-		startIndex += returned
-
-		if totalResults > 0 && startIndex > totalResults {
-			break
-		}
-		if totalResults == 0 && returned < scimGroupMemberPageSize {
-			break
-		}
-	}
-
-	if totalResults > 0 && len(members) != totalResults {
-		log.WithFields(logrus.Fields{
-			"expected_total_results": totalResults,
-			"fetched_member_count":   len(members),
-		}).Error("SCIM group member pagination returned incomplete results")
-		return nil, fmt.Errorf(
-			"SCIM group member pagination incomplete: fetched %d of %d members from Preset",
-			len(members), totalResults,
-		)
-	}
-
-	return members, nil
+	log.Info("successfully fetched SCIM group details from Preset")
+	return scimGroupToTeam(&group), nil
 }
 
 func scimGroupToTeam(g *scimGroup) *structs.Team {

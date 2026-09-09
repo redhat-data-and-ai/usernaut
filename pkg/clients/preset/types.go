@@ -37,9 +37,6 @@ type PresetConfig struct {
 
 const scimPageSize = 100
 
-// scimGroupMemberPageSize caps members returned per GET /Groups/{id} page.
-const scimGroupMemberPageSize = 1000
-
 // scimMembershipBatchSize caps users per SCIM group membership PATCH request.
 const scimMembershipBatchSize = 500
 

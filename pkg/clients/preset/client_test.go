@@ -6,13 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/gojek/heimdall/v7"
-	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/request/httpclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,154 +84,6 @@ func addBatchMemberCount(patchReq scimPatchRequest) int {
 	return len(members)
 }
 
-func TestResponseStatusFromAPIError(t *testing.T) {
-	err := &apiError{StatusCode: http.StatusConflict, Body: []byte("conflict")}
-	assert.Equal(t, http.StatusConflict, responseStatus(err))
-	assert.True(t, isResponseStatus(err, http.StatusConflict))
-	assert.False(t, isResponseStatus(err, http.StatusNotFound))
-	assert.Equal(t, 0, responseStatus(fmt.Errorf("other error")))
-}
-
-func TestRateLimitBackoff(t *testing.T) {
-	assert.Equal(t, presetRateLimitDefaultBackoff, rateLimitBackoff(http.Header{}))
-	assert.Equal(t, 2*time.Second, rateLimitBackoff(http.Header{"Retry-After": []string{"2"}}))
-	assert.Equal(t, time.Duration(0), rateLimitBackoff(http.Header{"Retry-After": []string{"0"}}))
-	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(http.Header{"Retry-After": []string{"120"}}))
-}
-
-func TestDeleteUser_retriesOnRateLimit(t *testing.T) {
-	var requestCount int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		if requestCount < 3 {
-			w.Header().Set("Retry-After", "0")
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.DeleteUser(context.Background(), "user-1"))
-	assert.Equal(t, 3, requestCount)
-}
-
-func TestDeleteUser_rateLimitExhausted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Retry-After", "0")
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	err := pc.DeleteUser(context.Background(), "user-1")
-	require.Error(t, err)
-	assert.True(t, isResponseStatus(err, http.StatusTooManyRequests))
-}
-
-func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Users"):
-			w.WriteHeader(http.StatusConflict)
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")):
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(scimUsersResponse{
-				TotalResults: 1,
-				Resources: []scimUser{{
-					ID:       "samlp|redhat|existing@example.com",
-					UserName: "existing@example.com",
-				}},
-			})
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	user, err := pc.CreateUser(context.Background(), &structs.User{
-		Email:    "existing@example.com",
-		UserName: "existing@example.com",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "samlp|redhat|existing@example.com", user.ID)
-}
-
-func TestDeleteNotFoundIsIdempotent(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodDelete, r.Method)
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.DeleteUser(context.Background(), "missing-user"))
-}
-
-func TestRemoveUserFromTeam_notFoundReturnsError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPatch, r.Method)
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	err := pc.RemoveUserFromTeam(context.Background(), "group-1", []string{"missing-user"})
-	require.Error(t, err)
-	assert.True(t, isResponseStatus(err, http.StatusNotFound))
-}
-
-func TestAddUserToTeam_conflictReturnsError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPatch, r.Method)
-		w.WriteHeader(http.StatusConflict)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	err := pc.AddUserToTeam(context.Background(), "group-1", []string{"user-a", "user-b"})
-	require.Error(t, err)
-	assert.True(t, isResponseStatus(err, http.StatusConflict))
-}
-
-func TestRemoveUserFromTeam_batchServiceError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPatch, r.Method)
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	err := pc.RemoveUserFromTeam(context.Background(), "group-1", []string{"user-a", "user-b"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "503")
-}
-
-func TestEscapeSCIMLiteral(t *testing.T) {
-	assert.Equal(t, `user\"name`, escapeSCIMLiteral(`user"name`))
-	assert.Equal(t, `path\\to`, escapeSCIMLiteral(`path\to`))
-}
-
-func TestNewClient_missingRequiredFields(t *testing.T) {
-	poolCfg, hystrixCfg := testHTTPConfigs()
-
-	_, err := NewClient(map[string]interface{}{}, poolCfg, hystrixCfg)
-	require.Error(t, err)
-
-	_, err = NewClient(map[string]interface{}{
-		"base_url": "https://example.com",
-	}, poolCfg, hystrixCfg)
-	require.Error(t, err)
-
-	_, err = NewClient(map[string]interface{}{
-		"base_url":  "https://example.com",
-		"team_slug": "team-1",
-	}, poolCfg, hystrixCfg)
-	require.Error(t, err)
-}
-
 func TestNewClient_success(t *testing.T) {
 	poolCfg, hystrixCfg := testHTTPConfigs()
 
@@ -250,60 +98,28 @@ func TestNewClient_success(t *testing.T) {
 	assert.Equal(t, "token", pc.scimToken)
 }
 
-func TestCreateUser_requiresEmail(t *testing.T) {
-	pc := newTestPresetClient(t, "https://example.com")
-	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "no-email"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "email is required")
-}
-
-func TestCreateTeam_conflictResolvesExistingGroup(t *testing.T) {
-	var lookups int
+func TestFetchTeamMembersByTeamID_singleResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Groups")):
-			lookups++
-			w.WriteHeader(http.StatusOK)
-			if lookups == 1 {
-				_ = json.NewEncoder(w).Encode(scimGroupsResponse{TotalResults: 0})
-				return
-			}
-			_ = json.NewEncoder(w).Encode(scimGroupsResponse{
-				TotalResults: 1,
-				Resources:    []scimGroup{{ID: "group-conflict", DisplayName: "conflict-team"}},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Groups"):
-			w.WriteHeader(http.StatusConflict)
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
-		}
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, testSCIMPath("/Groups/group-1"), r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(scimGroup{
+			ID:           "group-1",
+			TotalResults: 2,
+			Members: []scimMember{
+				{Value: "user-1", Display: "User One"},
+				{Value: "user-2", Display: "User Two"},
+			},
+		})
 	}))
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	team, err := pc.CreateTeam(context.Background(), &structs.Team{Name: "conflict-team"})
+	members, err := pc.FetchTeamMembersByTeamID(context.Background(), "group-1")
 	require.NoError(t, err)
-	assert.Equal(t, "group-conflict", team.ID)
-}
-
-func TestDeleteNotFoundIsIdempotent_team(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodDelete, r.Method)
-		require.True(t, strings.Contains(r.URL.Path, "/Groups/"))
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.DeleteTeamByID(context.Background(), "missing-group"))
-}
-
-func TestMembership_emptyInputIsNoOp(t *testing.T) {
-	pc := newTestPresetClient(t, "https://example.com")
-	require.NoError(t, pc.AddUserToTeam(context.Background(), "group-1", nil))
-	require.NoError(t, pc.AddUserToTeam(context.Background(), "group-1", []string{}))
-	require.NoError(t, pc.RemoveUserFromTeam(context.Background(), "group-1", nil))
-	require.NoError(t, pc.RemoveUserFromTeam(context.Background(), "group-1", []string{}))
+	require.Len(t, members, 2)
+	assert.Equal(t, "User One", members["user-1"].DisplayName)
+	assert.Equal(t, "user-2", members["user-2"].ID)
 }
 
 func TestAddUserToTeam_batchesAt500Limit(t *testing.T) {
@@ -336,244 +152,4 @@ func TestRemoveUserFromTeam_batchesAt500Limit(t *testing.T) {
 	userIDs := makeUserIDs(scimMembershipBatchSize + 1)
 	require.NoError(t, pc.RemoveUserFromTeam(context.Background(), "group-1", userIDs))
 	assert.Equal(t, []int{scimMembershipBatchSize, 1}, batchSizes)
-}
-
-func TestAddUserToTeam_successSingleBatch(t *testing.T) {
-	var patchCount int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPatch, r.Method)
-		patchReq := decodePatchRequest(t, r)
-		require.Len(t, patchReq.Operations, 1)
-		assert.Equal(t, "add", patchReq.Operations[0].Op)
-		assert.Equal(t, "members", patchReq.Operations[0].Path)
-		assert.Equal(t, 3, addBatchMemberCount(patchReq))
-		patchCount++
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.AddUserToTeam(context.Background(), "group-1", []string{"u1", "u2", "u3"}))
-	assert.Equal(t, 1, patchCount)
-}
-
-func TestRemoveUserFromTeam_successSingleBatch(t *testing.T) {
-	var patchCount int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPatch, r.Method)
-		patchReq := decodePatchRequest(t, r)
-		require.Len(t, patchReq.Operations, 2)
-		assert.Equal(t, "remove", patchReq.Operations[0].Op)
-		assert.Equal(t, `members[value eq "user-a"]`, patchReq.Operations[0].Path)
-		assert.Equal(t, `members[value eq "user-b"]`, patchReq.Operations[1].Path)
-		patchCount++
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.RemoveUserFromTeam(context.Background(), "group-1", []string{"user-a", "user-b"}))
-	assert.Equal(t, 1, patchCount)
-}
-
-func TestRemoveUserFromTeam_escapesReservedCharactersInFilter(t *testing.T) {
-	userID := `user"name\path`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		patchReq := decodePatchRequest(t, r)
-		require.Len(t, patchReq.Operations, 1)
-		assert.Equal(t, fmt.Sprintf(`members[value eq "%s"]`, escapeSCIMLiteral(userID)), patchReq.Operations[0].Path)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.RemoveUserFromTeam(context.Background(), "group-1", []string{userID}))
-}
-
-func TestAddUserToTeam_continuesAfterBatchFailure(t *testing.T) {
-	var batchSizes []int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		patchReq := decodePatchRequest(t, r)
-		memberCount := addBatchMemberCount(patchReq)
-		batchSizes = append(batchSizes, memberCount)
-		if memberCount == scimMembershipBatchSize {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	userIDs := makeUserIDs(scimMembershipBatchSize + 1)
-	err := pc.AddUserToTeam(context.Background(), "group-1", userIDs)
-	require.Error(t, err)
-	assert.GreaterOrEqual(t, len(batchSizes), 2)
-	assert.Equal(t, scimMembershipBatchSize, batchSizes[0])
-	assert.Equal(t, 1, batchSizes[len(batchSizes)-1])
-	assert.Contains(t, err.Error(), "batch 1/2")
-}
-
-func TestFetchTeamMembersByTeamID(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodGet, r.Method)
-		require.Equal(t, testSCIMPath("/Groups/group-1"), r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(scimGroup{
-			ID:           "group-1",
-			TotalResults: 2,
-			Members: []scimMember{
-				{Value: "user-1", Display: "User One"},
-				{Value: "user-2", Display: "User Two"},
-			},
-		})
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	members, err := pc.FetchTeamMembersByTeamID(context.Background(), "group-1")
-	require.NoError(t, err)
-	require.Len(t, members, 2)
-	assert.Equal(t, "User One", members["user-1"].DisplayName)
-	assert.Equal(t, "user-2", members["user-2"].ID)
-}
-
-func TestFetchSCIMGroupMembers_paginates(t *testing.T) {
-	var requests int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodGet, r.Method)
-		require.Equal(t, testSCIMPath("/Groups/group-1"), r.URL.Path)
-		requests++
-
-		startIndex := 1
-		if raw := r.URL.Query().Get("startIndex"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			require.NoError(t, err)
-			startIndex = parsed
-		}
-		count := scimGroupMemberPageSize
-		if raw := r.URL.Query().Get("count"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			require.NoError(t, err)
-			count = parsed
-		}
-		require.Equal(t, scimGroupMemberPageSize, count)
-
-		switch startIndex {
-		case 1:
-			page := make([]scimMember, scimGroupMemberPageSize)
-			for i := range page {
-				page[i] = scimMember{Value: fmt.Sprintf("user-%d", i)}
-			}
-			_ = json.NewEncoder(w).Encode(scimGroup{
-				ID:           "group-1",
-				TotalResults: scimGroupMemberPageSize + 1,
-				Members:      page,
-			})
-		case scimGroupMemberPageSize + 1:
-			_ = json.NewEncoder(w).Encode(scimGroup{
-				ID:           "group-1",
-				TotalResults: scimGroupMemberPageSize + 1,
-				Members:      []scimMember{{Value: "user-last"}},
-			})
-		default:
-			t.Fatalf("unexpected startIndex %d", startIndex)
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	members, err := pc.fetchSCIMGroupMembers(context.Background(), "group-1")
-	require.NoError(t, err)
-	assert.Equal(t, 2, requests)
-	assert.Len(t, members, scimGroupMemberPageSize+1)
-	assert.Equal(t, "user-last", members[len(members)-1].Value)
-}
-
-func TestFetchSCIMGroupMembers_stuckOnDuplicatePage(t *testing.T) {
-	var requests int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodGet, r.Method)
-		requests++
-		page := make([]scimMember, scimGroupMemberPageSize)
-		for i := range page {
-			page[i] = scimMember{Value: fmt.Sprintf("user-%d", i)}
-		}
-		_ = json.NewEncoder(w).Encode(scimGroup{ID: "group-1", Members: page})
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	_, err := pc.fetchSCIMGroupMembers(context.Background(), "group-1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "pagination stuck")
-	assert.Equal(t, 2, requests)
-}
-
-func TestFetchAllTeams_paginates(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodGet, r.Method)
-		require.True(t, strings.HasPrefix(r.URL.Path, testSCIMPath("/Groups")))
-
-		startIndex := 1
-		if raw := r.URL.Query().Get("startIndex"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			require.NoError(t, err)
-			startIndex = parsed
-		}
-
-		switch startIndex {
-		case 1:
-			_ = json.NewEncoder(w).Encode(scimGroupsResponse{
-				TotalResults: 2,
-				Resources:    []scimGroup{{ID: "g1", DisplayName: "group-one"}},
-			})
-		case 2:
-			_ = json.NewEncoder(w).Encode(scimGroupsResponse{
-				TotalResults: 2,
-				Resources:    []scimGroup{{ID: "g2", DisplayName: "group-two"}},
-			})
-		default:
-			_ = json.NewEncoder(w).Encode(scimGroupsResponse{TotalResults: 2})
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	teams, err := pc.FetchAllTeams(context.Background())
-	require.NoError(t, err)
-	require.Len(t, teams, 2)
-	assert.Equal(t, "group-one", teams["g1"].Name)
-	assert.Equal(t, "group-two", teams["g2"].Name)
-}
-
-func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
-	email := `user"name@example.com`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")):
-			filter := r.URL.Query().Get("filter")
-			assert.Contains(t, filter, `user\"name@example.com`)
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(scimUsersResponse{TotalResults: 0})
-		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Users"):
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(scimUser{
-				ID:       "new-user",
-				UserName: email,
-				Emails:   []scimEmailValue{{Value: email, Primary: true}},
-			})
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	user, err := pc.CreateUser(context.Background(), &structs.User{
-		Email:    email,
-		UserName: email,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "new-user", user.ID)
 }

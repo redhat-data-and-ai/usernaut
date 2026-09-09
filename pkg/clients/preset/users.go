@@ -144,18 +144,6 @@ func (pc *PresetClient) CreateUser(ctx context.Context, u *structs.User) (*struc
 		return nil, fmt.Errorf("email is required for Preset user creation")
 	}
 
-	existing, err := pc.findUserByEmail(ctx, u.Email)
-	if err == nil {
-		log.WithFields(logrus.Fields{
-			"user_id": existing.ID,
-		}).Info("SCIM user already exists in Preset")
-		return existing, nil
-	}
-	if !errors.Is(err, errUserNotFound) {
-		log.WithError(err).Error("failed to check if SCIM user exists in Preset")
-		return nil, fmt.Errorf("failed to check if user exists: %w", err)
-	}
-
 	reqURL := fmt.Sprintf("%s/Users", pc.scimURL())
 	reqBody := scimUserCreateRequest{
 		Schemas:  []string{scimUserSchema},
