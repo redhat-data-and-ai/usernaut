@@ -766,24 +766,24 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 
 // handleDeletion processes the deletion of a Group CR and its finalizer
 func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
-	if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
-		return nil
-	}
+	if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+		// Lock cache for deletion operations
+		// Multiple Group CRs might reference the same team and delete concurrently
+		r.CacheMutex.Lock()
+		defer r.CacheMutex.Unlock()
 
-	// Lock cache for deletion operations
-	// Multiple Group CRs might reference the same team and delete concurrently
-	r.CacheMutex.Lock()
-	defer r.CacheMutex.Unlock()
+		// Clean up user:groups reverse index for all members of this group
+		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
 
-	r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
-	if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
-		return err
-	}
+		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
+			return err
+		}
 
-	controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
-	if err := r.Update(ctx, groupCR); err != nil {
-		r.log.WithError(err).Error("error while updating group CR")
-		return err
+		controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
+		if err := r.Update(ctx, groupCR); err != nil {
+			r.log.WithError(err).Error("error while updating group CR")
+			return err
+		}
 	}
 	return nil
 }
