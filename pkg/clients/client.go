@@ -23,6 +23,7 @@ import (
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/preset"
 	redhatrover "github.com/redhat-data-and-ai/usernaut/pkg/clients/redhat_rover"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/snowflake"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -111,6 +112,13 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 			return nil, err
 		}
 		return gitlabClient, nil
+	case "preset":
+		appConfig, err := config.GetConfig()
+		if err != nil {
+			return nil, err
+		}
+		return preset.NewClient(backend.Connection,
+			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
 	default:
 		// If no valid backend type is matched, return an error
 		return nil, ErrInvalidBackend

@@ -25,4 +25,5 @@ spec:
   backends:
   - name: fivetran
     type: fivetran
-  
+  - name: preset
+    type: preset
