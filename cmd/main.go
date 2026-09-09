@@ -149,7 +149,8 @@ func main() {
 	}
 
 	watchedNamespaces := parseWatchedNamespaces(os.Getenv("WATCHED_NAMESPACE"))
-	setupLog.Info("watching namespaces", "namespaces", slices.Sorted(maps.Keys(watchedNamespaces)))
+	namespaces := slices.Collect(maps.Keys(watchedNamespaces))
+	setupLog.Info("watching namespaces", "namespaces", namespaces)
 
 	leaseDuration := 60 * time.Second
 	renewDeadline := 40 * time.Second
@@ -213,12 +214,13 @@ func main() {
 	}
 
 	if err = (&controller.GroupReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		AppConfig:  appConf,
-		Store:      dataStore,
-		LdapConn:   ldapConn,
-		CacheMutex: sharedCacheMutex,
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		AppConfig:         appConf,
+		Store:             dataStore,
+		LdapConn:          ldapConn,
+		CacheMutex:        sharedCacheMutex,
+		WatchedNamespaces: namespaces,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Group")
 		os.Exit(1)
