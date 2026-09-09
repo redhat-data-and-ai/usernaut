@@ -102,14 +102,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.handleDeletion(ctx, groupCR)
 	}
 
-	// Object is not being deleted, add finalizer if missing
-	if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
-		controllerutil.AddFinalizer(groupCR, groupFinalizer)
-		if err := r.Update(ctx, groupCR); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
 	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
 		r.log.WithError(err).Warn("spec validation failed")
 		groupCR.UpdateStatusWithErrMessage(err.Error())
@@ -118,6 +110,15 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Object is not being deleted, add finalizer if missing.
+	// Finalizer is added only after spec validation so invalid CRs can be deleted.
+	if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+		controllerutil.AddFinalizer(groupCR, groupFinalizer)
+		if err := r.Update(ctx, groupCR); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// set owner reference to the group CR
@@ -766,24 +767,31 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 
 // handleDeletion processes the deletion of a Group CR and its finalizer
 func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
-	if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
-		// Lock cache for deletion operations
-		// Multiple Group CRs might reference the same team and delete concurrently
-		r.CacheMutex.Lock()
-		defer r.CacheMutex.Unlock()
+	if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+		return nil
+	}
 
-		// Clean up user:groups reverse index for all members of this group
+	// Lock cache for deletion operations
+	// Multiple Group CRs might reference the same team and delete concurrently
+	r.CacheMutex.Lock()
+	defer r.CacheMutex.Unlock()
+
+	// Invalid specs never created backend resources. Skip cleanup so the
+	// finalizer can be removed instead of getting stuck on transform errors.
+	if err := validate(groupCR.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
+		r.log.WithError(err).Warn("skipping backend cleanup for invalid spec during deletion")
+	} else {
 		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
 
 		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
 			return err
 		}
+	}
 
-		controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
-		if err := r.Update(ctx, groupCR); err != nil {
-			r.log.WithError(err).Error("error while updating group CR")
-			return err
-		}
+	controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
+	if err := r.Update(ctx, groupCR); err != nil {
+		r.log.WithError(err).Error("error while updating group CR")
+		return err
 	}
 	return nil
 }

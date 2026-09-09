@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -350,6 +351,96 @@ var _ = Describe("Group Controller", func() {
 			Expect(status.Name).To(Equal("gitlab-main"))
 			Expect(status.Status).To(BeFalse())
 			Expect(status.Message).To(ContainSubstring("missing required connection parameters"))
+		})
+	})
+
+	Context("When spec validation fails", func() {
+		ctx := context.Background()
+
+		setupInvalidSpecReconciler := func() *GroupReconciler {
+			fivetranBackend := config.Backend{
+				Name:    "fivetran",
+				Type:    "fivetran",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyApiKey: "testKey",
+				},
+			}
+			reconciler, _ := setupTestReconciler([]config.Backend{fivetranBackend})
+			reconciler.AppConfig.ControllerConfig.SpecValidationRules = config.SpecValidationRulesConfig{
+				"default": {
+					Group: config.GroupSpecValidationRules{
+						GroupName: config.GroupNameValidationConfig{
+							Prefix: "aif-",
+						},
+					},
+				},
+			}
+			return reconciler
+		}
+
+		newInvalidGroup := func(name string, finalizers []string) *usernautdevv1alpha1.Group {
+			return &usernautdevv1alpha1.Group{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       name,
+					Namespace:  "default",
+					Finalizers: finalizers,
+				},
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: name,
+					Members: usernautdevv1alpha1.Members{
+						Users: []string{"test-user-1"},
+					},
+					Backends: []usernautdevv1alpha1.Backend{
+						{Name: "fivetran", Type: "fivetran"},
+					},
+				},
+			}
+		}
+
+		It("should not add a finalizer to an invalid Group CR", func() {
+			const resourceName = "food-delivery-group"
+			nn := types.NamespacedName{Name: resourceName, Namespace: "default"}
+			resource := newInvalidGroup(resourceName, nil)
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, resource) }()
+
+			reconciler := setupInvalidSpecReconciler()
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+
+			fresh := &usernautdevv1alpha1.Group{}
+			Expect(k8sClient.Get(ctx, nn, fresh)).To(Succeed())
+			Expect(controllerutil.ContainsFinalizer(fresh, groupFinalizer)).To(BeFalse())
+			Expect(fresh.Status.Conditions).NotTo(BeEmpty())
+			Expect(fresh.Status.Conditions[0].Message).To(ContainSubstring(`spec.group_name must start with "aif-"`))
+		})
+
+		It("should remove a stuck finalizer from an invalid Group CR on delete", func() {
+			const resourceName = "food-delivery-group-stuck"
+			nn := types.NamespacedName{Name: resourceName, Namespace: "default"}
+			resource := newInvalidGroup(resourceName, []string{groupFinalizer})
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			reconciler := setupInvalidSpecReconciler()
+
+			By("reconciling the invalid CR leaves the existing finalizer in place")
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+
+			fresh := &usernautdevv1alpha1.Group{}
+			Expect(k8sClient.Get(ctx, nn, fresh)).To(Succeed())
+			Expect(controllerutil.ContainsFinalizer(fresh, groupFinalizer)).To(BeTrue())
+
+			By("deleting the CR and reconciling removes the finalizer")
+			Expect(k8sClient.Delete(ctx, fresh)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, nn, &usernautdevv1alpha1.Group{})
+				return errors.IsNotFound(err)
+			}).Should(BeTrue())
 		})
 	})
 })
