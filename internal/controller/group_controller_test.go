@@ -399,7 +399,7 @@ var _ = Describe("Group Controller", func() {
 		}
 
 		It("should not add a finalizer to an invalid Group CR", func() {
-			const resourceName = "food-delivery-group"
+			const resourceName = "invalid-group"
 			nn := types.NamespacedName{Name: resourceName, Namespace: "default"}
 			resource := newInvalidGroup(resourceName, nil)
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -417,7 +417,7 @@ var _ = Describe("Group Controller", func() {
 		})
 
 		It("should remove a stuck finalizer from an invalid Group CR on delete", func() {
-			const resourceName = "food-delivery-group-stuck"
+			const resourceName = "invalid-group-stuck"
 			nn := types.NamespacedName{Name: resourceName, Namespace: "default"}
 			resource := newInvalidGroup(resourceName, []string{groupFinalizer})
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
