@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -64,14 +65,14 @@ const (
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
-	Scheme          *runtime.Scheme
-	AppConfig       *config.AppConfig
-	Store           *store.Store
-	log             *logrus.Entry
-	backendLogger   *logrus.Entry
-	LdapConn        ldap.LDAPClient
-	allLdapUserData map[string]*structs.LDAPUser
-
+	Scheme            *runtime.Scheme
+	AppConfig         *config.AppConfig
+	Store             *store.Store
+	log               *logrus.Entry
+	backendLogger     *logrus.Entry
+	LdapConn          ldap.LDAPClient
+	allLdapUserData   map[string]*structs.LDAPUser
+	WatchedNamespaces []string
 	// CacheMutex prevents concurrent access to the cache during group reconciliation.
 	// This shared mutex ensures that the group controller and user offboarding job don't interfere
 	// with each other when reading or modifying user/team data in Redis.
@@ -1073,7 +1074,16 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 
 	r.log.WithField("group", groupName).Info("fetching group members")
 
-	// Handle cyclic dependencies for the current recursion path.
+	groupCR := &usernautdevv1alpha1.Group{}
+	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
+		if !apierrors.IsNotFound(err) {
+			r.log.WithError(err).Error("error fetching the group CR")
+		}
+		return nil, err
+	}
+
+	// Handle cyclic dependencies for the current recursion path. This is checked only after the
+	// group CR is resolved so that a cycle is reported once, by the namespace holding the group.
 	if _, ok := visitedOnPath[groupName]; ok {
 		r.log.WithField("group", groupName).Warn("cyclic group dependency detected; returning empty member list")
 		return []string{}, nil
@@ -1081,21 +1091,35 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 	visitedOnPath[groupName] = struct{}{}
 	defer delete(visitedOnPath, groupName) // Remove from path when returning.
 
-	groupCR := &usernautdevv1alpha1.Group{}
-	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
-		r.log.WithError(err).Error("error fetching the group CR")
-		return nil, err
-	}
-
 	members := make([]string, 0)
 	members = append(members, groupCR.Spec.Members.Users...)
 
 	for _, subGroup := range groupCR.Spec.Members.Groups {
-		subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, namespace, visitedOnPath)
-		if err != nil {
-			return nil, err
+		foundIn := make([]string, 0, 1)
+		membersToAdd := make([]string, 0)
+		for _, searchNamespace := range r.WatchedNamespaces {
+			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return nil, fmt.Errorf("error resolving group %s in namespace %s: %w", subGroup, searchNamespace, err)
+			}
+			foundIn = append(foundIn, searchNamespace)
+			membersToAdd = append(membersToAdd, subMembers...)
 		}
-		members = append(members, subMembers...)
+
+		// as we don't have admission webhook, adding a check here to prevent multiple groups
+		// with the same name in different namespaces
+		switch {
+		case len(foundIn) == 0:
+			return nil, fmt.Errorf("no group %s found in namespaces %s",
+				subGroup, strings.Join(r.WatchedNamespaces, ", "))
+		case len(foundIn) > 1:
+			return nil, fmt.Errorf("multiple groups %s found in namespaces %s", subGroup, strings.Join(foundIn, ", "))
+		default:
+			members = append(members, membersToAdd...)
+		}
 	}
 
 	return members, nil
@@ -1121,6 +1145,15 @@ func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *userna
 		parentGroupCR := &usernautdevv1alpha1.Group{}
 		if err := r.Client.Get(ctx,
 			client.ObjectKey{Namespace: groupCR.Namespace, Name: parentGroupName}, parentGroupCR); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Kubernetes resolves owner references within the namespace of the dependent, and
+				// garbage collects the dependent when the owner is absent there. A group referenced
+				// from another watched namespace therefore cannot own this CR. Membership
+				// resolution reports the reference if it does not exist in any watched namespace.
+				r.log.WithField("group", parentGroupName).
+					Info("referenced group not present in this namespace; skipping owner reference")
+				continue
+			}
 			r.log.WithError(err).Error("error fetching the parent group CR")
 			return err
 		}
