@@ -102,6 +102,14 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.handleDeletion(ctx, groupCR)
 	}
 
+	// Object is not being deleted, add finalizer if missing
+	if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
+		controllerutil.AddFinalizer(groupCR, groupFinalizer)
+		if err := r.Update(ctx, groupCR); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
 		r.log.WithError(err).Warn("spec validation failed")
 		groupCR.UpdateStatusWithErrMessage(err.Error())
@@ -110,15 +118,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, nil
-	}
-
-	// Object is not being deleted, add finalizer if missing.
-	// Finalizer is added only after spec validation so invalid CRs can be deleted.
-	if !controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
-		controllerutil.AddFinalizer(groupCR, groupFinalizer)
-		if err := r.Update(ctx, groupCR); err != nil {
-			return ctrl.Result{}, err
-		}
 	}
 
 	// set owner reference to the group CR

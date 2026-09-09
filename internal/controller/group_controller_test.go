@@ -398,12 +398,11 @@ var _ = Describe("Group Controller", func() {
 			}
 		}
 
-		It("should not add a finalizer to an invalid Group CR", func() {
+		It("should add a finalizer to an invalid Group CR so later delete can clean up", func() {
 			const resourceName = "invalid-group"
 			nn := types.NamespacedName{Name: resourceName, Namespace: "default"}
 			resource := newInvalidGroup(resourceName, nil)
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			defer func() { _ = k8sClient.Delete(ctx, resource) }()
 
 			reconciler := setupInvalidSpecReconciler()
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
@@ -411,9 +410,19 @@ var _ = Describe("Group Controller", func() {
 
 			fresh := &usernautdevv1alpha1.Group{}
 			Expect(k8sClient.Get(ctx, nn, fresh)).To(Succeed())
-			Expect(controllerutil.ContainsFinalizer(fresh, groupFinalizer)).To(BeFalse())
+			Expect(controllerutil.ContainsFinalizer(fresh, groupFinalizer)).To(BeTrue())
 			Expect(fresh.Status.Conditions).NotTo(BeEmpty())
 			Expect(fresh.Status.Conditions[0].Message).To(ContainSubstring(`spec.group_name must start with "aif-"`))
+
+			By("deleting the invalid CR still removes the finalizer")
+			Expect(k8sClient.Delete(ctx, fresh)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, nn, &usernautdevv1alpha1.Group{})
+				return errors.IsNotFound(err)
+			}).Should(BeTrue())
 		})
 
 		It("should remove a stuck finalizer from an invalid Group CR on delete", func() {
