@@ -826,6 +826,7 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		})
 		backendLoggerInfo.Info("Finalizer: Deleting team from backend")
 
+		// Get team ID from consolidated group store (using original group name)
 		// NOTE: CacheMutex is already held by caller (handleDeletion)
 		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backend.Name, backend.Type)
 		if err != nil {
