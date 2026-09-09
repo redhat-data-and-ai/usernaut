@@ -35,7 +35,11 @@ type PresetConfig struct {
 	TeamSlug  string `json:"team_slug"`
 }
 
-const scimPageSize = 100
+// scimGroupsPageSize caps groups returned per FetchAllTeams page.
+const scimGroupsPageSize = 100
+
+// scimUsersPageSize caps users returned per FetchAllUsers page.
+const scimUsersPageSize = 1000
 
 // scimMembershipBatchSize caps users per SCIM group membership PATCH request.
 const scimMembershipBatchSize = 500
@@ -84,10 +88,9 @@ type scimName struct {
 
 // scimGroup represents a group in SCIM format
 type scimGroup struct {
-	ID           string       `json:"id"`
-	DisplayName  string       `json:"displayName"`
-	TotalResults int          `json:"totalResults"`
-	Members      []scimMember `json:"members"`
+	ID          string       `json:"id"`
+	DisplayName string       `json:"displayName"`
+	Members     []scimMember `json:"members"`
 }
 
 // scimGroupsResponse represents the SCIM Groups list response

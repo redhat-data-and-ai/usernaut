@@ -43,7 +43,7 @@ func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.
 
 	startIndex := 1
 	for {
-		reqURL := fmt.Sprintf("%s/Users?startIndex=%d&count=%d", pc.scimURL(), startIndex, scimPageSize)
+		reqURL := fmt.Sprintf("%s/Users?startIndex=%d&count=%d", pc.scimURL(), startIndex, scimUsersPageSize)
 		response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 		if err != nil {
 			log.WithError(err).Error("failed to fetch SCIM users from Preset")

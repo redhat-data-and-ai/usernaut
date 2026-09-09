@@ -42,7 +42,7 @@ func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.T
 
 	startIndex := 1
 	for {
-		reqURL := fmt.Sprintf("%s/Groups?startIndex=%d&count=%d", pc.scimURL(), startIndex, scimPageSize)
+		reqURL := fmt.Sprintf("%s/Groups?startIndex=%d&count=%d", pc.scimURL(), startIndex, scimGroupsPageSize)
 		response, err := pc.sendRequest(ctx, reqURL, http.MethodGet, nil)
 		if err != nil {
 			log.WithError(err).Error("failed to fetch SCIM groups from Preset")

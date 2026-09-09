@@ -104,8 +104,7 @@ func TestFetchTeamMembersByTeamID_singleResponse(t *testing.T) {
 		require.Equal(t, testSCIMPath("/Groups/group-1"), r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(scimGroup{
-			ID:           "group-1",
-			TotalResults: 2,
+			ID: "group-1",
 			Members: []scimMember{
 				{Value: "user-1", Display: "User One"},
 				{Value: "user-2", Display: "User Two"},
