@@ -442,5 +442,66 @@ var _ = Describe("Group Controller", func() {
 				return errors.IsNotFound(err)
 			}).Should(BeTrue())
 		})
+
+		It("should clean up after a valid reconcile followed by an invalid spec update", func() {
+			const resourceName = "aif-valid-then-invalid"
+			nn := types.NamespacedName{Name: resourceName, Namespace: "default"}
+			resource := newInvalidGroup(resourceName, nil)
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
+			fivetranBackend := config.Backend{
+				Name:    "fivetran",
+				Type:    "fivetran",
+				Enabled: true,
+				Connection: map[string]interface{}{
+					keyApiKey: "testKey",
+				},
+			}
+			reconciler, ldapClient := setupTestReconciler([]config.Backend{fivetranBackend})
+			reconciler.AppConfig.ControllerConfig.SpecValidationRules = config.SpecValidationRulesConfig{
+				"default": {
+					Group: config.GroupSpecValidationRules{
+						GroupName: config.GroupNameValidationConfig{
+							Prefix: "aif-",
+						},
+					},
+				},
+			}
+
+			ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Return(
+				map[string]map[string]interface{}{
+					"test-user-1": {
+						"cn":          "Test",
+						"sn":          "User",
+						"displayName": "Test User",
+						"mail":        "testuser@gmail.com",
+						"uid":         "testuser",
+					},
+				}, nil).Times(1)
+
+			By("reconciling a valid spec records that the group was applied")
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).To(HaveOccurred())
+
+			fresh := &usernautdevv1alpha1.Group{}
+			Expect(k8sClient.Get(ctx, nn, fresh)).To(Succeed())
+			Expect(controllerutil.ContainsFinalizer(fresh, groupFinalizer)).To(BeTrue())
+			Expect(fresh.Status.LastAppliedGeneration).NotTo(BeZero())
+
+			By("updating the spec so it is no longer valid")
+			fresh.Spec.GroupName = "food-delivery-group"
+			Expect(k8sClient.Update(ctx, fresh)).To(Succeed())
+
+			By("deleting still removes the finalizer")
+			Expect(k8sClient.Get(ctx, nn, fresh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, fresh)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, nn, &usernautdevv1alpha1.Group{})
+				return errors.IsNotFound(err)
+			}).Should(BeTrue())
+		})
 	})
 })

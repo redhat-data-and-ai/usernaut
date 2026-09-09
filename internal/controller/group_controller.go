@@ -776,16 +776,9 @@ func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautd
 	r.CacheMutex.Lock()
 	defer r.CacheMutex.Unlock()
 
-	// Invalid specs never created backend resources. Skip cleanup so the
-	// finalizer can be removed instead of getting stuck on transform errors.
-	if err := validate(groupCR.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
-		r.log.WithError(err).Warn("skipping backend cleanup for invalid spec during deletion")
-	} else {
-		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
-
-		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
-			return err
-		}
+	r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
+	if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
+		return err
 	}
 
 	controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
@@ -827,26 +820,13 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	groupName := groupCR.Spec.GroupName
 
 	for _, backend := range groupCR.Spec.Backends {
-		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
 		backendLoggerInfo := r.log.WithFields(logrus.Fields{
-			"group_name":            groupName,
-			"transformed_team_name": transformedGroupName,
-			"backend":               backend.Name,
-			"backend_type":          backend.Type,
+			"group_name":   groupName,
+			"backend":      backend.Name,
+			"backend_type": backend.Type,
 		})
 		backendLoggerInfo.Info("Finalizer: Deleting team from backend")
-		if err != nil {
-			backendLoggerInfo.WithError(err).Error("Finalizer: Error in transforming group name")
-			return err
-		}
 
-		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
-		if err != nil {
-			backendLoggerInfo.WithError(err).Errorf("Finalizer: error creating client for backend %s", backend.Name)
-			return err
-		}
-
-		// Get team ID from consolidated group store (using original group name)
 		// NOTE: CacheMutex is already held by caller (handleDeletion)
 		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backend.Name, backend.Type)
 		if err != nil {
@@ -855,8 +835,13 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		}
 
 		if teamID != "" {
-			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
+			backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
+			if err != nil {
+				backendLoggerInfo.WithError(err).Errorf("Finalizer: error creating client for backend %s", backend.Name)
+				return err
+			}
 
+			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
 			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
 				backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete team from the backend")
 				return err
@@ -864,7 +849,12 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 			backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
 		}
 
-		// Delete team entry from TeamStore (used for preload lookups)
+		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
+		if err != nil {
+			backendLoggerInfo.WithError(err).Warn("Finalizer: Error in transforming group name, skipping TeamStore cleanup")
+			continue
+		}
+
 		if err := r.Store.Team.Delete(ctx, transformedGroupName); err != nil {
 			backendLoggerInfo.WithError(err).Warn("Finalizer: failed to delete team from TeamStore cache")
 			// Continue processing - TeamStore is secondary cache
