@@ -856,6 +856,7 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 			backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
 		}
 
+		// Delete team entry from TeamStore (used for preload lookups)
 		if err := r.Store.Team.Delete(ctx, transformedGroupName); err != nil {
 			backendLoggerInfo.WithError(err).Warn("Finalizer: failed to delete team from TeamStore cache")
 			// Continue processing - TeamStore is secondary cache
