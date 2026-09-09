@@ -819,12 +819,25 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	groupName := groupCR.Spec.GroupName
 
 	for _, backend := range groupCR.Spec.Backends {
+		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
+		if err != nil {
+			r.log.WithError(err).Error("Finalizer: Error in transforming group name, skipping TeamStore cleanup")
+			continue
+		}
+
 		backendLoggerInfo := r.log.WithFields(logrus.Fields{
-			"group_name":   groupName,
-			"backend":      backend.Name,
-			"backend_type": backend.Type,
+			"group_name":             groupName,
+			"transformed_group_name": transformedGroupName,
+			"backend":                backend.Name,
+			"backend_type":           backend.Type,
 		})
 		backendLoggerInfo.Info("Finalizer: Deleting team from backend")
+
+		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
+		if err != nil {
+			backendLoggerInfo.WithError(err).Errorf("Finalizer: error creating client for backend %s", backend.Name)
+			return err
+		}
 
 		// Get team ID from consolidated group store (using original group name)
 		// NOTE: CacheMutex is already held by caller (handleDeletion)
@@ -835,24 +848,12 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		}
 
 		if teamID != "" {
-			backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
-			if err != nil {
-				backendLoggerInfo.WithError(err).Errorf("Finalizer: error creating client for backend %s", backend.Name)
-				return err
-			}
-
 			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
 			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
 				backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete team from the backend")
 				return err
 			}
 			backendLoggerInfo.Infof("Finalizer: Successfully deleted team with id '%s' from Backend %s", teamID, backend.Type)
-		}
-
-		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
-		if err != nil {
-			backendLoggerInfo.WithError(err).Warn("Finalizer: Error in transforming group name, skipping TeamStore cleanup")
-			continue
 		}
 
 		if err := r.Store.Team.Delete(ctx, transformedGroupName); err != nil {
