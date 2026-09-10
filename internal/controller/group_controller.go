@@ -820,17 +820,18 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 
 	for _, backend := range groupCR.Spec.Backends {
 		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
+		if err != nil {
+			r.log.WithError(err).Error("Finalizer: Error in transforming group name, skipping TeamStore cleanup")
+			continue
+		}
+
 		backendLoggerInfo := r.log.WithFields(logrus.Fields{
-			"group_name":            groupName,
-			"transformed_team_name": transformedGroupName,
-			"backend":               backend.Name,
-			"backend_type":          backend.Type,
+			"group_name":             groupName,
+			"transformed_group_name": transformedGroupName,
+			"backend":                backend.Name,
+			"backend_type":           backend.Type,
 		})
 		backendLoggerInfo.Info("Finalizer: Deleting team from backend")
-		if err != nil {
-			backendLoggerInfo.WithError(err).Error("Finalizer: Error in transforming group name")
-			return err
-		}
 
 		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 		if err != nil {
@@ -848,7 +849,6 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 
 		if teamID != "" {
 			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
-
 			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
 				backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete team from the backend")
 				return err
