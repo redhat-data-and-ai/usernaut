@@ -112,7 +112,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
 		r.log.WithError(err).Warn("spec validation failed")
-		groupCR.UpdateStatusWithErrMessage(err.Error())
+		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, err.Error())
 		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
 			r.log.WithError(statusErr).Error("error updating status after spec validation failure")
 			return ctrl.Result{}, statusErr
