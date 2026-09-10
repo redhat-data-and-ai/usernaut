@@ -146,9 +146,9 @@ func (c *Group) SetWaiting() {
 func (c *Group) UpdateStatus(reason, message string) {
 	condition := metav1.Condition{
 		Type:               GroupReadyCondition,
-		LastTransitionTime: metav1.Now(),
 		Reason:             reason,
 		Message:            message,
+		LastTransitionTime: metav1.Now(),
 	}
 	switch reason {
 	case SuccessfullyReconciled:
