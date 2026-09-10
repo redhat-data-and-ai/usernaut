@@ -621,3 +621,25 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ExceedsMaxDepth() {
 	assertions.Error(err)
 	assertions.Contains(err.Error(), "exceeds maximum depth")
 }
+
+func (suite *LDAPTestSuite) TestGetQueryMembers_DiagnosticWithZeroEntries_Fails() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		conn:       suite.ldapClient,
+		baseUserDN: "ou=users,dc=example,dc=com",
+		server:     "ldap://ldap.com:389",
+	}
+
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(1)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{
+		Entries:           []*ldap.Entry{},
+		ResultCode:        ldap.LDAPResultSuccess,
+		DiagnosticMessage: "IPA: directory is reinitializing",
+	}, nil).Times(1)
+
+	resp, err := ldapConn.GetQueryMembers(suite.ctx, "(objectClass=groupOfNames)")
+
+	assertions.ErrorIs(err, ErrLDAPUntrustworthyResult)
+	assertions.Nil(resp)
+}

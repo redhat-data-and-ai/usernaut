@@ -460,3 +460,76 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledStopsAfterFir
 	assertions.Len(out, 1)
 	assertions.Contains(out, "a1")
 }
+
+func (suite *LDAPTestSuite) TestGetUserLDAPData_DiagnosticWithZeroEntries_Fails() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		userDN:           "uid=%s,ou=users,dc=example,dc=com",
+		baseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=uid)",
+		attributes:       []string{"mail"},
+	}
+
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(1)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{
+		Entries:           []*ldap.Entry{},
+		ResultCode:        ldap.LDAPResultSuccess,
+		DiagnosticMessage: "IPA: directory is reinitializing",
+	}, nil).Times(1)
+
+	resp, err := ldapConn.GetUserLDAPData(suite.ctx, "testuser")
+
+	assertions.ErrorIs(err, ErrLDAPUntrustworthyResult)
+	assertions.Nil(resp)
+}
+
+func (suite *LDAPTestSuite) TestGetUserLDAPDataByEmail_DiagnosticWithZeroEntries_Fails() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail"},
+	}
+
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(1)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{
+		Entries:           []*ldap.Entry{},
+		ResultCode:        ldap.LDAPResultSuccess,
+		DiagnosticMessage: "IPA: directory is reinitializing",
+	}, nil).Times(1)
+
+	resp, err := ldapConn.GetUserLDAPDataByEmail(suite.ctx, "testuser@example.com")
+
+	assertions.ErrorIs(err, ErrLDAPUntrustworthyResult)
+	assertions.Nil(resp)
+}
+
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_DiagnosticWithZeroEntries_Fails() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail", "uid"},
+	}
+
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(1)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{
+		Entries:           []*ldap.Entry{},
+		ResultCode:        ldap.LDAPResultSuccess,
+		DiagnosticMessage: "IPA: directory is reinitializing",
+	}, nil).Times(1)
+
+	resp, err := ldapConn.GetBulkUserLDAPData(suite.ctx, []string{"testuser"})
+
+	assertions.ErrorIs(err, ErrLDAPUntrustworthyResult)
+	assertions.Empty(resp)
+}
