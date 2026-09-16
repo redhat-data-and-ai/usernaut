@@ -651,7 +651,7 @@ if err := r.Status().Update(ctx, groupCR); err != nil {
 
 - `SuccessfullyReconciled` — all members processed, all backends succeeded (`ConditionTrue`)
 - `PartiallyReconciled` — some members skipped (e.g. not found in LDAP), backends succeeded (`ConditionTrue`)
-- `ReconcileFailed` — one or more backends failed (`ConditionFalse`); takes precedence over `PartiallyReconciled`
+- `ReconcileFailed` — one or more backends failed (`ConditionFalse`); takes precedence over `PartiallyReconciled` for the condition. Stamp `status.lastAppliedGeneration` on the success/partial update first so a valid spec is recorded even when backends then fail; `ReconcileFailed` must not clear it.
 
 #### Partially Reconciled Pattern
 
@@ -667,15 +667,15 @@ When some members cannot be processed (LDAP miss, conversion failure) but the re
 groupCR.Status.BackendsStatus = backendStatus
 groupCR.Status.ReconciledUsers = membersMinusSkipped(uniqueMembers, skippedUsers)
 groupCR.Status.SkippedUsers = skippedUsers
-switch {
-case hasErrors:
-    groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
-case len(skippedUsers) > 0:
+if len(skippedUsers) > 0 {
     groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
         "Group partially reconciled: %d user(s) not found or failed",
         len(skippedUsers)))
-default:
+} else {
     groupCR.UpdateStatus(usernautdevv1alpha1.SuccessfullyReconciled, "")
+}
+if hasErrors {
+    groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
 }
 if err := r.Status().Update(ctx, groupCR); err != nil {
     return ctrl.Result{}, err

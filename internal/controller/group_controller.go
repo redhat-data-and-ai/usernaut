@@ -762,15 +762,17 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 			break
 		}
 	}
-	switch {
-	case hasErrors:
-		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
-	case len(skippedUsers) > 0:
+	// Stamp LastAppliedGeneration for a valid spec first. ReconcileFailed overwrites
+	// the condition but must not clear the generation (used after a later invalid spec).
+	if len(skippedUsers) > 0 {
 		groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
 			"Group partially reconciled: %d user(s) not found or failed",
 			len(skippedUsers)))
-	default:
+	} else {
 		groupCR.UpdateStatus(usernautdevv1alpha1.SuccessfullyReconciled, "")
+	}
+	if hasErrors {
+		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
 	}
 	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
 		r.log.WithError(updateStatusErr).Error("error while updating final status")

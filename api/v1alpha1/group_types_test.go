@@ -53,4 +53,17 @@ func TestGroupUpdateStatus(t *testing.T) {
 		assert.Equal(t, "Group reconcile failed", cond.Message)
 		assert.Equal(t, int64(0), g.Status.LastAppliedGeneration)
 	})
+
+	t.Run("failed after success keeps last applied generation", func(t *testing.T) {
+		t.Parallel()
+		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 7}}
+		g.UpdateStatus(SuccessfullyReconciled, "")
+		g.UpdateStatus(ReconcileFailed, "")
+
+		require.Len(t, g.Status.Conditions, 1)
+		cond := g.Status.Conditions[0]
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, ReconcileFailed, cond.Reason)
+		assert.Equal(t, int64(7), g.Status.LastAppliedGeneration)
+	})
 }
