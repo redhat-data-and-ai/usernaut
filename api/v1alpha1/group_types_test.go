@@ -28,14 +28,14 @@ func TestGroupUpdateStatus(t *testing.T) {
 	t.Run("partially reconciled", func(t *testing.T) {
 		t.Parallel()
 		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 5}}
-		g.UpdateStatus(PartiallyReconciled, "Group partially reconciled: 1 user(s) not found or failed: missing-user")
+		g.UpdateStatus(PartiallyReconciled, "Group partially reconciled: 1 user(s) not found or failed")
 
 		require.Len(t, g.Status.Conditions, 1)
 		cond := g.Status.Conditions[0]
 		assert.Equal(t, GroupReadyCondition, cond.Type)
 		assert.Equal(t, metav1.ConditionTrue, cond.Status)
 		assert.Equal(t, PartiallyReconciled, cond.Reason)
-		assert.Equal(t, "Group partially reconciled: 1 user(s) not found or failed: missing-user", cond.Message)
+		assert.Equal(t, "Group partially reconciled: 1 user(s) not found or failed", cond.Message)
 		assert.Equal(t, int64(5), g.Status.LastAppliedGeneration)
 	})
 

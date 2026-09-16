@@ -91,3 +91,13 @@ func TestFetchLDAPData_BulkErrorStillFails(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "get bulk LDAP user data")
 }
+
+func TestMembersMinusSkipped(t *testing.T) {
+	t.Parallel()
+
+	members := []string{"subhatta", "bdebnath", "pthacker"}
+	assert.Equal(t, members, membersMinusSkipped(members, nil))
+	assert.Equal(t, members, membersMinusSkipped(members, []string{}))
+	assert.Equal(t, []string{"bdebnath", "pthacker"}, membersMinusSkipped(members, []string{"subhatta"}))
+	assert.Empty(t, membersMinusSkipped(members, members))
+}

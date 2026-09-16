@@ -240,6 +240,10 @@ spec:
                 items:
                   type: string
                 type: array
+              skippedUsers:
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

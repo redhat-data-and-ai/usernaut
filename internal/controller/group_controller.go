@@ -167,7 +167,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
 	r.log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
-	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
@@ -215,7 +214,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Step 5: Update status and handle errors
-	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, ldapResult.SkippedUsers); err != nil {
+	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, uniqueMembers, ldapResult.SkippedUsers); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -728,7 +727,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	backendErrors map[string]map[string]string,
-	skippedUsers []string) error {
+	uniqueMembers, skippedUsers []string) error {
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
 	// Build status for each backend
@@ -754,6 +753,8 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 
 	// Update CR status
 	groupCR.Status.BackendsStatus = backendStatus
+	groupCR.Status.ReconciledUsers = membersMinusSkipped(uniqueMembers, skippedUsers)
+	groupCR.Status.SkippedUsers = skippedUsers
 	hasErrors := false
 	for _, m := range backendErrors {
 		if len(m) > 0 {
@@ -766,8 +767,8 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
 	case len(skippedUsers) > 0:
 		groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
-			"Group partially reconciled: %d user(s) not found or failed: %s",
-			len(skippedUsers), strings.Join(skippedUsers, ", ")))
+			"Group partially reconciled: %d user(s) not found or failed",
+			len(skippedUsers)))
 	default:
 		groupCR.UpdateStatus(usernautdevv1alpha1.SuccessfullyReconciled, "")
 	}
@@ -782,6 +783,25 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 	}
 
 	return nil
+}
+
+// membersMinusSkipped returns members that are not in skipped, preserving member order.
+func membersMinusSkipped(members, skipped []string) []string {
+	if len(skipped) == 0 {
+		return members
+	}
+	skip := make(map[string]struct{}, len(skipped))
+	for _, u := range skipped {
+		skip[u] = struct{}{}
+	}
+	out := make([]string, 0, len(members))
+	for _, u := range members {
+		if _, ok := skip[u]; ok {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // handleDeletion processes the deletion of a Group CR and its finalizer

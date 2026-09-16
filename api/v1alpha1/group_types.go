@@ -94,6 +94,7 @@ type GroupParam struct {
 // GroupStatus defines the observed state of Group
 type GroupStatus struct {
 	ReconciledUsers       []string           `json:"reconciledUsers,omitempty"`
+	SkippedUsers          []string           `json:"skippedUsers,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
