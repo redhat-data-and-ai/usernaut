@@ -94,6 +94,7 @@ type GroupParam struct {
 // GroupStatus defines the observed state of Group
 type GroupStatus struct {
 	ReconciledUsers       []string           `json:"reconciledUsers,omitempty"`
+	SkippedUsers          []string           `json:"skippedUsers,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
@@ -127,30 +128,48 @@ func init() {
 }
 
 func (c *Group) SetWaiting() {
-	c.setReadyCondition(metav1.ConditionUnknown, "Waiting", "Group is getting reconciled")
-}
-
-func (c *Group) UpdateStatus(isError bool) {
-	if isError {
-		c.setReadyCondition(metav1.ConditionFalse, ReconcileFailed, "Group reconcile failed")
-		return
-	}
-
-	c.Status.LastAppliedGeneration = c.Generation
-	c.setReadyCondition(metav1.ConditionTrue, SuccessfullyReconciled, "Group reconciled successfully")
-}
-
-func (c *Group) UpdateStatusWithErrMessage(errMessage string) {
-	c.setReadyCondition(metav1.ConditionFalse, ReconcileFailed, errMessage)
-}
-
-func (c *Group) setReadyCondition(status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               GroupReadyCondition,
-		Status:             status,
+		LastTransitionTime: metav1.Now(),
+		Status:             metav1.ConditionUnknown,
+		Message:            "Group is getting reconciled",
+		Reason:             "Waiting",
+	}
+	for i, currentCondition := range c.Status.Conditions {
+		if currentCondition.Type == condition.Type {
+			c.Status.Conditions[i] = condition
+			return
+		}
+	}
+	c.Status.Conditions = append(c.Status.Conditions, condition)
+}
+
+func (c *Group) UpdateStatus(reason, message string) {
+	condition := metav1.Condition{
+		Type:               GroupReadyCondition,
 		Reason:             reason,
 		Message:            message,
 		LastTransitionTime: metav1.Now(),
+	}
+	switch reason {
+	case SuccessfullyReconciled:
+		condition.Status = metav1.ConditionTrue
+		if condition.Message == "" {
+			condition.Message = "Group reconciled successfully"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	case PartiallyReconciled:
+		condition.Status = metav1.ConditionTrue
+		if condition.Message == "" {
+			condition.Message = "Group partially reconciled"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	default:
+		condition.Status = metav1.ConditionFalse
+		if condition.Message == "" {
+			condition.Message = "Group reconcile failed"
+		}
+		condition.Reason = ReconcileFailed
 	}
 	for i, currentCondition := range c.Status.Conditions {
 		if currentCondition.Type == condition.Type {

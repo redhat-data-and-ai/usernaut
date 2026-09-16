@@ -645,13 +645,50 @@ groupCR.SetWaiting()
 if err := r.Status().Update(ctx, groupCR); err != nil {
     return ctrl.Result{}, err
 }
+```
 
-// Update status with results
+`GroupReadyCondition` reasons:
+
+- `SuccessfullyReconciled` — all members processed, all backends succeeded (`ConditionTrue`)
+- `PartiallyReconciled` — some members skipped (e.g. not found in LDAP), backends succeeded (`ConditionTrue`)
+- `ReconcileFailed` — one or more backends failed (`ConditionFalse`); takes precedence over `PartiallyReconciled` for the condition. Stamp `status.lastAppliedGeneration` on the success/partial update first so a valid spec is recorded even when backends then fail; `ReconcileFailed` must not clear it.
+
+#### Partially Reconciled Pattern
+
+When some members cannot be processed (LDAP miss, conversion failure) but the rest can still sync:
+
+- Continue reconciling the remaining users; do not fail the whole reconcile for missing members
+- Real LDAP/server errors (timeout, connection) still fail the reconcile so members are not misclassified as missing
+- Put skipped IDs in `status.skippedUsers`; `status.reconciledUsers` is the remaining members (skipped IDs are excluded)
+- Log the skipped IDs; do **not** put the list in the condition message
+- Condition `message` is a **count only**. `metav1.Condition.Message` is capped at 32,768 characters (`maxLength` on the CRD). `spec.members.users` / `groups` have no item or string-length bound, so joining skipped IDs can make `Status().Update` fail and the partial status will not persist
+
+```go
 groupCR.Status.BackendsStatus = backendStatus
-groupCR.UpdateStatus(hasErrors)
+groupCR.Status.ReconciledUsers = membersMinusSkipped(uniqueMembers, skippedUsers)
+groupCR.Status.SkippedUsers = skippedUsers
+if len(skippedUsers) > 0 {
+    groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
+        "Group partially reconciled: %d user(s) not found or failed",
+        len(skippedUsers)))
+} else {
+    groupCR.UpdateStatus(usernautdevv1alpha1.SuccessfullyReconciled, "")
+}
+if hasErrors {
+    groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
+}
 if err := r.Status().Update(ctx, groupCR); err != nil {
     return ctrl.Result{}, err
 }
+```
+
+❌ **Don't** join unbounded member lists into the condition message:
+
+```go
+// BAD: can exceed the 32,768-character condition message limit
+groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
+    "Group partially reconciled: %d user(s) not found or failed: %s",
+    len(skippedUsers), strings.Join(skippedUsers, ", ")))
 ```
 
 #### Controller Setup
@@ -2067,6 +2104,9 @@ func (c *GitLabClient) FetchAllTeams(ctx context.Context) (map[string]structs.Te
 - [ ] Waiting state is set at start of reconciliation
 - [ ] Backend-specific status is updated (BackendStatus slice)
 - [ ] Partial failures are handled (some backends succeed, some fail)
+- [ ] Missing LDAP members use `PartiallyReconciled` and `status.skippedUsers`; backends still reconcile
+- [ ] Condition messages are counts/summaries only (32,768-character cap); do not join member lists
+- [ ] `ReconcileFailed` takes precedence over `PartiallyReconciled` when backends error
 
 #### Finalizers and Cleanup
 

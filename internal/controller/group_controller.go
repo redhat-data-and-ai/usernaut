@@ -112,7 +112,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
 		r.log.WithError(err).Warn("spec validation failed")
-		groupCR.UpdateStatusWithErrMessage(err.Error())
+		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, err.Error())
 		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
 			r.log.WithError(statusErr).Error("error updating status after spec validation failure")
 			return ctrl.Result{}, statusErr
@@ -167,7 +167,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
 	r.log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
-	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	r.log.Info("fetching LDAP data for the users in the group")
 
@@ -215,7 +214,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Step 5: Update status and handle errors
-	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors); err != nil {
+	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, uniqueMembers, ldapResult.SkippedUsers); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -225,6 +224,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 type LDAPFetchResult struct {
 	CurrentMembers []string // emails of users with valid LDAP data
 	ActiveUserList []string // UIDs of active users
+	SkippedUsers   []string // members not found in LDAP or failed to process
 }
 
 // fetchQueryMembers runs the LDAP query and, when the query has a manager filter and
@@ -428,8 +428,10 @@ func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, see
 
 // fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData.
 // This function does NOT update any cache indexes - it only fetches data.
-// If the bulk LDAP client returns an error (e.g. server timeout), the entire reconcile
-// should fail so members are not misclassified as missing from LDAP.
+// Members missing from LDAP are skipped and returned in SkippedUsers so reconcile
+// can continue and mark the group PartiallyReconciled. If the bulk LDAP client
+// returns a real error (e.g. server timeout), the entire reconcile should fail
+// so members are not misclassified as missing from LDAP.
 // NOTE: This function assumes CacheMutex is already held by the caller.
 func (r *GroupReconciler) fetchLDAPData(
 	ctx context.Context,
@@ -443,6 +445,7 @@ func (r *GroupReconciler) fetchLDAPData(
 
 	// Track current valid members (users with valid LDAP data)
 	currentMembers := make([]string, 0, len(uniqueMembers))
+	skippedUsers := make([]string, 0)
 
 	r.log.WithField("member_count", len(uniqueMembers)).Info("fetching LDAP data in bulk")
 
@@ -459,12 +462,14 @@ func (r *GroupReconciler) fetchLDAPData(
 		userData, ok := bulkData[user]
 		if !ok {
 			r.log.WithField("user", user).Warn("user not found in LDAP, skipping")
+			skippedUsers = append(skippedUsers, user)
 			continue
 		}
 
 		ldapUser := &structs.LDAPUser{}
 		if err := utils.MapToStruct(userData, ldapUser); err != nil {
 			r.log.WithField("user", user).WithError(err).Error("error converting LDAP user data to struct")
+			skippedUsers = append(skippedUsers, user)
 			continue
 		}
 
@@ -477,6 +482,12 @@ func (r *GroupReconciler) fetchLDAPData(
 		currentMembers = append(currentMembers, ldapUser.GetEmail())
 	}
 
+	if len(skippedUsers) > 0 {
+		r.log.WithField("skipped_users", skippedUsers).
+			WithField("skipped_count", len(skippedUsers)).
+			Warn("group members not found in LDAP; continuing with remaining users")
+	}
+
 	activeUserList := make([]string, 0, len(uniqueUIDs))
 	for uid, isActive := range uniqueUIDs {
 		if isActive {
@@ -487,6 +498,7 @@ func (r *GroupReconciler) fetchLDAPData(
 	return &LDAPFetchResult{
 		CurrentMembers: currentMembers,
 		ActiveUserList: activeUserList,
+		SkippedUsers:   skippedUsers,
 	}, nil
 }
 
@@ -714,7 +726,8 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 // updateStatusAndHandleErrors updates the CR status and handles any backend errors
 func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
-	backendErrors map[string]map[string]string) error {
+	backendErrors map[string]map[string]string,
+	uniqueMembers, skippedUsers []string) error {
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
 	// Build status for each backend
@@ -740,7 +753,8 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 
 	// Update CR status
 	groupCR.Status.BackendsStatus = backendStatus
-	groupCR.UpdateStatus(false)
+	groupCR.Status.ReconciledUsers = membersMinusSkipped(uniqueMembers, skippedUsers)
+	groupCR.Status.SkippedUsers = skippedUsers
 	hasErrors := false
 	for _, m := range backendErrors {
 		if len(m) > 0 {
@@ -748,8 +762,17 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 			break
 		}
 	}
+	// Stamp LastAppliedGeneration for a valid spec first. ReconcileFailed overwrites
+	// the condition but must not clear the generation (used after a later invalid spec).
+	if len(skippedUsers) > 0 {
+		groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
+			"Group partially reconciled: %d user(s) not found or failed",
+			len(skippedUsers)))
+	} else {
+		groupCR.UpdateStatus(usernautdevv1alpha1.SuccessfullyReconciled, "")
+	}
 	if hasErrors {
-		groupCR.UpdateStatus(true)
+		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
 	}
 	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
 		r.log.WithError(updateStatusErr).Error("error while updating final status")
@@ -762,6 +785,25 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 	}
 
 	return nil
+}
+
+// membersMinusSkipped returns members that are not in skipped, preserving member order.
+func membersMinusSkipped(members, skipped []string) []string {
+	if len(skipped) == 0 {
+		return members
+	}
+	skip := make(map[string]struct{}, len(skipped))
+	for _, u := range skipped {
+		skip[u] = struct{}{}
+	}
+	out := make([]string, 0, len(members))
+	for _, u := range members {
+		if _, ok := skip[u]; ok {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // handleDeletion processes the deletion of a Group CR and its finalizer

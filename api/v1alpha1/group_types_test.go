@@ -3,28 +3,67 @@ package v1alpha1
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestGroupUpdateValidationFailed(t *testing.T) {
-	group := &Group{}
-	group.UpdateStatusWithErrMessage(`spec.group_name must start with "aif-"`)
+func TestGroupUpdateStatus(t *testing.T) {
+	t.Parallel()
 
-	if len(group.Status.Conditions) != 1 {
-		t.Fatalf("expected 1 condition, got %d", len(group.Status.Conditions))
-	}
+	t.Run("successful", func(t *testing.T) {
+		t.Parallel()
+		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 4}}
+		g.UpdateStatus(SuccessfullyReconciled, "")
 
-	condition := group.Status.Conditions[0]
-	if condition.Type != GroupReadyCondition {
-		t.Fatalf("expected type %q, got %q", GroupReadyCondition, condition.Type)
-	}
-	if condition.Status != metav1.ConditionFalse {
-		t.Fatalf("expected status False, got %q", condition.Status)
-	}
-	if condition.Reason != ReconcileFailed {
-		t.Fatalf("expected reason %q, got %q", ReconcileFailed, condition.Reason)
-	}
-	if condition.Message != `spec.group_name must start with "aif-"` {
-		t.Fatalf("unexpected message: %q", condition.Message)
-	}
+		require.Len(t, g.Status.Conditions, 1)
+		cond := g.Status.Conditions[0]
+		assert.Equal(t, GroupReadyCondition, cond.Type)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status)
+		assert.Equal(t, SuccessfullyReconciled, cond.Reason)
+		assert.Equal(t, "Group reconciled successfully", cond.Message)
+		assert.Equal(t, int64(4), g.Status.LastAppliedGeneration)
+	})
+
+	t.Run("partially reconciled", func(t *testing.T) {
+		t.Parallel()
+		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 5}}
+		g.UpdateStatus(PartiallyReconciled, "Group partially reconciled: 1 user(s) not found or failed")
+
+		require.Len(t, g.Status.Conditions, 1)
+		cond := g.Status.Conditions[0]
+		assert.Equal(t, GroupReadyCondition, cond.Type)
+		assert.Equal(t, metav1.ConditionTrue, cond.Status)
+		assert.Equal(t, PartiallyReconciled, cond.Reason)
+		assert.Equal(t, "Group partially reconciled: 1 user(s) not found or failed", cond.Message)
+		assert.Equal(t, int64(5), g.Status.LastAppliedGeneration)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		t.Parallel()
+		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 6}}
+		g.SetWaiting()
+		g.UpdateStatus(ReconcileFailed, "")
+
+		require.Len(t, g.Status.Conditions, 1)
+		cond := g.Status.Conditions[0]
+		assert.Equal(t, GroupReadyCondition, cond.Type)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, ReconcileFailed, cond.Reason)
+		assert.Equal(t, "Group reconcile failed", cond.Message)
+		assert.Equal(t, int64(0), g.Status.LastAppliedGeneration)
+	})
+
+	t.Run("failed after success keeps last applied generation", func(t *testing.T) {
+		t.Parallel()
+		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 7}}
+		g.UpdateStatus(SuccessfullyReconciled, "")
+		g.UpdateStatus(ReconcileFailed, "")
+
+		require.Len(t, g.Status.Conditions, 1)
+		cond := g.Status.Conditions[0]
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, ReconcileFailed, cond.Reason)
+		assert.Equal(t, int64(7), g.Status.LastAppliedGeneration)
+	})
 }
