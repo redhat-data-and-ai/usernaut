@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/golang/mock/gomock"
@@ -69,4 +70,24 @@ func TestFetchLDAPData_AllUsersFound(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Empty(t, result.SkippedUsers)
 	assert.Equal(t, []string{"found@example.com"}, result.CurrentMembers)
+}
+
+func TestFetchLDAPData_BulkErrorStillFails(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ldapClient := mocks.NewMockLDAPClient(ctrl)
+	r := &GroupReconciler{
+		LdapConn: ldapClient,
+		log:      logger.Logger(context.Background()),
+	}
+
+	members := []string{"found-user"}
+	ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), members).
+		Return(nil, errors.New("LDAP timeout"))
+
+	result, err := r.fetchLDAPData(context.Background(), members)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "get bulk LDAP user data")
 }

@@ -429,8 +429,10 @@ func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, see
 
 // fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData.
 // This function does NOT update any cache indexes - it only fetches data.
-// If the bulk LDAP client returns an error (e.g. server timeout), the entire reconcile
-// should fail so members are not misclassified as missing from LDAP.
+// Members missing from LDAP are skipped and returned in SkippedUsers so reconcile
+// can continue and mark the group PartiallyReconciled. If the bulk LDAP client
+// returns a real error (e.g. server timeout), the entire reconcile should fail
+// so members are not misclassified as missing from LDAP.
 // NOTE: This function assumes CacheMutex is already held by the caller.
 func (r *GroupReconciler) fetchLDAPData(
 	ctx context.Context,
@@ -479,6 +481,12 @@ func (r *GroupReconciler) fetchLDAPData(
 		}
 
 		currentMembers = append(currentMembers, ldapUser.GetEmail())
+	}
+
+	if len(skippedUsers) > 0 {
+		r.log.WithField("skipped_users", skippedUsers).
+			WithField("skipped_count", len(skippedUsers)).
+			Warn("group members not found in LDAP; continuing with remaining users")
 	}
 
 	activeUserList := make([]string, 0, len(uniqueUIDs))
