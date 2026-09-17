@@ -119,13 +119,12 @@ spec:
                               - rhatOfficeFloor
                               - roomNumber
                               type: string
+                            ldap_query:
+                              x-kubernetes-preserve-unknown-fields: true
                             value:
                               type: string
-                          required:
-                          - criteria
-                          - key
-                          - value
                           type: object
+                        minItems: 1
                         type: array
                       operator:
                         enum:

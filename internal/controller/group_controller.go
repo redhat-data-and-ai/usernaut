@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -64,14 +65,14 @@ const (
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
-	Scheme          *runtime.Scheme
-	AppConfig       *config.AppConfig
-	Store           *store.Store
-	log             *logrus.Entry
-	backendLogger   *logrus.Entry
-	LdapConn        ldap.LDAPClient
-	allLdapUserData map[string]*structs.LDAPUser
-
+	Scheme            *runtime.Scheme
+	AppConfig         *config.AppConfig
+	Store             *store.Store
+	log               *logrus.Entry
+	backendLogger     *logrus.Entry
+	LdapConn          ldap.LDAPClient
+	allLdapUserData   map[string]*structs.LDAPUser
+	WatchedNamespaces []string
 	// CacheMutex prevents concurrent access to the cache during group reconciliation.
 	// This shared mutex ensures that the group controller and user offboarding job don't interfere
 	// with each other when reading or modifying user/team data in Redis.
@@ -107,6 +108,16 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err := r.Update(ctx, groupCR); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
+		r.log.WithError(err).Warn("spec validation failed")
+		groupCR.UpdateStatusWithErrMessage(err.Error())
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			r.log.WithError(statusErr).Error("error updating status after spec validation failure")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// set owner reference to the group CR
@@ -264,13 +275,7 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 
 	log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
 
-	hasManagerFilter := false
-	for _, filter := range query.Filters {
-		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
-			hasManagerFilter = true
-			break
-		}
-	}
+	hasManagerFilter := queryHasManagerFilter(query)
 
 	// Manager filter present but indirect reports disabled: return only direct reports of the manager in the query (no recursion).
 	if hasManagerFilter && !includeIndirectReports {
@@ -279,9 +284,6 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 
 	if hasManagerFilter && includeIndirectReports {
 		log.Info("has manager filter, fetching indirect reports")
-		nestedQuery := usernautdevv1alpha1.LDAPQuery{
-			Operator: query.Operator,
-		}
 
 		queue := make([]string, 0, len(queryMembers))
 		queue = append(queue, queryMembers...)
@@ -304,17 +306,10 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 			}
 			visited[member] = struct{}{}
 
-			nestedQuery.Filters = make([]usernautdevv1alpha1.LDAPFilter, 0, len(query.Filters))
-			for _, filter := range query.Filters {
-				value := filter.Value
-				if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
-					value = member
-				}
-				nestedQuery.Filters = append(nestedQuery.Filters, usernautdevv1alpha1.LDAPFilter{
-					Key:      filter.Key,
-					Criteria: filter.Criteria,
-					Value:    value,
-				})
+			nestedQuery := usernautdevv1alpha1.LDAPQuery{
+				Operator: query.Operator,
+				Filters:  replaceManagerInFilters(query.Filters, member),
+				Options:  query.Options,
 			}
 			nestedQueryMembers, err := r.fetchQueryMembers(ctx, &nestedQuery, includeIndirectReports, visited)
 			if err != nil {
@@ -332,18 +327,93 @@ func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernaut
 	return r.deduplicateMembers(queryMembers), nil
 }
 
-func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string {
-	if query == nil {
-		return nil
+// replaceManagerInFilters returns a copy of filters where every manager filter value
+// is replaced with managerUID. Duplicate manager filters with the same criteria and
+// value after replacement are collapsed to a single entry.
+func replaceManagerInFilters(filters []usernautdevv1alpha1.LDAPFilter, managerUID string) []usernautdevv1alpha1.LDAPFilter {
+	if len(filters) == 0 {
+		return []usernautdevv1alpha1.LDAPFilter{}
 	}
-
-	managerUIDs := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, filter := range query.Filters {
-		if !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+	result := make([]usernautdevv1alpha1.LDAPFilter, 0, len(filters))
+	seenManagers := make(map[string]struct{})
+	for _, filter := range filters {
+		if filter.LDAPQuery != nil {
+			nested := replaceManagerInQuery(filter.LDAPQuery, managerUID)
+			result = append(result, usernautdevv1alpha1.LDAPFilter{
+				LDAPQuery: nested,
+			})
 			continue
 		}
 
+		value := filter.Value
+		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+			value = managerUID
+			dedupeKey := strings.ToLower(strings.TrimSpace(filter.Criteria)) + "|" + value
+			if _, ok := seenManagers[dedupeKey]; ok {
+				continue
+			}
+			seenManagers[dedupeKey] = struct{}{}
+		}
+		result = append(result, usernautdevv1alpha1.LDAPFilter{
+			Key:      filter.Key,
+			Criteria: filter.Criteria,
+			Value:    value,
+		})
+	}
+	return result
+}
+
+func replaceManagerInQuery(query *usernautdevv1alpha1.LDAPQuery, managerUID string) *usernautdevv1alpha1.LDAPQuery {
+	if query == nil {
+		return nil
+	}
+	return &usernautdevv1alpha1.LDAPQuery{
+		Operator: query.Operator,
+		Filters:  replaceManagerInFilters(query.Filters, managerUID),
+		Options:  query.Options,
+	}
+}
+
+func filtersHaveManager(filters []usernautdevv1alpha1.LDAPFilter) bool {
+	for _, filter := range filters {
+		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+			return true
+		}
+		if filter.LDAPQuery != nil && queryHasManagerFilter(filter.LDAPQuery) {
+			return true
+		}
+	}
+	return false
+}
+
+// queryHasManagerFilter reports whether a manager filter exists anywhere in the query tree.
+func queryHasManagerFilter(query *usernautdevv1alpha1.LDAPQuery) bool {
+	if query == nil {
+		return false
+	}
+	return filtersHaveManager(query.Filters)
+}
+
+// extractManagerUIDsFromQuery returns unique manager UIDs referenced anywhere in the query tree.
+func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string {
+	if query == nil {
+		return []string{}
+	}
+	seen := make(map[string]struct{})
+	result := []string{}
+	collectManagerUIDsFromFilters(query.Filters, seen, &result)
+	return result
+}
+
+func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, seen map[string]struct{}, result *[]string) {
+	for _, filter := range filters {
+		if filter.LDAPQuery != nil {
+			collectManagerUIDsFromFilters(filter.LDAPQuery.Filters, seen, result)
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+			continue
+		}
 		uid := filter.Value
 		if uid == "" {
 			continue
@@ -352,10 +422,8 @@ func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string 
 			continue
 		}
 		seen[uid] = struct{}{}
-		managerUIDs = append(managerUIDs, uid)
+		*result = append(*result, uid)
 	}
-
-	return managerUIDs
 }
 
 // fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData.
@@ -752,17 +820,18 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 
 	for _, backend := range groupCR.Spec.Backends {
 		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
+		if err != nil {
+			r.log.WithError(err).Error("Finalizer: Error in transforming group name, skipping TeamStore cleanup")
+			continue
+		}
+
 		backendLoggerInfo := r.log.WithFields(logrus.Fields{
-			"group_name":            groupName,
-			"transformed_team_name": transformedGroupName,
-			"backend":               backend.Name,
-			"backend_type":          backend.Type,
+			"group_name":             groupName,
+			"transformed_group_name": transformedGroupName,
+			"backend":                backend.Name,
+			"backend_type":           backend.Type,
 		})
 		backendLoggerInfo.Info("Finalizer: Deleting team from backend")
-		if err != nil {
-			backendLoggerInfo.WithError(err).Error("Finalizer: Error in transforming group name")
-			return err
-		}
 
 		backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 		if err != nil {
@@ -780,7 +849,6 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 
 		if teamID != "" {
 			backendLoggerInfo.Infof("Finalizer: Deleting team with (ID: %s) from Backend %s", teamID, backend.Type)
-
 			if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
 				backendLoggerInfo.WithError(err).Error("Finalizer: failed to delete team from the backend")
 				return err
@@ -1063,7 +1131,16 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 
 	r.log.WithField("group", groupName).Info("fetching group members")
 
-	// Handle cyclic dependencies for the current recursion path.
+	groupCR := &usernautdevv1alpha1.Group{}
+	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
+		if !apierrors.IsNotFound(err) {
+			r.log.WithError(err).Error("error fetching the group CR")
+		}
+		return nil, err
+	}
+
+	// Handle cyclic dependencies for the current recursion path. This is checked only after the
+	// group CR is resolved so that a cycle is reported once, by the namespace holding the group.
 	if _, ok := visitedOnPath[groupName]; ok {
 		r.log.WithField("group", groupName).Warn("cyclic group dependency detected; returning empty member list")
 		return []string{}, nil
@@ -1071,21 +1148,35 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 	visitedOnPath[groupName] = struct{}{}
 	defer delete(visitedOnPath, groupName) // Remove from path when returning.
 
-	groupCR := &usernautdevv1alpha1.Group{}
-	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
-		r.log.WithError(err).Error("error fetching the group CR")
-		return nil, err
-	}
-
 	members := make([]string, 0)
 	members = append(members, groupCR.Spec.Members.Users...)
 
 	for _, subGroup := range groupCR.Spec.Members.Groups {
-		subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, namespace, visitedOnPath)
-		if err != nil {
-			return nil, err
+		foundIn := make([]string, 0, 1)
+		membersToAdd := make([]string, 0)
+		for _, searchNamespace := range r.WatchedNamespaces {
+			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return nil, fmt.Errorf("error resolving group %s in namespace %s: %w", subGroup, searchNamespace, err)
+			}
+			foundIn = append(foundIn, searchNamespace)
+			membersToAdd = append(membersToAdd, subMembers...)
 		}
-		members = append(members, subMembers...)
+
+		// as we don't have admission webhook, adding a check here to prevent multiple groups
+		// with the same name in different namespaces
+		switch {
+		case len(foundIn) == 0:
+			return nil, fmt.Errorf("no group %s found in namespaces %s",
+				subGroup, strings.Join(r.WatchedNamespaces, ", "))
+		case len(foundIn) > 1:
+			return nil, fmt.Errorf("multiple groups %s found in namespaces %s", subGroup, strings.Join(foundIn, ", "))
+		default:
+			members = append(members, membersToAdd...)
+		}
 	}
 
 	return members, nil
@@ -1111,6 +1202,15 @@ func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *userna
 		parentGroupCR := &usernautdevv1alpha1.Group{}
 		if err := r.Client.Get(ctx,
 			client.ObjectKey{Namespace: groupCR.Namespace, Name: parentGroupName}, parentGroupCR); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Kubernetes resolves owner references within the namespace of the dependent, and
+				// garbage collects the dependent when the owner is absent there. A group referenced
+				// from another watched namespace therefore cannot own this CR. Membership
+				// resolution reports the reference if it does not exist in any watched namespace.
+				r.log.WithField("group", parentGroupName).
+					Info("referenced group not present in this namespace; skipping owner reference")
+				continue
+			}
 			r.log.WithError(err).Error("error fetching the parent group CR")
 			return err
 		}

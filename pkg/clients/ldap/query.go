@@ -83,38 +83,52 @@ func (l *LDAPConn) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.L
 	if query == nil {
 		return "", errors.New("ldap query is nil")
 	}
+	return buildQueryFromSpec(query, l.baseUserDN, 1)
+}
+
+func buildQueryFromSpec(query *v1alpha1.LDAPQuery, baseUserDN string, depth int) (string, error) {
+	if depth > v1alpha1.MaxLDAPQueryDepth {
+		return "", fmt.Errorf("ldap query nesting exceeds maximum depth of %d", v1alpha1.MaxLDAPQueryDepth)
+	}
 	if len(query.Filters) == 0 {
 		return "", errors.New("filters are empty")
 	}
-	filters, err := buildFiltersFromSpec(query.Filters, l.baseUserDN)
-	if err != nil {
-		return "", err
+
+	parts := make([]string, 0, len(query.Filters))
+	for i, filter := range query.Filters {
+		part, err := buildFilterItem(filter, baseUserDN, depth)
+		if err != nil {
+			return "", fmt.Errorf("filters[%d]: %w", i, err)
+		}
+		parts = append(parts, part)
 	}
 
 	op := strings.ToLower(strings.TrimSpace(query.Operator))
 	switch op {
 	case "and":
-		return "(&" + strings.Join(filters, "") + ")", nil
+		return "(&" + strings.Join(parts, "") + ")", nil
 	case "or":
-		return "(|" + strings.Join(filters, "") + ")", nil
+		return "(|" + strings.Join(parts, "") + ")", nil
 	default:
 		return "", fmt.Errorf("unsupported operator %q", query.Operator)
 	}
 }
 
-func buildFiltersFromSpec(filters []v1alpha1.LDAPFilter, baseUserDN string) ([]string, error) {
-	results := make([]string, 0, len(filters))
-	for _, filter := range filters {
-		result, err := buildFilterFromSpec(filter, baseUserDN)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, result)
+func buildFilterItem(filter v1alpha1.LDAPFilter, baseUserDN string, depth int) (string, error) {
+	hasSimple := filter.Key != "" || filter.Criteria != "" || filter.Value != ""
+	hasNested := filter.LDAPQuery != nil
+
+	if hasSimple && hasNested {
+		return "", errors.New("filter item cannot have both key/criteria/value and ldap_query")
 	}
-	return results, nil
+
+	if hasNested {
+		return buildQueryFromSpec(filter.LDAPQuery, baseUserDN, depth+1)
+	}
+	return buildSimpleFilter(filter, baseUserDN)
 }
 
-func buildFilterFromSpec(filter v1alpha1.LDAPFilter, baseUserDN string) (string, error) {
+func buildSimpleFilter(filter v1alpha1.LDAPFilter, baseUserDN string) (string, error) {
 	op := strings.ToLower(strings.TrimSpace(filter.Criteria))
 
 	if baseUserDN == "" {
