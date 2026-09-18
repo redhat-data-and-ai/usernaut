@@ -156,8 +156,10 @@ func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
 
 	pc := newTestPresetClient(t, srv.URL)
 	user, err := pc.CreateUser(context.Background(), &structs.User{
-		Email:    "existing@example.com",
-		UserName: "existing@example.com",
+		Email:     "existing@example.com",
+		UserName:  "existing",
+		FirstName: "Existing",
+		LastName:  "User",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|existing@example.com", user.ID)
@@ -250,11 +252,14 @@ func TestNewClient_success(t *testing.T) {
 	assert.Equal(t, "token", pc.scimToken)
 }
 
-func TestCreateUser_requiresEmail(t *testing.T) {
+func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
 	pc := newTestPresetClient(t, "https://example.com")
-	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "no-email"})
+	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "ctolosa"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "email is required")
+	assert.Contains(t, err.Error(), "email and username are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "email and username are required")
 }
 
 func TestCreateTeam_conflictResolvesExistingGroup(t *testing.T) {
@@ -542,10 +547,88 @@ func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
 
 	pc := newTestPresetClient(t, srv.URL)
 	user, err := pc.CreateUser(context.Background(), &structs.User{
-		Email:    `user"name@example.com`,
-		UserName: `user"name@example.com`,
+		Email:     `user"name@example.com`,
+		UserName:  `user"name`,
+		FirstName: "Given",
+		LastName:  "Family",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|user@example.com", user.ID)
-	assert.Contains(t, filter, `user\"name@example.com`)
+	assert.Contains(t, filter, `user\"name`)
+}
+
+func TestCreateUser_postsUidAndLdapNames(t *testing.T) {
+	var body scimUserCreateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, testSCIMPath("/Users"), r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(scimUser{
+			ID:       "samlp|redhat|ctolosa",
+			UserName: "ctolosa",
+			Emails: []scimEmailValue{
+				{Value: "ctolosa@redhat.com", Primary: true, Type: "work"},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	created, err := pc.CreateUser(context.Background(), &structs.User{
+		UserName:  "ctolosa",
+		Email:     "ctolosa@redhat.com",
+		FirstName: "Carlos",
+		LastName:  "Tolosa",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "samlp|redhat|ctolosa", created.ID)
+	assert.Equal(t, "ctolosa", created.UserName)
+
+	assert.Equal(t, []string{scimUserSchema}, body.Schemas)
+	assert.Equal(t, "ctolosa", body.UserName)
+	assert.Equal(t, scimName{GivenName: "Carlos", FamilyName: "Tolosa"}, body.Name)
+	require.Len(t, body.Emails, 1)
+	assert.Equal(t, "ctolosa@redhat.com", body.Emails[0].Value)
+	assert.True(t, body.Emails[0].Primary)
+	assert.Equal(t, "work", body.Emails[0].Type)
+	assert.True(t, body.Active)
+}
+
+func TestCreateUser_bdebnath(t *testing.T) {
+	var body scimUserCreateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, testSCIMPath("/Users"), r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(scimUser{
+			ID:       "samlp|redhat|bdebnath",
+			UserName: "bdebnath",
+			Emails: []scimEmailValue{
+				{Value: "bdebnath@redhat.com", Primary: true, Type: "work"},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	created, err := pc.CreateUser(context.Background(), &structs.User{
+		UserName:  "bdebnath",
+		Email:     "bdebnath@redhat.com",
+		FirstName: "Bidesh",
+		LastName:  "Debnath",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "samlp|redhat|bdebnath", created.ID)
+	assert.Equal(t, "bdebnath", created.UserName)
+
+	assert.Equal(t, []string{scimUserSchema}, body.Schemas)
+	assert.Equal(t, "bdebnath", body.UserName)
+	assert.Equal(t, scimName{GivenName: "Bidesh", FamilyName: "Debnath"}, body.Name)
+	require.Len(t, body.Emails, 1)
+	assert.Equal(t, "bdebnath@redhat.com", body.Emails[0].Value)
+	assert.True(t, body.Emails[0].Primary)
+	assert.Equal(t, "work", body.Emails[0].Type)
+	assert.True(t, body.Active)
 }
