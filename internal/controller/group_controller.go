@@ -110,6 +110,20 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// Skip expensive reconciliation (LDAP, backends) when nothing changed.
+	// Parent groups (with subgroup references) are never skipped — child membership
+	// changes don't bump the parent's generation, so skipping would delay propagation
+	// until the next periodic requeue. Leaf groups are safe to skip since their
+	// membership only changes via spec edits (which bump generation).
+	// requeueAfter/2 ensures periodic requeues (8h) always exceed the window and
+	// trigger a full reconcile, preserving LDAP membership refresh.
+	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
+	if !hasSubgroups && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
+		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
+		r.log.Info("skipping reconciliation, generation unchanged")
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
 	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
 		r.log.WithError(err).Warn("spec validation failed")
 		groupCR.UpdateStatusWithErrMessage(err.Error())
@@ -1100,7 +1114,6 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	}
 
-	// force reconcile flag
 	labelPredicate := controllerutils.ForceReconcilePredicate()
 
 	maxConcurrentReconciles := r.AppConfig.ControllerConfig.MaxConcurrentReconciles
@@ -1108,7 +1121,6 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		maxConcurrentReconciles = 1 // default value
 	}
 
-	// Log the configured concurrency level
 	logger.Logger(context.Background()).WithFields(logrus.Fields{
 		"maxConcurrentReconciles": maxConcurrentReconciles,
 	}).Info("Configuring MaxConcurrentReconciles for Group controller")
