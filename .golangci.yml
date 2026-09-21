@@ -3,19 +3,6 @@ version: "2"
 run:
   timeout: 5m
 
-issues:
-  exclude-rules:
-    - path: "api/*"
-      linters:
-        - lll
-    - path: "internal/*"
-      linters:
-        - dupl
-        - lll
-    - path: "_test\\.go"
-      linters:
-        - dupl
-
 linters:
   default: none
   enable:
@@ -37,9 +24,30 @@ linters:
     - unparam
     - unused
   settings:
+    goconst:
+      min-occurrences: 6
+      ignore-string-values: '^[a-zA-Z_]+$'
     revive:
       rules:
         - name: comment-spacings
+    staticcheck:
+      checks:
+        - "all"
+        - "-QF*"
+        - "-ST*"
+  exclusions:
+    rules:
+      - path: "^api/"
+        linters:
+          - lll
+      - path: "^internal/"
+        linters:
+          - dupl
+          - lll
+      - path: "_test\\.go"
+        linters:
+          - dupl
+          - goconst
 
 formatters:
   enable:

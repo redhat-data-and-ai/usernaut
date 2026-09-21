@@ -67,10 +67,7 @@ func NewClient(
 		return nil, fmt.Errorf("failed to initialize http client: %w", err)
 	}
 
-	dependantExists := false
-	if dependsOn.Name != "" || dependsOn.Type != "" {
-		dependantExists = true
-	}
+	dependantExists := dependsOn.Name != "" || dependsOn.Type != ""
 
 	return &GitlabClient{
 		gitlabClient:    client,
