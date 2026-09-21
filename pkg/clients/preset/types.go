@@ -35,6 +35,11 @@ type PresetConfig struct {
 	TeamSlug  string `json:"team_slug"`
 }
 
+const (
+	serviceName   = "preset"
+	logKeyService = "service"
+)
+
 // scimGroupsPageSize caps groups returned per FetchAllTeams page.
 const scimGroupsPageSize = 100
 
