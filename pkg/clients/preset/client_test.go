@@ -135,17 +135,23 @@ func TestDeleteUser_rateLimitExhausted(t *testing.T) {
 }
 
 func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
+	var filter string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Users"):
 			w.WriteHeader(http.StatusConflict)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")):
+			filter = r.URL.Query().Get("filter")
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(scimUsersResponse{
 				TotalResults: 1,
 				Resources: []scimUser{{
 					ID:       "samlp|redhat|existing@example.com",
-					UserName: "existing@example.com",
+					UserName: "existing",
+					Emails: []scimEmailValue{{
+						Value:   "existing@example.com",
+						Primary: true,
+					}},
 				}},
 			})
 		default:
@@ -163,6 +169,9 @@ func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|existing@example.com", user.ID)
+	assert.Equal(t, "existing", user.UserName)
+	assert.Equal(t, "existing@example.com", user.Email)
+	assert.Equal(t, `userName eq "existing"`, filter)
 }
 
 func TestDeleteNotFoundIsIdempotent(t *testing.T) {
@@ -258,6 +267,12 @@ func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email and username are required")
 	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "email and username are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "  ", UserName: "ctolosa"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "email and username are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com", UserName: "  "})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email and username are required")
 }
@@ -499,7 +514,11 @@ func TestFetchAllUsers_paginates(t *testing.T) {
 		for i := range resources {
 			resources[i] = scimUser{
 				ID:       fmt.Sprintf("user-%d", startIndex+i),
-				UserName: fmt.Sprintf("user-%d@example.com", startIndex+i),
+				UserName: fmt.Sprintf("user-%d", startIndex+i),
+				Emails: []scimEmailValue{{
+					Value:   fmt.Sprintf("user-%d@example.com", startIndex+i),
+					Primary: true,
+				}},
 			}
 		}
 
@@ -517,13 +536,17 @@ func TestFetchAllUsers_paginates(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	_, userIDMap, err := pc.FetchAllUsers(context.Background())
+	userEmailMap, userIDMap, err := pc.FetchAllUsers(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, []int{1, scimUsersPageSize + 1}, pageRequests)
 	assert.Len(t, userIDMap, scimUsersPageSize+1)
+	assert.Len(t, userEmailMap, scimUsersPageSize+1)
+	assert.Equal(t, "user-1", userIDMap["user-1"].UserName)
+	assert.Equal(t, "user-1@example.com", userIDMap["user-1"].Email)
+	assert.Equal(t, userIDMap["user-1"], userEmailMap["user-1@example.com"])
 }
 
-func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
+func TestFindUserByUserName_escapesFilterLiteral(t *testing.T) {
 	var filter string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -536,7 +559,11 @@ func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
 				TotalResults: 1,
 				Resources: []scimUser{{
 					ID:       "samlp|redhat|user@example.com",
-					UserName: `user"name@example.com`,
+					UserName: `user"name`,
+					Emails: []scimEmailValue{{
+						Value:   `user"name@example.com`,
+						Primary: true,
+					}},
 				}},
 			})
 		default:
@@ -554,5 +581,6 @@ func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|user@example.com", user.ID)
-	assert.Contains(t, filter, `user\"name`)
+	assert.Equal(t, `user"name@example.com`, user.Email)
+	assert.Equal(t, `userName eq "user\"name"`, filter)
 }

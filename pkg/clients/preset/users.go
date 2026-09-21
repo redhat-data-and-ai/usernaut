@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -118,9 +119,6 @@ func scimUserToStruct(su *scimUser) *structs.User {
 			email = su.Emails[0].Value
 		}
 	}
-	if email == "" {
-		email = su.UserName
-	}
 
 	return &structs.User{
 		ID:          su.ID,
@@ -142,15 +140,17 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 	log.Info("creating user")
 	reqURL := fmt.Sprintf("%s/Users", pc.scimURL())
 
-	if user.Email == "" || user.UserName == "" {
+	email := strings.TrimSpace(user.Email)
+	userName := strings.TrimSpace(user.UserName)
+	if email == "" || userName == "" {
 		return nil, fmt.Errorf("email and username are required for Preset user creation")
 	}
 
 	reqBody := scimUserCreateRequest{
 		Schemas:  []string{scimUserSchema},
-		UserName: user.UserName,
+		UserName: userName,
 		Emails: []scimEmailValue{
-			{Value: user.Email, Primary: true, Type: "work"},
+			{Value: email, Primary: true, Type: "work"},
 		},
 		Name: scimName{
 			GivenName:  user.FirstName,
@@ -163,7 +163,7 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 	if err != nil {
 		if isResponseStatus(err, http.StatusConflict) {
 			log.WithField("status", http.StatusConflict).Info("user already exists, fetching user details")
-			return pc.findUserByUserName(ctx, user.UserName)
+			return pc.findUserByUserName(ctx, userName)
 		}
 		log.WithError(err).Error("error creating user")
 		return nil, err
