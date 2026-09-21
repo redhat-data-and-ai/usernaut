@@ -26,7 +26,6 @@ linters:
   settings:
     goconst:
       min-occurrences: 6
-      ignore-string-values: '^[a-zA-Z_]+$'
     revive:
       rules:
         - name: comment-spacings
@@ -34,8 +33,12 @@ linters:
       checks:
         - "all"
         - "-QF*"
-        - "-ST*"
+        - "-ST1000"
+        - "-ST1003"
+        - "-ST1020"
+        - "-ST1021"
   exclusions:
+    presets: []
     rules:
       - path: "^api/"
         linters:

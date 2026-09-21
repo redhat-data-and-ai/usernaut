@@ -29,7 +29,7 @@ import (
 )
 
 func (g *GitlabClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
-	log := logger.Logger(ctx).WithField("service", "gitlab")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 	log.Info("fetching all teams")
 
 	teams := make(map[string]structs.Team)
@@ -65,8 +65,8 @@ func (g *GitlabClient) FetchAllTeams(ctx context.Context) (map[string]structs.Te
 
 func (g *GitlabClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 	log.Info("fetching team details")
 
@@ -82,8 +82,8 @@ func (g *GitlabClient) FetchTeamDetails(ctx context.Context, teamID string) (*st
 
 func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"team":    team,
+		logKeyService: serviceName,
+		"team":        team,
 	})
 	log.Info("creating team")
 
@@ -128,8 +128,8 @@ func (g *GitlabClient) CreateTeam(ctx context.Context, team *structs.Team) (*str
 
 func (g *GitlabClient) DeleteTeamByID(ctx context.Context, teamID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 	log.Info("deleting team")
 
@@ -174,7 +174,7 @@ func (g *GitlabClient) addToLdapGroup(groupID int) (string, int, error) {
 }
 
 func (g *GitlabClient) initiateSync(ctx context.Context) (int, error) {
-	log := logger.Logger(ctx).WithField("service", "gitlab")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 	log.Info("initiating LDAP sync")
 
 	resp, statusCode, err := g.sendLdapSyncRequest(ctx)
@@ -192,8 +192,8 @@ func (g *GitlabClient) pollForPendingDeletion(ctx context.Context,
 	maxAttempts int,
 	interval time.Duration) (string, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 	for i := 0; i < maxAttempts; i++ {
 		group, resp, err := g.gitlabClient.Groups.GetGroup(teamID, &gitlab.GetGroupOptions{})

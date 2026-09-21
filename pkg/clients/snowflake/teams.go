@@ -30,7 +30,7 @@ import (
 
 // FetchAllTeams fetches all roles from Snowflake using REST API with proper pagination
 func (c *SnowflakeClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
-	log := logger.Logger(ctx).WithField("service", "snowflake")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 
 	log.Info("fetching all teams")
 	teams := make(map[string]structs.Team)
@@ -67,7 +67,7 @@ func (c *SnowflakeClient) processTeamsPage(resp []byte, teams map[string]structs
 
 // CreateTeam creates a new role in Snowflake using REST API
 func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
-	log := logger.Logger(ctx).WithField("service", "snowflake")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 
 	log.Info("creating team")
 	endpoint := "/api/v2/roles"
@@ -103,8 +103,8 @@ func (c *SnowflakeClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 // since the detailed information is not consumed by the reconciliation workflow
 func (c *SnowflakeClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "snowflake",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 
 	log.Info("fetching team details")
@@ -122,8 +122,8 @@ func (c *SnowflakeClient) FetchTeamDetails(ctx context.Context, teamID string) (
 // DeleteTeamByID deletes a role in Snowflake using REST API
 func (c *SnowflakeClient) DeleteTeamByID(ctx context.Context, teamID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "snowflake",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 
 	log.Info("deleting team")

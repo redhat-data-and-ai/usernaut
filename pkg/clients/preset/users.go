@@ -34,7 +34,7 @@ var errUserNotFound = errors.New("user not found")
 // FetchAllUsers retrieves all users via SCIM and returns maps keyed by email and SCIM ID
 func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
+		logKeyService: serviceName,
 	})
 	log.Info("fetching all SCIM users from Preset")
 
@@ -84,8 +84,8 @@ func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.
 // FetchUserDetails retrieves details of a specific user by SCIM ID
 func (pc *PresetClient) FetchUserDetails(ctx context.Context, userID string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 	log.Info("fetching user details from Preset")
 
@@ -134,9 +134,9 @@ func scimUserToStruct(su *scimUser) *structs.User {
 // CreateUser provisions a user via SCIM. If the user already exists, returns their existing details.
 func (pc *PresetClient) CreateUser(ctx context.Context, u *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":  "preset",
-		"username": u.UserName,
-		"email":    u.Email,
+		logKeyService: serviceName,
+		"username":    u.UserName,
+		"email":       u.Email,
 	})
 	log.Info("creating SCIM user in Preset")
 
@@ -182,8 +182,8 @@ func (pc *PresetClient) CreateUser(ctx context.Context, u *structs.User) (*struc
 // DeleteUser removes a user via SCIM
 func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 	log.Info("deleting SCIM user from Preset")
 
@@ -204,8 +204,8 @@ func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 
 func (pc *PresetClient) findUserByEmail(ctx context.Context, email string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		"email":   email,
+		logKeyService: serviceName,
+		"email":       email,
 	})
 
 	// Preset SCIM uses the user's email as userName; see CreateUser.

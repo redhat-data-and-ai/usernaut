@@ -57,7 +57,7 @@ func NewClient(
 
 	// Heimdall Client to initiate LDAP sync request
 	heimdallClient, err := httpclient.InitializeClient(
-		"gitlab",
+		serviceName,
 		poolCfg,
 		hystrixCfg,
 		heimdall.NewRetrier(heimdall.NewConstantBackoff(100*time.Millisecond, 50*time.Millisecond)), 3,
@@ -92,5 +92,5 @@ func (g *GitlabClient) sendLdapSyncRequest(ctx context.Context) ([]byte, int, er
 	request.SetHeaders(map[string]string{
 		"Authorization": "Bearer " + g.gitlabConfig.Token,
 	})
-	return request.MakeRequest(g.httpClient, "backend.gitlab.InitiateLdapSync", "gitlab")
+	return request.MakeRequest(g.httpClient, "backend.gitlab.InitiateLdapSync", serviceName)
 }
