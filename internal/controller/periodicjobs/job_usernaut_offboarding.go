@@ -499,7 +499,7 @@ func (uoj *UserOffboardingJob) getUserDataFromCache(
 		return backendMap, email, nil
 	}
 
-	return nil, "", fmt.Errorf("No user found with username: %s", userKey)
+	return nil, "", fmt.Errorf("no user found with username: %s", userKey)
 }
 
 // isUserActiveInLDAP verifies whether a user exists and is active in the LDAP directory.

@@ -18,8 +18,8 @@ func (fc *FivetranClient) FetchTeamMembersByTeamID(
 	teamID string) (map[string]*structs.User, error) {
 
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 	log.Info("fetching team members by team ID")
 
@@ -63,9 +63,9 @@ func (fc *FivetranClient) FetchTeamMembersByTeamID(
 
 func (fc *FivetranClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "fivetran",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
+		logKeyService: serviceName,
+		"teamID":      teamID,
+		"user_count":  len(userIDs),
 	})
 
 	log.Info("adding users to the team")
@@ -116,9 +116,9 @@ func (fc *FivetranClient) AddUserToTeam(ctx context.Context, teamID string, user
 
 func (fc *FivetranClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "fivetran",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
+		logKeyService: serviceName,
+		"teamID":      teamID,
+		"user_count":  len(userIDs),
 	})
 
 	log.Info("removing users from the team")

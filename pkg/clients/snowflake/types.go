@@ -18,6 +18,11 @@ package snowflake
 
 import "github.com/gojek/heimdall/v7"
 
+const (
+	serviceName   = "snowflake"
+	logKeyService = "service"
+)
+
 // SnowflakeConfig holds the configuration for Snowflake client
 type SnowflakeConfig struct {
 	PAT     string

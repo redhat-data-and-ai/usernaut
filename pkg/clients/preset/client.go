@@ -132,7 +132,7 @@ func NewClient(presetAppConfig map[string]interface{},
 	}
 
 	client, err := httpclient.InitializeClient(
-		"preset",
+		serviceName,
 		connectionPoolConfig,
 		hystrixResiliencyConfig,
 		heimdall.NewRetrier(heimdall.NewConstantBackoff(presetHTTPRetryBackoff, 0)),
@@ -169,7 +169,7 @@ func (pc *PresetClient) sendRequest(
 	ctx context.Context, reqURL string, method string, body interface{},
 ) ([]byte, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
+		logKeyService: serviceName,
 	})
 
 	var requestBody []byte
@@ -194,7 +194,7 @@ func (pc *PresetClient) sendRequest(
 		}
 		req.SetHeaders(reqHeaders)
 
-		respBody, respHeaders, statusCode, err := req.MakeRequestWithHeader(pc.client, method, "preset")
+		respBody, respHeaders, statusCode, err := req.MakeRequestWithHeader(pc.client, method, serviceName)
 		if err != nil {
 			return nil, fmt.Errorf("request failed: %w", err)
 		}
@@ -241,8 +241,8 @@ func (pc *PresetClient) querySCIMByFilter(
 	ctx context.Context, resource string, filter string, fieldKey string, fieldValue string,
 ) ([]byte, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		fieldKey:  fieldValue,
+		logKeyService: serviceName,
+		fieldKey:      fieldValue,
 	})
 
 	reqURL := fmt.Sprintf("%s/%s?filter=%s", pc.scimURL(), resource, url.QueryEscape(filter))

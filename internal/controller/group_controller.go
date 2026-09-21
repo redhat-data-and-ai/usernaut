@@ -88,7 +88,7 @@ type GroupReconciler struct {
 func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	ctx = logger.WithRequestId(ctx, controller.ReconcileIDFromContext(ctx))
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
-		"request": req.NamespacedName.String(),
+		"request": req.String(),
 	})
 
 	groupCR := &usernautdevv1alpha1.Group{}
@@ -134,7 +134,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
-		"request":        req.NamespacedName.String(),
+		"request":        req.String(),
 		"group":          groupCR.Spec.GroupName,
 		"has_ldap_query": groupCR.Spec.Members.LDAPQuery != nil,
 		"members":        len(groupCR.Spec.Members.Users),
@@ -1075,7 +1075,7 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 	r.log.WithField("group", groupName).Info("fetching group members")
 
 	groupCR := &usernautdevv1alpha1.Group{}
-	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
 		if !apierrors.IsNotFound(err) {
 			r.log.WithError(err).Error("error fetching the group CR")
 		}
@@ -1143,7 +1143,7 @@ func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *userna
 	desiredOwnerRefs := make(map[types.UID]metav1.OwnerReference)
 	for _, parentGroupName := range groupCR.Spec.Members.Groups {
 		parentGroupCR := &usernautdevv1alpha1.Group{}
-		if err := r.Client.Get(ctx,
+		if err := r.Get(ctx,
 			client.ObjectKey{Namespace: groupCR.Namespace, Name: parentGroupName}, parentGroupCR); err != nil {
 			if apierrors.IsNotFound(err) {
 				// Kubernetes resolves owner references within the namespace of the dependent, and
