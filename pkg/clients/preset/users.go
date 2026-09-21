@@ -134,7 +134,6 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
 		"username":    user.UserName,
-		"email":       user.Email,
 	})
 
 	log.Info("creating user")
