@@ -30,7 +30,7 @@ import (
 )
 
 func (g *GitlabClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
-	log := logger.Logger(ctx).WithField("service", "gitlab")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 	log.Info("fetching all users")
 
 	userEmailMap := make(map[string]*structs.User)
@@ -82,8 +82,8 @@ func (g *GitlabClient) FetchAllUsers(ctx context.Context) (map[string]*structs.U
 
 func (g *GitlabClient) FetchUserDetails(ctx context.Context, userID string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 	log.Info("fetching user details")
 	var user *gitlab.User
@@ -136,8 +136,8 @@ func (g *GitlabClient) FetchUserDetails(ctx context.Context, userID string) (*st
 
 func (g *GitlabClient) CreateUser(ctx context.Context, u *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"user":    u,
+		logKeyService: serviceName,
+		"user":        u,
 	})
 	log.Info("creating user")
 
@@ -177,8 +177,8 @@ func (g *GitlabClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 
 func (g *GitlabClient) DeleteUser(ctx context.Context, userID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 	log.Info("deleting user")
 

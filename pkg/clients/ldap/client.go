@@ -106,7 +106,7 @@ func (l *LDAPConn) getConn() LDAPConnClient {
 func (l *LDAPClientConfig) createConn() (LDAPConnClient, error) {
 	newConn, err := ldapv3.DialURL(l.server, ldapv3.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to establish LDAP connection: %v\n", err)
+		return nil, fmt.Errorf("failed to establish LDAP connection: %w", err)
 
 	}
 
@@ -115,13 +115,13 @@ func (l *LDAPClientConfig) createConn() (LDAPConnClient, error) {
 		err = newConn.Bind(l.bindUsername, l.bindPassword)
 		if err != nil {
 			_ = newConn.Close()
-			return nil, fmt.Errorf("failed to bind LDAP connection: %v\n", err)
+			return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
 		}
 	} else {
 		err = newConn.UnauthenticatedBind(l.bindUsername)
 		if err != nil {
 			_ = newConn.Close()
-			return nil, fmt.Errorf("failed to bind LDAP connection: %v\n", err)
+			return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
 		}
 	}
 	return newConn, nil

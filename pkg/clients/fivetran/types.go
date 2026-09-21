@@ -17,6 +17,11 @@ limitations under the License.
 package fivetran
 
 const (
+	serviceName   = "fivetran"
+	logKeyService = "service"
+)
+
+const (
 	AccountReviewerRole  = "Account Reviewer"
 	ConnectorAdminRole   = "Connector Administrator"
 	ConnectorCreatorRole = "Connector Creator"
