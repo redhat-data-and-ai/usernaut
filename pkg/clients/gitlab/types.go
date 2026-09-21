@@ -21,6 +21,12 @@ import (
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
+const (
+	serviceName   = "gitlab"
+	logKeyService = "service"
+	logKeyTeamID  = "teamID"
+)
+
 var (
 	ldapProvider = "ldapmain"
 )
