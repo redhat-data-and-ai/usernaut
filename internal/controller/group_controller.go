@@ -1151,8 +1151,8 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 		// with the same name in different namespaces
 		switch {
 		case len(foundIn) == 0:
-			return nil, fmt.Errorf("no group %s found in namespaces %s",
-				subGroup, strings.Join(r.WatchedNamespaces, ", "))
+			log.WithField("group", subGroup).Warn("no group found in namespaces, skipping group members")
+			continue
 		case len(foundIn) > 1:
 			return nil, fmt.Errorf("multiple groups %s found in namespaces %s", subGroup, strings.Join(foundIn, ", "))
 		default:
