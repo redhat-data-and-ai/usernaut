@@ -117,7 +117,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
 	if !hasSubgroups && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
 		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
-		r.log.Info("skipping reconciliation, generation unchanged")
+		log.Info("skipping reconciliation, generation unchanged")
 		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 
