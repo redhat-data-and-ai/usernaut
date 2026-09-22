@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -61,6 +62,8 @@ const (
 	// this takes care of updating users in ldap query based groups
 	requeueAfter = 8 * time.Hour
 )
+
+var retryPriority = -200
 
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
@@ -160,7 +163,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, includeIndirectReports, nil)
 		if err != nil {
 			log.WithError(err).Error("error fetching query members")
-			return ctrl.Result{}, err
+			return ctrl.Result{Priority: &retryPriority}, err
 		}
 		if includeManager {
 			queryMembers = append(queryMembers, extractManagerUIDsFromQuery(groupCR.Spec.Members.LDAPQuery)...)
@@ -172,10 +175,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups, log)
 	if err != nil {
 		log.WithError(err).Error("error fetching unique group members")
-		return ctrl.Result{}, err
+		groupCR.UpdateStatusWithErrMessage(err.Error())
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after error fetching unique group members")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
+
+	if len(uniqueMembers) == 0 {
+		log.Info("no members to reconcile, skipping backend reconciliation")
+		groupCR.UpdateStatusWithErrMessage("no members to reconcile, skipping backend reconciliation")
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after no members to reconcile")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
+	}
 
 	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
@@ -186,7 +204,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, log)
 	if err != nil {
 		log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
-		return ctrl.Result{}, err
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
 	// Step 2: Process all backends (no global lock - individual store ops are atomic)
@@ -213,13 +231,14 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Step 4: Remove force reconcile label if present
 	if removeErr := controllerutils.RemoveForceReconcileLabel(ctx, r.Client, groupCR); removeErr != nil {
 		log.WithError(removeErr).Error("Failed to remove force reconcile label")
-		return ctrl.Result{}, removeErr
+		return ctrl.Result{Priority: &retryPriority}, removeErr
 	}
 
 	// Step 5: Update status and handle errors
 	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, log); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
+
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
@@ -1140,6 +1159,7 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
+			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](2*time.Second, 1000*time.Second),
 		}).
 		Complete(r)
 }
