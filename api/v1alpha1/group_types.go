@@ -17,6 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -97,6 +100,7 @@ type GroupStatus struct {
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
+	MissingSubGroups      []string           `json:"missingSubGroups,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -137,6 +141,12 @@ func (c *Group) UpdateStatus(isError bool) {
 	}
 
 	c.Status.LastAppliedGeneration = c.Generation
+	if len(c.Status.MissingSubGroups) > 0 {
+		c.setReadyCondition(metav1.ConditionFalse, MissingSubGroupsReason,
+			fmt.Sprintf("Reconciled with %d missing sub-groups: %s",
+				len(c.Status.MissingSubGroups), strings.Join(c.Status.MissingSubGroups, ", ")))
+		return
+	}
 	c.setReadyCondition(metav1.ConditionTrue, SuccessfullyReconciled, "Group reconciled successfully")
 }
 
@@ -144,19 +154,33 @@ func (c *Group) UpdateStatusWithErrMessage(errMessage string) {
 	c.setReadyCondition(metav1.ConditionFalse, ReconcileFailed, errMessage)
 }
 
-func (c *Group) setReadyCondition(status metav1.ConditionStatus, reason, message string) {
-	condition := metav1.Condition{
-		Type:               GroupReadyCondition,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
+func (c *Group) SetMissingSubGroups(missing []string) {
+	c.Status.MissingSubGroups = missing
+	if len(missing) == 0 {
+		c.setCondition(MembersResolvedCondition, metav1.ConditionTrue, "Resolved", "All sub-groups resolved")
+	} else {
+		c.setCondition(MembersResolvedCondition, metav1.ConditionFalse, MissingSubGroupsReason,
+			fmt.Sprintf("Missing sub-groups: %s", strings.Join(missing, ", ")))
 	}
-	for i, currentCondition := range c.Status.Conditions {
-		if currentCondition.Type == condition.Type {
+}
+
+func (c *Group) setCondition(condType string, status metav1.ConditionStatus, reason, message string) {
+	if len(message) > maxConditionMessageLen {
+		message = message[:maxConditionMessageLen-3] + "..."
+	}
+	condition := metav1.Condition{
+		Type: condType, Status: status, Reason: reason,
+		Message: message, LastTransitionTime: metav1.Now(),
+	}
+	for i, cur := range c.Status.Conditions {
+		if cur.Type == condType {
 			c.Status.Conditions[i] = condition
 			return
 		}
 	}
 	c.Status.Conditions = append(c.Status.Conditions, condition)
+}
+
+func (c *Group) setReadyCondition(status metav1.ConditionStatus, reason, message string) {
+	c.setCondition(GroupReadyCondition, status, reason, message)
 }
