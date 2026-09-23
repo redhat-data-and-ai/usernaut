@@ -52,6 +52,14 @@ func (l *LDAPConn) executeSearch(ctx context.Context,
 		return nil, err
 	}
 
+	_, diagnostic, _ := searchResultMeta(resp, nil)
+	if len(resp.Entries) == 0 && diagnostic != "" {
+		log.WithField("ldap_diagnostic_message", diagnostic).
+			Error("LDAP search returned no entries with diagnostic message")
+		return nil, fmt.Errorf("%w: resultCode=%d diagnostic=%q",
+			ErrLDAPUntrustworthyResult, resp.ResultCode, diagnostic)
+	}
+
 	if len(resp.Entries) == 0 {
 		log.Warn("no LDAP entries found")
 		return nil, ErrNoUserFound
@@ -164,6 +172,17 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 				"bulk LDAP search failed (batch %d/%d, %d users, start offset %d): %w",
 				batchNum, totalBatches, len(batch), batchStart, err,
 			)
+		}
+
+		_, diagnostic, _ := searchResultMeta(resp, nil)
+		if len(resp.Entries) == 0 && diagnostic != "" {
+			log.WithField("ldap_diagnostic_message", diagnostic).
+				WithField("batch_start", batchStart).
+				WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches)).
+				WithField("batch_user_ids", batch).
+				Error("bulk LDAP batch returned no entries with diagnostic message")
+			return result, fmt.Errorf("%w: resultCode=%d diagnostic=%q",
+				ErrLDAPUntrustworthyResult, resp.ResultCode, diagnostic)
 		}
 
 		log.WithField("batch_start", batchStart).WithField("entries", len(resp.Entries)).

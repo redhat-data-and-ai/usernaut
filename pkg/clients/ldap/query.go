@@ -43,6 +43,14 @@ func (l *LDAPConn) GetQueryMembers(ctx context.Context, query string) ([]string,
 		log.WithError(err).Error("failed to search LDAP for query members")
 		return nil, err
 	}
+	_, diagnostic, _ := searchResultMeta(resp, nil)
+	if len(resp.Entries) == 0 && diagnostic != "" {
+		log.WithField("ldap_diagnostic_message", diagnostic).
+			Error("LDAP query search returned no entries with diagnostic message")
+		return nil, fmt.Errorf("%w: resultCode=%d diagnostic=%q",
+			ErrLDAPUntrustworthyResult, resp.ResultCode, diagnostic)
+	}
+
 	log.WithField("entries", len(resp.Entries)).Info("LDAP search results")
 	if len(resp.Entries) == 0 {
 		log.Info("no LDAP entries found for query; returning empty member list")
