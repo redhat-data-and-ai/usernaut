@@ -60,7 +60,7 @@ func astroUserToStruct(user *AstroUser) *structs.User {
 // Returns 2 maps: 1st map keyed by ID, 2nd map keyed by email
 func (c *AstroClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User,
 	map[string]*structs.User, error) {
-	log := logger.Logger(ctx).WithField("service", "astro")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 
 	log.Info("fetching all users")
 	resultByID := make(map[string]*structs.User)
@@ -96,8 +96,8 @@ func (c *AstroClient) FetchAllUsers(ctx context.Context) (map[string]*structs.Us
 // FetchUserDetails fetches details for a specific user using REST API
 func (c *AstroClient) FetchUserDetails(ctx context.Context, userID string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "astro",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 	log.Info("fetching user details by ID")
 
@@ -128,8 +128,8 @@ func (c *AstroClient) FetchUserDetails(ctx context.Context, userID string) (*str
 // In Astro, users are created via invitations
 func (c *AstroClient) CreateUser(ctx context.Context, user *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "astro",
-		"user":    user.Email,
+		logKeyService: serviceName,
+		"user":        user.Email,
 	})
 
 	log.Info("creating user (sending invitation)")
@@ -190,8 +190,8 @@ func (c *AstroClient) CreateUser(ctx context.Context, user *structs.User) (*stru
 // Astro doesn't have a direct delete endpoint; instead, we remove the org-level role
 func (c *AstroClient) DeleteUser(ctx context.Context, userID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "astro",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 
 	log.Info("deleting user (removing organization role)")

@@ -32,8 +32,8 @@ import (
 func (c *AstroClient) FetchTeamMembersByTeamID(ctx context.Context,
 	teamID string) (map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "astro",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 	log.Info("fetching team members by team ID")
 
@@ -73,9 +73,9 @@ func (c *AstroClient) FetchTeamMembersByTeamID(ctx context.Context,
 // AddUserToTeam adds users to a team
 func (c *AstroClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "astro",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
+		"user_count":  len(userIDs),
 	})
 	log.Info("adding users to team")
 
@@ -108,9 +108,9 @@ func (c *AstroClient) AddUserToTeam(ctx context.Context, teamID string, userIDs 
 // RemoveUserFromTeam removes users from a team
 func (c *AstroClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "astro",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
+		"user_count":  len(userIDs),
 	})
 	log.Info("removing users from team")
 
@@ -147,8 +147,8 @@ func (c *AstroClient) RemoveUserFromTeam(ctx context.Context, teamID string, use
 func (c *AstroClient) ReconcileGroupParams(
 	ctx context.Context, teamID string, groupParams structs.TeamParams) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "astro",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 
 	log.Debug("ReconcileGroupParams called - no implementation needed for Astro at this time")

@@ -18,6 +18,12 @@ package astro
 
 import "github.com/gojek/heimdall/v7"
 
+const (
+	serviceName   = "astro"
+	logKeyService = "service"
+	logKeyTeamID  = "teamID"
+)
+
 // AstroConfig holds the configuration for Astro client
 type AstroConfig struct {
 	APIToken string

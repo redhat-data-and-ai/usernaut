@@ -41,7 +41,7 @@ func astroTeamToStruct(team AstroTeam) structs.Team {
 
 // FetchAllTeams fetches all teams from Astro using REST API with pagination
 func (c *AstroClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
-	log := logger.Logger(ctx).WithField("service", "astro")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 
 	log.Info("fetching all teams")
 	teams := make(map[string]structs.Team)
@@ -73,8 +73,8 @@ func (c *AstroClient) FetchAllTeams(ctx context.Context) (map[string]structs.Tea
 // FetchTeamDetails fetches details for a specific team
 func (c *AstroClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "astro",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 
 	log.Info("fetching team details")
@@ -106,8 +106,8 @@ func (c *AstroClient) FetchTeamDetails(ctx context.Context, teamID string) (*str
 // fetchTeamByName looks up a team by name using the Astro names filter.
 func (c *AstroClient) fetchTeamByName(ctx context.Context, name string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":  "astro",
-		"teamName": name,
+		logKeyService: serviceName,
+		"teamName":    name,
 	})
 
 	endpoint := fmt.Sprintf("/teams?names=%s&limit=1", url.QueryEscape(name))
@@ -128,7 +128,7 @@ func (c *AstroClient) fetchTeamByName(ctx context.Context, name string) (*struct
 	for _, team := range teamsResp.Teams {
 		if team.Name == name {
 			result := astroTeamToStruct(team)
-			log.WithField("teamID", result.ID).Info("found existing team by name")
+			log.WithField(logKeyTeamID, result.ID).Info("found existing team by name")
 			return &result, nil
 		}
 	}
@@ -139,8 +139,8 @@ func (c *AstroClient) fetchTeamByName(ctx context.Context, name string) (*struct
 // CreateTeam creates a new team in Astro
 func (c *AstroClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":  "astro",
-		"teamName": team.Name,
+		logKeyService: serviceName,
+		"teamName":    team.Name,
 	})
 
 	log.Info("creating team")
@@ -175,7 +175,7 @@ func (c *AstroClient) CreateTeam(ctx context.Context, team *structs.Team) (*stru
 		return nil, fmt.Errorf("failed to parse create team response: %w", err)
 	}
 
-	log.WithField("teamID", createdTeam.ID).Info("team created successfully")
+	log.WithField(logKeyTeamID, createdTeam.ID).Info("team created successfully")
 
 	result := astroTeamToStruct(createdTeam)
 	return &result, nil
@@ -184,8 +184,8 @@ func (c *AstroClient) CreateTeam(ctx context.Context, team *structs.Team) (*stru
 // DeleteTeamByID deletes a team from Astro
 func (c *AstroClient) DeleteTeamByID(ctx context.Context, teamID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "astro",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 
 	log.Info("deleting team")

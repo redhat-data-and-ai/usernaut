@@ -55,7 +55,7 @@ func NewClient(connection map[string]interface{}, poolCfg httpclient.ConnectionP
 	}
 
 	client, err := httpclient.InitializeClient(
-		"astro",
+		serviceName,
 		poolCfg,
 		hystrixCfg,
 		heimdall.NewRetrier(heimdall.NewConstantBackoff(100*time.Millisecond, 50*time.Millisecond)), 3,
@@ -108,7 +108,7 @@ func (c *AstroClient) makeRequest(ctx context.Context, endpoint,
 		return nil, 0, err
 	}
 
-	return req.MakeRequest(c.client, method, "astro")
+	return req.MakeRequest(c.client, method, serviceName)
 }
 
 // makeRequestWithHeader uses the common request package for HTTP requests
@@ -120,7 +120,7 @@ func (c *AstroClient) makeRequestWithHeader(ctx context.Context, endpoint,
 		return nil, nil, 0, err
 	}
 
-	return req.MakeRequestWithHeader(c.client, method, "astro")
+	return req.MakeRequestWithHeader(c.client, method, serviceName)
 }
 
 // fetchAllWithPagination handles paginated requests using offset-based pagination
