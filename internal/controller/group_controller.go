@@ -172,7 +172,8 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	visitedGroups := make(map[string]struct{})
-	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups, log)
+	var missingGroups []string
+	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups, &missingGroups, log)
 	if err != nil {
 		log.WithError(err).Error("error fetching unique group members")
 		groupCR.UpdateStatusWithErrMessage(err.Error())
@@ -183,11 +184,18 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
+	groupCR.SetMissingSubGroups(missingGroups)
+
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
 	if len(uniqueMembers) == 0 {
-		log.Info("no members to reconcile, skipping backend reconciliation")
-		groupCR.UpdateStatusWithErrMessage("no members to reconcile, skipping backend reconciliation")
+		if len(missingGroups) > 0 {
+			log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
+			groupCR.UpdateStatus(false)
+		} else {
+			log.Info("no members to reconcile, skipping backend reconciliation")
+			groupCR.UpdateStatusWithErrMessage("no members to reconcile, skipping backend reconciliation")
+		}
 		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
 			log.WithError(statusErr).Error("error updating status after no members to reconcile")
 			return ctrl.Result{}, statusErr
@@ -872,7 +880,6 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		}
 
 		// Get team ID from consolidated group store (using original group name)
-		// NOTE: CacheMutex is already held by caller (handleDeletion)
 		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backend.Name, backend.Type)
 		if err != nil {
 			backendLoggerInfo.WithError(err).Error("Finalizer: error fetching team details from cache")
@@ -1165,7 +1172,7 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName,
-	namespace string, visitedOnPath map[string]struct{}, log *logrus.Entry) ([]string, error) {
+	namespace string, visitedOnPath map[string]struct{}, missingGroups *[]string, log *logrus.Entry) ([]string, error) {
 
 	log.WithField("group", groupName).Info("fetching group members")
 
@@ -1193,7 +1200,7 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 		foundIn := make([]string, 0, 1)
 		membersToAdd := make([]string, 0)
 		for _, searchNamespace := range r.WatchedNamespaces {
-			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath, log)
+			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath, missingGroups, log)
 			if err != nil {
 				if apierrors.IsNotFound(err) {
 					continue
@@ -1208,8 +1215,9 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 		// with the same name in different namespaces
 		switch {
 		case len(foundIn) == 0:
-			return nil, fmt.Errorf("no group %s found in namespaces %s",
-				subGroup, strings.Join(r.WatchedNamespaces, ", "))
+			log.WithField("group", subGroup).
+				Warn("no group found in namespaces, skipping group members")
+			*missingGroups = append(*missingGroups, subGroup)
 		case len(foundIn) > 1:
 			return nil, fmt.Errorf("multiple groups %s found in namespaces %s", subGroup, strings.Join(foundIn, ", "))
 		default:
