@@ -239,6 +239,19 @@ func TestEscapeSCIMLiteral(t *testing.T) {
 	assert.Equal(t, `path\\to`, escapeSCIMLiteral(`path\to`))
 }
 
+func TestRequestLogURL(t *testing.T) {
+	assert.Equal(t, "", requestLogURL("://bad"))
+	assert.Equal(
+		t,
+		"https://manage.app.preset.io/api/v1/teams/t/scim/v2/Users?startIndex=1",
+		requestLogURL("https://manage.app.preset.io/api/v1/teams/t/scim/v2/Users?startIndex=1"),
+	)
+
+	got := requestLogURL(`https://manage.app.preset.io/api/v1/teams/t/scim/v2/Users?filter=userName eq "ruagrawa"`)
+	assert.NotContains(t, got, "ruagrawa")
+	assert.Contains(t, got, "filter=%5Bredacted%5D")
+}
+
 func TestNewClient_missingRequiredFields(t *testing.T) {
 	poolCfg, hystrixCfg := testHTTPConfigs()
 

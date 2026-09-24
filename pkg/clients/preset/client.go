@@ -253,12 +253,14 @@ func (pc *PresetClient) sendRequest(
 		"Accept":        "application/json",
 	}
 
+	logURL := requestLogURL(reqURL)
+
 	for attempt := 0; ; attempt++ {
 		log.WithFields(logrus.Fields{
 			logKeyAttempt: attempt + 1,
 			"max_retries": presetRateLimitRetryAttempts,
 			"method":      method,
-			"url":         reqURL,
+			"url":         logURL,
 		}).Debug("sending Preset API request")
 
 		req, err := request.NewRequest(ctx, method, reqURL, requestBody)
@@ -272,7 +274,7 @@ func (pc *PresetClient) sendRequest(
 			log.WithError(err).WithFields(logrus.Fields{
 				logKeyAttempt: attempt + 1,
 				"method":      method,
-				"url":         reqURL,
+				"url":         logURL,
 			}).Error("Preset API request failed")
 			return nil, fmt.Errorf("request failed: %w", err)
 		}
@@ -281,7 +283,7 @@ func (pc *PresetClient) sendRequest(
 			logKeyAttempt: attempt + 1,
 			"status_code": statusCode,
 			"method":      method,
-			"url":         reqURL,
+			"url":         logURL,
 		}).Debug("received Preset API response")
 
 		if statusCode == http.StatusOK || statusCode == http.StatusCreated || statusCode == http.StatusNoContent {
@@ -302,7 +304,7 @@ func (pc *PresetClient) sendRequest(
 					"status_code": statusCode,
 					"retry_after": respHeaders.Get("Retry-After"),
 					"method":      method,
-					"url":         reqURL,
+					"url":         logURL,
 				}).Error("Preset API rate limit retries exhausted")
 			} else {
 				log.WithFields(logrus.Fields{
@@ -311,7 +313,7 @@ func (pc *PresetClient) sendRequest(
 					"status_code": statusCode,
 					"retry_after": respHeaders.Get("Retry-After"),
 					"method":      method,
-					"url":         reqURL,
+					"url":         logURL,
 				}).Warn("Preset API rate limit exceeded (429)")
 
 				backoff := rateLimitBackoff(log, respHeaders, attempt)
@@ -350,6 +352,23 @@ func (pc *PresetClient) sendRequest(
 		}).Debug("unexpected response from Preset API")
 		return nil, &apiError{StatusCode: statusCode, Body: respBody}
 	}
+}
+
+// requestLogURL returns a URL safe to write to logs. SCIM filter values can
+// contain usernames, so the filter query parameter is redacted. The original
+// request URL is left unchanged.
+func requestLogURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	q := parsed.Query()
+	if _, ok := q["filter"]; !ok {
+		return parsed.String()
+	}
+	q.Set("filter", "[redacted]")
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 func escapeSCIMLiteral(s string) string {
