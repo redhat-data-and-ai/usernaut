@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -57,33 +59,45 @@ func isResponseStatus(err error, statusCode int) bool {
 	return responseStatus(err) == statusCode
 }
 
-const presetHTTPRetryAttempts = 3
+// rateLimitJitter applies full jitter in [0, d]. Overridable in tests for determinism.
+var rateLimitJitter = fullJitter
 
-// presetHTTPRetryBackoff is longer than other backends to reduce Preset SCIM rate-limit pressure.
-var presetHTTPRetryBackoff = 5 * time.Second
+func fullJitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int64N(int64(d) + 1))
+}
 
-const (
-	presetRateLimitRetryAttempts  = 3
-	presetRateLimitDefaultBackoff = 5 * time.Second
-	presetRateLimitMaxBackoff     = 60 * time.Second
-)
+// exponentialRateLimitBackoff returns base * 2^attempt, capped at max.
+func exponentialRateLimitBackoff(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	backoff := float64(presetRateLimitBaseBackoff) * math.Pow(presetRateLimitExpFactor, float64(attempt))
+	if backoff > float64(presetRateLimitMaxBackoff) {
+		return presetRateLimitMaxBackoff
+	}
+	return time.Duration(backoff)
+}
 
-func rateLimitBackoff(headers http.Header) time.Duration {
+// parseRetryAfter returns the wait duration from a Retry-After header when present.
+// ok is false when the header is missing or unparseable.
+func parseRetryAfter(headers http.Header) (time.Duration, bool) {
 	retryAfter := strings.TrimSpace(headers.Get("Retry-After"))
 	if retryAfter == "" {
-		return presetRateLimitDefaultBackoff
+		return 0, false
 	}
 
 	if seconds, err := strconv.Atoi(retryAfter); err == nil {
-		backoff := time.Duration(seconds) * time.Second
-		return capRateLimitBackoff(backoff)
+		return capRateLimitBackoff(time.Duration(seconds) * time.Second), true
 	}
 
 	if retryAt, err := http.ParseTime(retryAfter); err == nil {
-		return capRateLimitBackoff(time.Until(retryAt))
+		return capRateLimitBackoff(time.Until(retryAt)), true
 	}
 
-	return presetRateLimitDefaultBackoff
+	return 0, false
 }
 
 func capRateLimitBackoff(backoff time.Duration) time.Duration {
@@ -94,6 +108,53 @@ func capRateLimitBackoff(backoff time.Duration) time.Duration {
 		return presetRateLimitMaxBackoff
 	}
 	return backoff
+}
+
+// rateLimitBackoff chooses how long to wait before retrying a 429.
+//
+// Step A: When Retry-After is present it is honored in full (capped at
+// presetRateLimitMaxBackoff), including 0 = retry immediately.
+//
+// Step B: When Retry-After is missing, fall back to exponential backoff
+// Delay = BaseDelay * 2^attempt, with full jitter so concurrent reconciles
+// do not retry in lockstep.
+//
+// Step C (retry budget) is enforced by the caller: at most
+// presetRateLimitRetryAttempts retries and delays are capped at
+// presetRateLimitMaxBackoff.
+//
+// log may be nil (used by unit tests).
+func rateLimitBackoff(log *logrus.Entry, headers http.Header, attempt int) time.Duration {
+	retryAfterHeader := strings.TrimSpace(headers.Get("Retry-After"))
+	if retryAfter, ok := parseRetryAfter(headers); ok {
+		if log != nil {
+			log.WithFields(logrus.Fields{
+				logKeyAttempt:    attempt + 1,
+				"backoff_source": "retry_after",
+				"retry_after":    retryAfterHeader,
+				"retry_after_ms": retryAfter.Milliseconds(),
+				"backoff_ms":     retryAfter.Milliseconds(),
+				"max_backoff_ms": presetRateLimitMaxBackoff.Milliseconds(),
+			}).Info("computed Preset rate limit backoff from Retry-After header")
+		}
+		return retryAfter
+	}
+
+	exponential := exponentialRateLimitBackoff(attempt)
+	wait := rateLimitJitter(exponential)
+	if log != nil {
+		log.WithFields(logrus.Fields{
+			logKeyAttempt:     attempt + 1,
+			"backoff_source":  "exponential",
+			"retry_after":     retryAfterHeader,
+			"exponential_ms":  exponential.Milliseconds(),
+			"backoff_ms":      wait.Milliseconds(),
+			"base_backoff_ms": presetRateLimitBaseBackoff.Milliseconds(),
+			"exp_factor":      presetRateLimitExpFactor,
+			"max_backoff_ms":  presetRateLimitMaxBackoff.Milliseconds(),
+		}).Info("computed Preset rate limit backoff using exponential strategy")
+	}
+	return wait
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -135,7 +196,12 @@ func NewClient(presetAppConfig map[string]interface{},
 		serviceName,
 		connectionPoolConfig,
 		hystrixResiliencyConfig,
-		heimdall.NewRetrier(heimdall.NewConstantBackoff(presetHTTPRetryBackoff, 0)),
+		heimdall.NewRetrier(heimdall.NewExponentialBackoff(
+			presetHTTPRetryInitialBackoff,
+			presetHTTPRetryMaxBackoff,
+			presetHTTPRetryExpFactor,
+			presetHTTPRetryMaxJitter,
+		)),
 		presetHTTPRetryAttempts,
 		nil)
 	if err != nil {
@@ -187,7 +253,16 @@ func (pc *PresetClient) sendRequest(
 		"Accept":        "application/json",
 	}
 
+	logURL := requestLogURL(reqURL)
+
 	for attempt := 0; ; attempt++ {
+		log.WithFields(logrus.Fields{
+			logKeyAttempt: attempt + 1,
+			"max_retries": presetRateLimitRetryAttempts,
+			"method":      method,
+			"url":         logURL,
+		}).Debug("sending Preset API request")
+
 		req, err := request.NewRequest(ctx, method, reqURL, requestBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
@@ -196,24 +271,71 @@ func (pc *PresetClient) sendRequest(
 
 		respBody, respHeaders, statusCode, err := req.MakeRequestWithHeader(pc.client, method, serviceName)
 		if err != nil {
+			log.WithError(err).WithFields(logrus.Fields{
+				logKeyAttempt: attempt + 1,
+				"method":      method,
+				"url":         logURL,
+			}).Error("Preset API request failed")
 			return nil, fmt.Errorf("request failed: %w", err)
 		}
 
+		log.WithFields(logrus.Fields{
+			logKeyAttempt: attempt + 1,
+			"status_code": statusCode,
+			"method":      method,
+			"url":         logURL,
+		}).Debug("received Preset API response")
+
 		if statusCode == http.StatusOK || statusCode == http.StatusCreated || statusCode == http.StatusNoContent {
+			if attempt > 0 {
+				log.WithFields(logrus.Fields{
+					logKeyAttempt: attempt + 1,
+					"status_code": statusCode,
+				}).Info("Preset API request succeeded after rate limit retry")
+			}
 			return respBody, nil
 		}
 
-		if statusCode == http.StatusTooManyRequests && attempt < presetRateLimitRetryAttempts {
-			backoff := rateLimitBackoff(respHeaders)
-			log.WithFields(logrus.Fields{
-				"attempt":      attempt + 1,
-				"max_attempts": presetRateLimitRetryAttempts,
-				"backoff_ms":   backoff.Milliseconds(),
-			}).Warn("Preset API rate limit exceeded, retrying after backoff")
-			if err := sleepWithContext(ctx, backoff); err != nil {
-				return nil, err
+		if statusCode == http.StatusTooManyRequests {
+			if attempt >= presetRateLimitRetryAttempts {
+				log.WithFields(logrus.Fields{
+					logKeyAttempt: attempt + 1,
+					"max_retries": presetRateLimitRetryAttempts,
+					"status_code": statusCode,
+					"retry_after": respHeaders.Get("Retry-After"),
+					"method":      method,
+					"url":         logURL,
+				}).Error("Preset API rate limit retries exhausted")
+			} else {
+				log.WithFields(logrus.Fields{
+					logKeyAttempt: attempt + 1,
+					"max_retries": presetRateLimitRetryAttempts,
+					"status_code": statusCode,
+					"retry_after": respHeaders.Get("Retry-After"),
+					"method":      method,
+					"url":         logURL,
+				}).Warn("Preset API rate limit exceeded (429)")
+
+				backoff := rateLimitBackoff(log, respHeaders, attempt)
+				log.WithFields(logrus.Fields{
+					logKeyAttempt: attempt + 1,
+					"backoff_ms":  backoff.Milliseconds(),
+				}).Info("waiting before Preset API rate limit retry")
+
+				if err := sleepWithContext(ctx, backoff); err != nil {
+					log.WithError(err).WithFields(logrus.Fields{
+						logKeyAttempt: attempt + 1,
+						"backoff_ms":  backoff.Milliseconds(),
+					}).Warn("Preset API rate limit backoff interrupted")
+					return nil, err
+				}
+
+				log.WithFields(logrus.Fields{
+					logKeyAttempt:  attempt + 1,
+					"next_attempt": attempt + 2,
+				}).Info("resuming Preset API request after rate limit backoff")
+				continue
 			}
-			continue
 		}
 
 		const maxLogBodyLen = 512
@@ -226,9 +348,27 @@ func (pc *PresetClient) sendRequest(
 			"status_code":           statusCode,
 			"response_body_preview": responseBodyPreview,
 			"response_body_size":    len(respBody),
+			logKeyAttempt:           attempt + 1,
 		}).Debug("unexpected response from Preset API")
 		return nil, &apiError{StatusCode: statusCode, Body: respBody}
 	}
+}
+
+// requestLogURL returns a URL safe to write to logs. SCIM filter values can
+// contain usernames, so the filter query parameter is redacted. The original
+// request URL is left unchanged.
+func requestLogURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	q := parsed.Query()
+	if _, ok := q["filter"]; !ok {
+		return parsed.String()
+	}
+	q.Set("filter", "[redacted]")
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 func escapeSCIMLiteral(s string) string {

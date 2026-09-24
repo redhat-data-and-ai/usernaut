@@ -97,10 +97,20 @@ func TestResponseStatusFromAPIError(t *testing.T) {
 }
 
 func TestRateLimitBackoff(t *testing.T) {
-	assert.Equal(t, presetRateLimitDefaultBackoff, rateLimitBackoff(http.Header{}))
-	assert.Equal(t, 2*time.Second, rateLimitBackoff(http.Header{"Retry-After": []string{"2"}}))
-	assert.Equal(t, time.Duration(0), rateLimitBackoff(http.Header{"Retry-After": []string{"0"}}))
-	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(http.Header{"Retry-After": []string{"120"}}))
+	orig := rateLimitJitter
+	t.Cleanup(func() { rateLimitJitter = orig })
+	rateLimitJitter = func(d time.Duration) time.Duration { return d }
+
+	assert.Equal(t, 2*time.Second, rateLimitBackoff(nil, http.Header{"Retry-After": []string{"2"}}, 0))
+	assert.Equal(t, time.Duration(0), rateLimitBackoff(nil, http.Header{"Retry-After": []string{"0"}}, 0))
+	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(nil, http.Header{"Retry-After": []string{"120"}}, 0))
+
+	assert.Equal(t, presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 0))
+	assert.Equal(t, 2*presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 1))
+	assert.Equal(t, 4*presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 2))
+	assert.Equal(t, 8*presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 3))
+	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(nil, http.Header{}, 4))
+	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(nil, http.Header{}, 5))
 }
 
 func TestDeleteUser_retriesOnRateLimit(t *testing.T) {
@@ -135,17 +145,23 @@ func TestDeleteUser_rateLimitExhausted(t *testing.T) {
 }
 
 func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
+	var filter string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Users"):
 			w.WriteHeader(http.StatusConflict)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")):
+			filter = r.URL.Query().Get("filter")
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(scimUsersResponse{
 				TotalResults: 1,
 				Resources: []scimUser{{
 					ID:       "samlp|redhat|existing@example.com",
-					UserName: "existing@example.com",
+					UserName: "existing",
+					Emails: []scimEmailValue{{
+						Value:   "existing@example.com",
+						Primary: true,
+					}},
 				}},
 			})
 		default:
@@ -156,11 +172,16 @@ func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
 
 	pc := newTestPresetClient(t, srv.URL)
 	user, err := pc.CreateUser(context.Background(), &structs.User{
-		Email:    "existing@example.com",
-		UserName: "existing@example.com",
+		Email:     "existing@example.com",
+		UserName:  "existing",
+		FirstName: "Existing",
+		LastName:  "User",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|existing@example.com", user.ID)
+	assert.Equal(t, "existing", user.UserName)
+	assert.Equal(t, "existing@example.com", user.Email)
+	assert.Equal(t, `userName eq "existing"`, filter)
 }
 
 func TestDeleteNotFoundIsIdempotent(t *testing.T) {
@@ -218,6 +239,19 @@ func TestEscapeSCIMLiteral(t *testing.T) {
 	assert.Equal(t, `path\\to`, escapeSCIMLiteral(`path\to`))
 }
 
+func TestRequestLogURL(t *testing.T) {
+	assert.Equal(t, "", requestLogURL("://bad"))
+	assert.Equal(
+		t,
+		"https://manage.app.preset.io/api/v1/teams/t/scim/v2/Users?startIndex=1",
+		requestLogURL("https://manage.app.preset.io/api/v1/teams/t/scim/v2/Users?startIndex=1"),
+	)
+
+	got := requestLogURL(`https://manage.app.preset.io/api/v1/teams/t/scim/v2/Users?filter=userName eq "ruagrawa"`)
+	assert.NotContains(t, got, "ruagrawa")
+	assert.Contains(t, got, "filter=%5Bredacted%5D")
+}
+
 func TestNewClient_missingRequiredFields(t *testing.T) {
 	poolCfg, hystrixCfg := testHTTPConfigs()
 
@@ -250,11 +284,20 @@ func TestNewClient_success(t *testing.T) {
 	assert.Equal(t, "token", pc.scimToken)
 }
 
-func TestCreateUser_requiresEmail(t *testing.T) {
+func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
 	pc := newTestPresetClient(t, "https://example.com")
-	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "no-email"})
+	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "ctolosa"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "email is required")
+	assert.Contains(t, err.Error(), "email and username are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "email and username are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "  ", UserName: "ctolosa"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "email and username are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com", UserName: "  "})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "email and username are required")
 }
 
 func TestCreateTeam_conflictResolvesExistingGroup(t *testing.T) {
@@ -494,7 +537,11 @@ func TestFetchAllUsers_paginates(t *testing.T) {
 		for i := range resources {
 			resources[i] = scimUser{
 				ID:       fmt.Sprintf("user-%d", startIndex+i),
-				UserName: fmt.Sprintf("user-%d@example.com", startIndex+i),
+				UserName: fmt.Sprintf("user-%d", startIndex+i),
+				Emails: []scimEmailValue{{
+					Value:   fmt.Sprintf("user-%d@example.com", startIndex+i),
+					Primary: true,
+				}},
 			}
 		}
 
@@ -512,13 +559,17 @@ func TestFetchAllUsers_paginates(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	_, userIDMap, err := pc.FetchAllUsers(context.Background())
+	userEmailMap, userIDMap, err := pc.FetchAllUsers(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, []int{1, scimUsersPageSize + 1}, pageRequests)
 	assert.Len(t, userIDMap, scimUsersPageSize+1)
+	assert.Len(t, userEmailMap, scimUsersPageSize+1)
+	assert.Equal(t, "user-1", userIDMap["user-1"].UserName)
+	assert.Equal(t, "user-1@example.com", userIDMap["user-1"].Email)
+	assert.Equal(t, userIDMap["user-1"], userEmailMap["user-1@example.com"])
 }
 
-func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
+func TestFindUserByUserName_escapesFilterLiteral(t *testing.T) {
 	var filter string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -531,7 +582,11 @@ func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
 				TotalResults: 1,
 				Resources: []scimUser{{
 					ID:       "samlp|redhat|user@example.com",
-					UserName: `user"name@example.com`,
+					UserName: `user"name`,
+					Emails: []scimEmailValue{{
+						Value:   `user"name@example.com`,
+						Primary: true,
+					}},
 				}},
 			})
 		default:
@@ -542,10 +597,13 @@ func TestFindUserByEmail_escapesFilterLiteral(t *testing.T) {
 
 	pc := newTestPresetClient(t, srv.URL)
 	user, err := pc.CreateUser(context.Background(), &structs.User{
-		Email:    `user"name@example.com`,
-		UserName: `user"name@example.com`,
+		Email:     `user"name@example.com`,
+		UserName:  `user"name`,
+		FirstName: "Given",
+		LastName:  "Family",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|user@example.com", user.ID)
-	assert.Contains(t, filter, `user\"name@example.com`)
+	assert.Equal(t, `user"name@example.com`, user.Email)
+	assert.Equal(t, `userName eq "user\"name"`, filter)
 }
