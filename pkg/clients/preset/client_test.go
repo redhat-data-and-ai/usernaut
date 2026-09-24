@@ -97,10 +97,20 @@ func TestResponseStatusFromAPIError(t *testing.T) {
 }
 
 func TestRateLimitBackoff(t *testing.T) {
-	assert.Equal(t, presetRateLimitDefaultBackoff, rateLimitBackoff(http.Header{}))
-	assert.Equal(t, 2*time.Second, rateLimitBackoff(http.Header{"Retry-After": []string{"2"}}))
-	assert.Equal(t, time.Duration(0), rateLimitBackoff(http.Header{"Retry-After": []string{"0"}}))
-	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(http.Header{"Retry-After": []string{"120"}}))
+	orig := rateLimitJitter
+	t.Cleanup(func() { rateLimitJitter = orig })
+	rateLimitJitter = func(d time.Duration) time.Duration { return d }
+
+	assert.Equal(t, 2*time.Second, rateLimitBackoff(nil, http.Header{"Retry-After": []string{"2"}}, 0))
+	assert.Equal(t, time.Duration(0), rateLimitBackoff(nil, http.Header{"Retry-After": []string{"0"}}, 0))
+	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(nil, http.Header{"Retry-After": []string{"120"}}, 0))
+
+	assert.Equal(t, presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 0))
+	assert.Equal(t, 2*presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 1))
+	assert.Equal(t, 4*presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 2))
+	assert.Equal(t, 8*presetRateLimitBaseBackoff, rateLimitBackoff(nil, http.Header{}, 3))
+	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(nil, http.Header{}, 4))
+	assert.Equal(t, presetRateLimitMaxBackoff, rateLimitBackoff(nil, http.Header{}, 5))
 }
 
 func TestDeleteUser_retriesOnRateLimit(t *testing.T) {
