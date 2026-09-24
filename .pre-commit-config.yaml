@@ -1,0 +1,43 @@
+# Pre-commit hooks for usernaut (whole repo).
+#
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# Gitleaks (pre-commit hook) scans staged changes; scripts/check-secrets.sh covers
+# additional project-specific patterns. Use `make setup-pre-commit` only if you
+# prefer the legacy git hook without the pre-commit framework.
+
+exclude: ^vendor/
+
+repos:
+  # Generic file and repo hygiene (pre-commit/pre-commit-hooks)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+        exclude: ^CODEOWNERS$  # script + CI validate; avoid pre-commit changing trailing newlines
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: detect-private-key
+      - id: check-merge-conflict
+
+  # Secret detection (requires Go >= 1.23.8; run: brew upgrade go)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
+
+  # Same checks as scripts/pre-commit (check-secrets + make lint test)
+  - repo: local
+    hooks:
+      - id: check-secrets
+        name: check secrets (scripts/check-secrets.sh)
+        entry: bash scripts/check-secrets.sh
+        language: system
+        pass_filenames: false
+      - id: go-lint-test
+        name: make lint test
+        entry: bash -c "make lint test"
+        language: system
+        pass_filenames: false
