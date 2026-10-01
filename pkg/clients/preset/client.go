@@ -135,7 +135,7 @@ func rateLimitBackoff(log *logrus.Entry, headers http.Header, attempt int) time.
 				"retry_after_ms": retryAfter.Milliseconds(),
 				"backoff_ms":     retryAfter.Milliseconds(),
 				"max_backoff_ms": presetRateLimitMaxBackoff.Milliseconds(),
-			}).Info("computed Preset rate limit backoff from Retry-After header")
+			}).Debug("computed Preset rate limit backoff from Retry-After header")
 		}
 		return retryAfter
 	}
@@ -152,7 +152,7 @@ func rateLimitBackoff(log *logrus.Entry, headers http.Header, attempt int) time.
 			"base_backoff_ms": presetRateLimitBaseBackoff.Milliseconds(),
 			"exp_factor":      presetRateLimitExpFactor,
 			"max_backoff_ms":  presetRateLimitMaxBackoff.Milliseconds(),
-		}).Info("computed Preset rate limit backoff using exponential strategy")
+		}).Debug("computed Preset rate limit backoff using exponential strategy")
 	}
 	return wait
 }
@@ -253,14 +253,12 @@ func (pc *PresetClient) sendRequest(
 		"Accept":        "application/json",
 	}
 
-	logURL := requestLogURL(reqURL)
-
 	for attempt := 0; ; attempt++ {
 		log.WithFields(logrus.Fields{
 			logKeyAttempt: attempt + 1,
 			"max_retries": presetRateLimitRetryAttempts,
 			"method":      method,
-			"url":         logURL,
+			"url":         reqURL,
 		}).Debug("sending Preset API request")
 
 		req, err := request.NewRequest(ctx, method, reqURL, requestBody)
@@ -274,7 +272,7 @@ func (pc *PresetClient) sendRequest(
 			log.WithError(err).WithFields(logrus.Fields{
 				logKeyAttempt: attempt + 1,
 				"method":      method,
-				"url":         logURL,
+				"url":         reqURL,
 			}).Error("Preset API request failed")
 			return nil, fmt.Errorf("request failed: %w", err)
 		}
@@ -283,7 +281,7 @@ func (pc *PresetClient) sendRequest(
 			logKeyAttempt: attempt + 1,
 			"status_code": statusCode,
 			"method":      method,
-			"url":         logURL,
+			"url":         reqURL,
 		}).Debug("received Preset API response")
 
 		if statusCode == http.StatusOK || statusCode == http.StatusCreated || statusCode == http.StatusNoContent {
@@ -304,23 +302,24 @@ func (pc *PresetClient) sendRequest(
 					"status_code": statusCode,
 					"retry_after": respHeaders.Get("Retry-After"),
 					"method":      method,
-					"url":         logURL,
+					"url":         reqURL,
 				}).Error("Preset API rate limit retries exhausted")
 			} else {
+				backoff := rateLimitBackoff(log, respHeaders, attempt)
 				log.WithFields(logrus.Fields{
 					logKeyAttempt: attempt + 1,
 					"max_retries": presetRateLimitRetryAttempts,
 					"status_code": statusCode,
 					"retry_after": respHeaders.Get("Retry-After"),
+					"backoff_ms":  backoff.Milliseconds(),
 					"method":      method,
-					"url":         logURL,
+					"url":         reqURL,
 				}).Warn("Preset API rate limit exceeded (429)")
 
-				backoff := rateLimitBackoff(log, respHeaders, attempt)
 				log.WithFields(logrus.Fields{
 					logKeyAttempt: attempt + 1,
 					"backoff_ms":  backoff.Milliseconds(),
-				}).Info("waiting before Preset API rate limit retry")
+				}).Debug("waiting before Preset API rate limit retry")
 
 				if err := sleepWithContext(ctx, backoff); err != nil {
 					log.WithError(err).WithFields(logrus.Fields{
@@ -333,7 +332,7 @@ func (pc *PresetClient) sendRequest(
 				log.WithFields(logrus.Fields{
 					logKeyAttempt:  attempt + 1,
 					"next_attempt": attempt + 2,
-				}).Info("resuming Preset API request after rate limit backoff")
+				}).Debug("resuming Preset API request after rate limit backoff")
 				continue
 			}
 		}
@@ -352,23 +351,6 @@ func (pc *PresetClient) sendRequest(
 		}).Debug("unexpected response from Preset API")
 		return nil, &apiError{StatusCode: statusCode, Body: respBody}
 	}
-}
-
-// requestLogURL returns a URL safe to write to logs. SCIM filter values can
-// contain usernames, so the filter query parameter is redacted. The original
-// request URL is left unchanged.
-func requestLogURL(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	q := parsed.Query()
-	if _, ok := q["filter"]; !ok {
-		return parsed.String()
-	}
-	q.Set("filter", "[redacted]")
-	parsed.RawQuery = q.Encode()
-	return parsed.String()
 }
 
 func escapeSCIMLiteral(s string) string {

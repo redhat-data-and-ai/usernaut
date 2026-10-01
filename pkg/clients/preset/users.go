@@ -173,6 +173,9 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 		return nil, fmt.Errorf("failed to parse create user response: %w", err)
 	}
 
+	log.WithFields(logrus.Fields{
+		"user_id": createdUser.ID,
+	}).Info("successfully created SCIM user in Preset")
 	return scimUserToStruct(&createdUser), nil
 }
 
