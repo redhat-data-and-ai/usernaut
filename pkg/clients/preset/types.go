@@ -83,6 +83,7 @@ type scimUserCreateRequest struct {
 type scimEmailValue struct {
 	Value   string `json:"value"`
 	Primary bool   `json:"primary"`
+	Type    string `json:"type,omitempty"`
 }
 
 // scimName represents the name component of a SCIM user
