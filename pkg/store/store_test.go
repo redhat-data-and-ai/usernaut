@@ -44,16 +44,10 @@ func TestStore_InterfaceCompliance(t *testing.T) {
 
 	store := New(c)
 
-	// Verify User implements UserStoreInterface
+	// Verify interface implementations
 	var _ UserStoreInterface = store.User
-
-	// Verify Team implements TeamStoreInterface
 	var _ TeamStoreInterface = store.Team
-
-	// Verify Group implements GroupStoreInterface
 	var _ GroupStoreInterface = store.Group
-
-	// Verify UserGroups implements UserGroupsStoreInterface
 	var _ UserGroupsStoreInterface = store.UserGroups
 }
 

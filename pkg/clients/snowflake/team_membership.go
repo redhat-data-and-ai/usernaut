@@ -34,8 +34,8 @@ import (
 func (c *SnowflakeClient) FetchTeamMembersByTeamID(ctx context.Context,
 	teamID string) (map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "snowflake",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 	log.Info("fetching team members by team ID")
 
@@ -89,9 +89,9 @@ func (c *SnowflakeClient) RemoveUserFromTeam(ctx context.Context, teamID string,
 func (c *SnowflakeClient) modifyTeamMembership(ctx context.Context, teamID string,
 	userIDs []string, action, verb string, successStatuses []int) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "snowflake",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
+		logKeyService: serviceName,
+		"teamID":      teamID,
+		"user_count":  len(userIDs),
 	})
 	log.Infof("%sing users to/from team", verb)
 
