@@ -94,6 +94,9 @@ spec:
                     properties:
                       filters:
                         items:
+                          description: |-
+                            LDAPFilter is a single LDAP filter item. Options may be set only when key is manager.
+                            Nested ldap_query is schemaless, so CEL cannot check it; the query builder rejects options on nested items.
                           properties:
                             criteria:
                               enum:
@@ -121,9 +124,21 @@ spec:
                               type: string
                             ldap_query:
                               x-kubernetes-preserve-unknown-fields: true
+                            options:
+                              description: Options is only valid when key is manager.
+                              properties:
+                                include_indirect_reports:
+                                  type: boolean
+                                include_manager:
+                                  type: boolean
+                              type: object
                             value:
                               type: string
                           type: object
+                          x-kubernetes-validations:
+                          - message: options is only allowed when key is manager
+                            rule: '!has(self.options) || (has(self.key) && self.key
+                              == ''manager'')'
                         minItems: 1
                         type: array
                       operator:
@@ -131,13 +146,6 @@ spec:
                         - and
                         - or
                         type: string
-                      options:
-                        properties:
-                          include_indirect_reports:
-                            type: boolean
-                          include_manager:
-                            type: boolean
-                        type: object
                     required:
                     - filters
                     - operator

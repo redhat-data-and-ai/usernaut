@@ -112,4 +112,51 @@ var _ = Describe("Group spec.members validation", func() {
 			_ = k8sClient.Delete(ctx, g)
 		})
 	})
+
+	It("accepts options on a manager filter", func() {
+		name := "group-members-accept-manager-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "equals",
+						Value:    "jsmith",
+						Options: &usernautdevv1alpha1.LDAPOptions{
+							IncludeIndirectReports: true,
+							IncludeManager:         true,
+						},
+					},
+				},
+			},
+		})
+		Expect(k8sClient.Create(ctx, g)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, g)
+		})
+	})
+
+	It("rejects options on a non-manager filter", func() {
+		name := "group-members-reject-title-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{
+						Key:      "title",
+						Criteria: "contains",
+						Value:    "engineer",
+						Options: &usernautdevv1alpha1.LDAPOptions{
+							IncludeIndirectReports: true,
+						},
+					},
+				},
+			},
+		})
+		err := k8sClient.Create(ctx, g)
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/options): %v", err)
+		Expect(err.Error()).To(ContainSubstring("options is only allowed when key is manager"))
+	})
 })

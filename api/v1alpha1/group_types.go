@@ -36,6 +36,10 @@ type Backend struct {
 	Type string `json:"type"`
 }
 
+// LDAPFilter is a single LDAP filter item. Options may be set only when key is manager.
+// Nested ldap_query is schemaless, so CEL cannot check it; the query builder rejects options on nested items.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.options) || (has(self.key) && self.key == 'manager')",message="options is only allowed when key is manager"
 type LDAPFilter struct {
 	// +optional
 	// +kubebuilder:validation:Enum=givenName;displayName;rhatJobTitle;title;employeeType;manager;rhatCostCenter;rhatCostCenterDesc;rhatGeo;co;st;rhatLocation;rhatOfficeLocation;rhatOfficeFloor;roomNumber
@@ -45,6 +49,9 @@ type LDAPFilter struct {
 	Criteria string `json:"criteria,omitempty"`
 	// +optional
 	Value string `json:"value,omitempty"`
+	// Options is only valid when key is manager.
+	// +optional
+	Options *LDAPOptions `json:"options,omitempty"`
 	// +optional
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:pruning:PreserveUnknownFields
@@ -56,10 +63,9 @@ type LDAPQuery struct {
 	Operator string `json:"operator"`
 	// +kubebuilder:validation:MinItems=1
 	Filters []LDAPFilter `json:"filters"`
-	// +optional
-	Options *LDAPOptions `json:"options,omitempty"`
 }
 
+// LDAPOptions applies to a manager filter. Missing or false fields are treated as disabled.
 type LDAPOptions struct {
 	IncludeIndirectReports bool `json:"include_indirect_reports,omitempty"`
 	IncludeManager         bool `json:"include_manager,omitempty"`

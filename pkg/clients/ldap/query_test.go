@@ -621,3 +621,83 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ExceedsMaxDepth() {
 	assertions.Error(err)
 	assertions.Contains(err.Error(), "exceeds maximum depth")
 }
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ManagerOptionsIgnoredInFilterString() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "manager",
+				Criteria: "equals",
+				Value:    "mgrAlpha",
+				Options: &v1alpha1.LDAPOptions{
+					IncludeIndirectReports: true,
+					IncludeManager:         true,
+				},
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	assertions.NoError(err)
+	assertions.Equal("(&(manager=uid=mgrAlpha,ou=users,dc=redhat,dc=com))", filter)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OptionsRejectedOnNonManager() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "title",
+				Criteria: "contains",
+				Value:    "engineer",
+				Options: &v1alpha1.LDAPOptions{
+					IncludeIndirectReports: true,
+				},
+			},
+		},
+	}
+
+	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	assertions.Error(err)
+	assertions.Contains(err.Error(), "options is only allowed when key is manager")
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OptionsRejectedOnNestedQueryItem() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Options: &v1alpha1.LDAPOptions{IncludeManager: true},
+				LDAPQuery: &v1alpha1.LDAPQuery{
+					Operator: "or",
+					Filters: []v1alpha1.LDAPFilter{
+						{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	assertions.Error(err)
+	assertions.Contains(err.Error(), "options is only allowed when key is manager")
+}
