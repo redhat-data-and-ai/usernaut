@@ -649,7 +649,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ManagerOptionsIgnoredInFi
 	assertions.Equal("(&(manager=uid=mgrAlpha,ou=users,dc=redhat,dc=com))", filter)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OptionsRejectedOnNonManager() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NonManagerOptionsIgnoredInFilterString() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -670,12 +670,12 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OptionsRejectedOnNonManag
 		},
 	}
 
-	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
-	assertions.Error(err)
-	assertions.Contains(err.Error(), "options is only allowed when key is manager")
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	assertions.NoError(err)
+	assertions.Equal("(&(title=*engineer*))", filter)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OptionsRejectedOnNestedQueryItem() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedQueryItemOptionsIgnoredInFilterString() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -697,7 +697,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OptionsRejectedOnNestedQu
 		},
 	}
 
-	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
-	assertions.Error(err)
-	assertions.Contains(err.Error(), "options is only allowed when key is manager")
+	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	assertions.NoError(err)
+	assertions.Equal("(&(|(manager=uid=mgrAlpha,ou=users,dc=redhat,dc=com)))", filter)
 }

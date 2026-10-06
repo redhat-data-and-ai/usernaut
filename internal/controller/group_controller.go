@@ -134,6 +134,16 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
+	if err := validateLDAPQuery(groupCR.Spec.Members.LDAPQuery); err != nil {
+		log.WithError(err).Warn("ldap_query validation failed")
+		groupCR.UpdateStatusWithErrMessage(err.Error())
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after ldap_query validation failure")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// set owner reference to the group CR
 	if err := r.setOwnerReference(ctx, groupCR, log); err != nil {
 		log.WithError(err).Error("error setting owner reference")

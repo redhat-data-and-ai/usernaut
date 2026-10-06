@@ -154,4 +154,190 @@ var _ = Describe("Group spec validation", func() {
 			Expect(err.Error()).To(ContainSubstring(`spec.backends type "snowflake" is not allowed`))
 		})
 	})
+
+	Describe("validateLDAPQuery", func() {
+		It("allows a nil query", func() {
+			Expect(validateLDAPQuery(nil)).NotTo(HaveOccurred())
+		})
+
+		It("allows options on a manager filter", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "equals",
+						Value:    "pbhattac",
+						Options: &usernautv1alpha1.LDAPOptions{
+							IncludeIndirectReports: true,
+						},
+					},
+				},
+			}
+			Expect(validateLDAPQuery(query)).NotTo(HaveOccurred())
+		})
+
+		It("rejects options on a non-manager filter", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						Key:      "title",
+						Criteria: "contains",
+						Value:    "engineer",
+						Options:  &usernautv1alpha1.LDAPOptions{IncludeIndirectReports: true},
+					},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.members.ldap_query.filters[0]"))
+			Expect(err.Error()).To(ContainSubstring("options is only allowed when key is manager"))
+		})
+
+		It("rejects options on a nested ldap_query wrapper", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+							Operator: "or",
+							Filters: []usernautv1alpha1.LDAPFilter{
+								{
+									Options: &usernautv1alpha1.LDAPOptions{IncludeManager: true},
+									LDAPQuery: &usernautv1alpha1.LDAPQuery{
+										Operator: "and",
+										Filters: []usernautv1alpha1.LDAPFilter{
+											{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.members.ldap_query.filters[0].ldap_query.filters[0]"))
+			Expect(err.Error()).To(ContainSubstring("options is only allowed when key is manager"))
+		})
+
+		It("allows nested manager options", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "or",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+							Operator: "and",
+							Filters: []usernautv1alpha1.LDAPFilter{
+								{
+									Key:      "manager",
+									Criteria: "equals",
+									Value:    "mgrAlpha",
+									Options:  &usernautv1alpha1.LDAPOptions{IncludeIndirectReports: true},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(validateLDAPQuery(query)).NotTo(HaveOccurred())
+		})
+
+		It("rejects an invalid nested operator", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+							Operator: "xor",
+							Filters: []usernautv1alpha1.LDAPFilter{
+								{Key: "co", Criteria: "equals", Value: "US"},
+							},
+						},
+					},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.members.ldap_query.filters[0].ldap_query"))
+			Expect(err.Error()).To(ContainSubstring(`unsupported operator "xor"`))
+		})
+
+		It("rejects empty nested filters", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+							Operator: "or",
+							Filters:  nil,
+						},
+					},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("filters are empty"))
+		})
+
+		It("rejects mixing key and ldap_query on a nested filter", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+							Operator: "or",
+							Filters: []usernautv1alpha1.LDAPFilter{
+								{
+									Key:       "title",
+									Criteria:  "contains",
+									Value:     "engineer",
+									LDAPQuery: &usernautv1alpha1.LDAPQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{Key: "co", Criteria: "equals", Value: "US"}}},
+								},
+							},
+						},
+					},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("cannot have both key/criteria/value and ldap_query"))
+		})
+
+		It("rejects an unsupported nested filter key", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+							Operator: "or",
+							Filters: []usernautv1alpha1.LDAPFilter{
+								{Key: "mail", Criteria: "equals", Value: "user@example.com"},
+							},
+						},
+					},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(`unsupported filter key "mail"`))
+		})
+
+		It("rejects nesting that exceeds max depth", func() {
+			level4 := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters:  []usernautv1alpha1.LDAPFilter{{Key: "co", Criteria: "equals", Value: "US"}},
+			}
+			level3 := &usernautv1alpha1.LDAPQuery{Operator: "or", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level4}}}
+			level2 := &usernautv1alpha1.LDAPQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level3}}}
+			level1 := &usernautv1alpha1.LDAPQuery{Operator: "or", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level2}}}
+			query := &usernautv1alpha1.LDAPQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level1}}}
+
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("exceeds maximum depth"))
+		})
+	})
 })

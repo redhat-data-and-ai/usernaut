@@ -25,6 +25,16 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
+var (
+	ldapFilterKeys = []string{
+		"givenName", "displayName", "rhatJobTitle", "title", "employeeType", "manager",
+		"rhatCostCenter", "rhatCostCenterDesc", "rhatGeo", "co", "st", "rhatLocation",
+		"rhatOfficeLocation", "rhatOfficeFloor", "roomNumber",
+	}
+	ldapFilterCriteria = []string{"equals", "contains", "not"}
+	ldapQueryOperators = []string{"and", "or"}
+)
+
 func validate(namespace string, group *usernautv1alpha1.Group, rules config.SpecValidationRulesConfig) error {
 	nsRules, ok := rules[namespace]
 	if !ok {
@@ -60,5 +70,77 @@ func validateGroupName(group *usernautv1alpha1.Group, rule config.GroupNameValid
 		return fmt.Errorf("spec.group_name must start with %q", rule.Prefix)
 	}
 
+	return nil
+}
+
+// validateLDAPQuery walks the full ldap_query tree, including nested ldap_query items
+// that the CRD cannot validate (schemaless).
+func validateLDAPQuery(query *usernautv1alpha1.LDAPQuery) error {
+	if query == nil {
+		return nil
+	}
+	return validateLDAPQueryAt(query, "spec.members.ldap_query", 1)
+}
+
+func validateLDAPQueryAt(query *usernautv1alpha1.LDAPQuery, path string, depth int) error {
+	if query == nil {
+		return fmt.Errorf("%s: ldap_query is empty", path)
+	}
+	if depth > usernautv1alpha1.MaxLDAPQueryDepth {
+		return fmt.Errorf("%s: ldap query nesting exceeds maximum depth of %d", path, usernautv1alpha1.MaxLDAPQueryDepth)
+	}
+
+	op := strings.ToLower(strings.TrimSpace(query.Operator))
+	if !slices.Contains(ldapQueryOperators, op) {
+		return fmt.Errorf("%s: unsupported operator %q", path, query.Operator)
+	}
+	if len(query.Filters) == 0 {
+		return fmt.Errorf("%s: filters are empty", path)
+	}
+
+	for i, filter := range query.Filters {
+		filterPath := fmt.Sprintf("%s.filters[%d]", path, i)
+		if err := validateLDAPFilter(filter, filterPath, depth); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateLDAPFilter(filter usernautv1alpha1.LDAPFilter, path string, depth int) error {
+	hasSimple := filter.Key != "" || filter.Criteria != "" || filter.Value != ""
+	hasNested := filter.LDAPQuery != nil
+
+	if hasSimple && hasNested {
+		return fmt.Errorf("%s: filter item cannot have both key/criteria/value and ldap_query", path)
+	}
+	if !hasSimple && !hasNested {
+		return fmt.Errorf("%s: filter item must have key/criteria/value or ldap_query", path)
+	}
+
+	if filter.Options != nil && !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
+		return fmt.Errorf("%s: options is only allowed when key is manager", path)
+	}
+
+	if hasNested {
+		return validateLDAPQueryAt(filter.LDAPQuery, path+".ldap_query", depth+1)
+	}
+
+	key := strings.TrimSpace(filter.Key)
+	if key == "" {
+		return fmt.Errorf("%s: filter key is empty", path)
+	}
+	if !slices.Contains(ldapFilterKeys, key) {
+		return fmt.Errorf("%s: unsupported filter key %q", path, filter.Key)
+	}
+
+	criteria := strings.ToLower(strings.TrimSpace(filter.Criteria))
+	if !slices.Contains(ldapFilterCriteria, criteria) {
+		return fmt.Errorf("%s: unsupported filter criteria %q", path, filter.Criteria)
+	}
+
+	if strings.TrimSpace(filter.Value) == "" {
+		return fmt.Errorf("%s: filter value is empty", path)
+	}
 	return nil
 }

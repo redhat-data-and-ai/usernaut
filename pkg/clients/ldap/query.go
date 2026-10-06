@@ -115,10 +115,6 @@ func buildQueryFromSpec(query *v1alpha1.LDAPQuery, baseUserDN string, depth int)
 }
 
 func buildFilterItem(filter v1alpha1.LDAPFilter, baseUserDN string, depth int) (string, error) {
-	if err := validateFilterOptions(filter); err != nil {
-		return "", err
-	}
-
 	hasSimple := filter.Key != "" || filter.Criteria != "" || filter.Value != ""
 	hasNested := filter.LDAPQuery != nil
 
@@ -130,19 +126,6 @@ func buildFilterItem(filter v1alpha1.LDAPFilter, baseUserDN string, depth int) (
 		return buildQueryFromSpec(filter.LDAPQuery, baseUserDN, depth+1)
 	}
 	return buildSimpleFilter(filter, baseUserDN)
-}
-
-func validateFilterOptions(filter v1alpha1.LDAPFilter) error {
-	if filter.Options == nil {
-		return nil
-	}
-	if filter.LDAPQuery != nil {
-		return errors.New("options is only allowed when key is manager")
-	}
-	if !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
-		return errors.New("options is only allowed when key is manager")
-	}
-	return nil
 }
 
 func buildSimpleFilter(filter v1alpha1.LDAPFilter, baseUserDN string) (string, error) {
