@@ -20,8 +20,8 @@ func TestFetchLDAPData_SkippedUsers(t *testing.T) {
 	ldapClient := mocks.NewMockLDAPClient(ctrl)
 	r := &GroupReconciler{
 		LdapConn: ldapClient,
-		log:      logger.Logger(context.Background()),
 	}
+	log := logger.Logger(context.Background())
 
 	members := []string{"found-user", "missing-user"}
 	ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), members).Return(map[string]map[string]interface{}{
@@ -34,14 +34,14 @@ func TestFetchLDAPData_SkippedUsers(t *testing.T) {
 		},
 	}, nil)
 
-	result, err := r.fetchLDAPData(context.Background(), members)
+	result, allLdapUserData, err := r.fetchLDAPData(context.Background(), members, log)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, []string{"found@example.com"}, result.CurrentMembers)
 	assert.Equal(t, []string{"found-user"}, result.ActiveUserList)
 	assert.Equal(t, []string{"missing-user"}, result.SkippedUsers)
-	require.Contains(t, r.allLdapUserData, "found-user")
-	assert.NotContains(t, r.allLdapUserData, "missing-user")
+	require.Contains(t, allLdapUserData, "found-user")
+	assert.NotContains(t, allLdapUserData, "missing-user")
 }
 
 func TestFetchLDAPData_AllUsersFound(t *testing.T) {
@@ -51,8 +51,8 @@ func TestFetchLDAPData_AllUsersFound(t *testing.T) {
 	ldapClient := mocks.NewMockLDAPClient(ctrl)
 	r := &GroupReconciler{
 		LdapConn: ldapClient,
-		log:      logger.Logger(context.Background()),
 	}
+	log := logger.Logger(context.Background())
 
 	members := []string{"found-user"}
 	ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), members).Return(map[string]map[string]interface{}{
@@ -65,11 +65,12 @@ func TestFetchLDAPData_AllUsersFound(t *testing.T) {
 		},
 	}, nil)
 
-	result, err := r.fetchLDAPData(context.Background(), members)
+	result, allLdapUserData, err := r.fetchLDAPData(context.Background(), members, log)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Empty(t, result.SkippedUsers)
 	assert.Equal(t, []string{"found@example.com"}, result.CurrentMembers)
+	require.Contains(t, allLdapUserData, "found-user")
 }
 
 func TestFetchLDAPData_BulkErrorStillFails(t *testing.T) {
@@ -79,16 +80,16 @@ func TestFetchLDAPData_BulkErrorStillFails(t *testing.T) {
 	ldapClient := mocks.NewMockLDAPClient(ctrl)
 	r := &GroupReconciler{
 		LdapConn: ldapClient,
-		log:      logger.Logger(context.Background()),
 	}
 
 	members := []string{"found-user"}
 	ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), members).
 		Return(nil, errors.New("LDAP timeout"))
 
-	result, err := r.fetchLDAPData(context.Background(), members)
+	result, allLdapUserData, err := r.fetchLDAPData(context.Background(), members, logger.Logger(context.Background()))
 	require.Error(t, err)
 	assert.Nil(t, result)
+	assert.Nil(t, allLdapUserData)
 	assert.Contains(t, err.Error(), "get bulk LDAP user data")
 }
 

@@ -39,6 +39,20 @@ func TestGroupUpdateStatus(t *testing.T) {
 		assert.Equal(t, int64(5), g.Status.LastAppliedGeneration)
 	})
 
+	t.Run("missing sub-groups", func(t *testing.T) {
+		t.Parallel()
+		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 8}}
+		g.UpdateStatus(MissingSubGroupsReason, "Reconciled with 1 missing sub-groups: platform")
+
+		require.Len(t, g.Status.Conditions, 1)
+		cond := g.Status.Conditions[0]
+		assert.Equal(t, GroupReadyCondition, cond.Type)
+		assert.Equal(t, metav1.ConditionFalse, cond.Status)
+		assert.Equal(t, MissingSubGroupsReason, cond.Reason)
+		assert.Equal(t, "Reconciled with 1 missing sub-groups: platform", cond.Message)
+		assert.Equal(t, int64(8), g.Status.LastAppliedGeneration)
+	})
+
 	t.Run("failed", func(t *testing.T) {
 		t.Parallel()
 		g := &Group{ObjectMeta: metav1.ObjectMeta{Generation: 6}}
