@@ -165,11 +165,11 @@ spec:
                             type: boolean
                           includeManagers:
                             type: boolean
+                          includeOnlyManagers:
+                            type: boolean
                           includeOnlyManagersOfMembers:
                             description: IncludeOnlyManagersOfMembers adds each resolved
                               member's manager (from LDAP).
-                            type: boolean
-                          includeOnlyManagers:
                             type: boolean
                         type: object
                         x-kubernetes-validations:
