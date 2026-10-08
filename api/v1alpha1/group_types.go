@@ -17,6 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -73,10 +76,10 @@ type GroupSpec struct {
 	Backends    []Backend    `json:"backends"`
 }
 
-// Members defines how group membership is resolved. When LDAPQuery is set, Users is optional
-// (members can come only from LDAP). When LDAPQuery is omitted, Users must be a non-empty list.
+// Members defines how group membership is resolved. At least one of ldap_query,
+// a non-empty users list, or a non-empty groups list must be provided.
 //
-// +kubebuilder:validation:XValidation:rule="has(self.ldap_query) || (has(self.users) && size(self.users) > 0)",message="users must be a non-empty list when ldap_query is omitted"
+// +kubebuilder:validation:XValidation:rule="has(self.ldap_query) || (has(self.users) && size(self.users) > 0) || (has(self.groups) && size(self.groups) > 0)",message="users or groups must be a non-empty list when ldap_query is omitted"
 type Members struct {
 	Groups    []string   `json:"groups,omitempty"`
 	Users     []string   `json:"users,omitempty"`
@@ -98,6 +101,7 @@ type GroupStatus struct {
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
+	MissingSubGroups      []string           `json:"missingSubGroups,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -128,15 +132,64 @@ func init() {
 }
 
 func (c *Group) SetWaiting() {
-	condition := metav1.Condition{
-		Type:               GroupReadyCondition,
-		LastTransitionTime: metav1.Now(),
-		Status:             metav1.ConditionUnknown,
-		Message:            "Group is getting reconciled",
-		Reason:             "Waiting",
+	c.setReadyCondition(metav1.ConditionUnknown, "Waiting", "Group is getting reconciled")
+}
+
+// UpdateStatus sets GroupReadyCondition from a reconcile reason.
+// SuccessfullyReconciled and PartiallyReconciled are ready (True).
+// MissingSubGroupsReason is not ready. Those three stamp LastAppliedGeneration.
+// Any other reason is ReconcileFailed and does not clear a generation already stamped.
+func (c *Group) UpdateStatus(reason, message string) {
+	var status metav1.ConditionStatus
+	switch reason {
+	case SuccessfullyReconciled:
+		status = metav1.ConditionTrue
+		if message == "" {
+			message = "Group reconciled successfully"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	case PartiallyReconciled:
+		status = metav1.ConditionTrue
+		if message == "" {
+			message = "Group partially reconciled"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	case MissingSubGroupsReason:
+		status = metav1.ConditionFalse
+		if message == "" {
+			message = "Group reconciled with missing sub-groups"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	default:
+		status = metav1.ConditionFalse
+		reason = ReconcileFailed
+		if message == "" {
+			message = "Group reconcile failed"
+		}
 	}
-	for i, currentCondition := range c.Status.Conditions {
-		if currentCondition.Type == condition.Type {
+	c.setReadyCondition(status, reason, message)
+}
+
+func (c *Group) SetMissingSubGroups(missing []string) {
+	c.Status.MissingSubGroups = missing
+	if len(missing) == 0 {
+		c.setCondition(MembersResolvedCondition, metav1.ConditionTrue, "Resolved", "All sub-groups resolved")
+		return
+	}
+	c.setCondition(MembersResolvedCondition, metav1.ConditionFalse, MissingSubGroupsReason,
+		fmt.Sprintf("Missing sub-groups: %s", strings.Join(missing, ", ")))
+}
+
+func (c *Group) setCondition(condType string, status metav1.ConditionStatus, reason, message string) {
+	if len(message) > maxConditionMessageLen {
+		message = message[:maxConditionMessageLen-3] + "..."
+	}
+	condition := metav1.Condition{
+		Type: condType, Status: status, Reason: reason,
+		Message: message, LastTransitionTime: metav1.Now(),
+	}
+	for i, cur := range c.Status.Conditions {
+		if cur.Type == condType {
 			c.Status.Conditions[i] = condition
 			return
 		}
@@ -144,38 +197,6 @@ func (c *Group) SetWaiting() {
 	c.Status.Conditions = append(c.Status.Conditions, condition)
 }
 
-func (c *Group) UpdateStatus(reason, message string) {
-	condition := metav1.Condition{
-		Type:               GroupReadyCondition,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	}
-	switch reason {
-	case SuccessfullyReconciled:
-		condition.Status = metav1.ConditionTrue
-		if condition.Message == "" {
-			condition.Message = "Group reconciled successfully"
-		}
-		c.Status.LastAppliedGeneration = c.Generation
-	case PartiallyReconciled:
-		condition.Status = metav1.ConditionTrue
-		if condition.Message == "" {
-			condition.Message = "Group partially reconciled"
-		}
-		c.Status.LastAppliedGeneration = c.Generation
-	default:
-		condition.Status = metav1.ConditionFalse
-		if condition.Message == "" {
-			condition.Message = "Group reconcile failed"
-		}
-		condition.Reason = ReconcileFailed
-	}
-	for i, currentCondition := range c.Status.Conditions {
-		if currentCondition.Type == condition.Type {
-			c.Status.Conditions[i] = condition
-			return
-		}
-	}
-	c.Status.Conditions = append(c.Status.Conditions, condition)
+func (c *Group) setReadyCondition(status metav1.ConditionStatus, reason, message string) {
+	c.setCondition(GroupReadyCondition, status, reason, message)
 }

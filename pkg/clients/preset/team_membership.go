@@ -31,8 +31,8 @@ import (
 // FetchTeamMembersByTeamID retrieves all members of a SCIM group via GET /Groups/{id}.
 func (pc *PresetClient) FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 	log.Info("fetching SCIM group members from Preset")
 
@@ -70,9 +70,9 @@ func (pc *PresetClient) AddUserToTeam(ctx context.Context, teamID string, userID
 	}
 
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "preset",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
+		logKeyService: serviceName,
+		"teamID":      teamID,
+		"user_count":  len(userIDs),
 	})
 	log.Info("adding users to SCIM group in Preset")
 
@@ -112,9 +112,9 @@ func (pc *PresetClient) RemoveUserFromTeam(ctx context.Context, teamID string, u
 	}
 
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":    "preset",
-		"teamID":     teamID,
-		"user_count": len(userIDs),
+		logKeyService: serviceName,
+		"teamID":      teamID,
+		"user_count":  len(userIDs),
 	})
 	log.Info("removing users from SCIM group in Preset")
 

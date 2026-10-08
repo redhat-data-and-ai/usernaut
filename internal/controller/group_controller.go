@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -62,20 +63,19 @@ const (
 	requeueAfter = 8 * time.Hour
 )
 
+var retryPriority = -200
+
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
 	Scheme            *runtime.Scheme
 	AppConfig         *config.AppConfig
 	Store             *store.Store
-	log               *logrus.Entry
-	backendLogger     *logrus.Entry
 	LdapConn          ldap.LDAPClient
-	allLdapUserData   map[string]*structs.LDAPUser
 	WatchedNamespaces []string
-	// CacheMutex prevents concurrent access to the cache during group reconciliation.
-	// This shared mutex ensures that the group controller and user offboarding job don't interfere
-	// with each other when reading or modifying user/team data in Redis.
+	// CacheMutex prevents concurrent cache index updates during group reconciliation.
+	// This shared mutex ensures that bulk read-modify-write operations on cache indexes
+	// (user:groups reverse index, group members) are atomic.
 	// This mutex is shared across components and passed from main.go.
 	CacheMutex *sync.RWMutex
 }
@@ -87,19 +87,19 @@ type GroupReconciler struct {
 
 func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	ctx = logger.WithRequestId(ctx, controller.ReconcileIDFromContext(ctx))
-	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
-		"request": req.NamespacedName.String(),
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		"request": req.String(),
 	})
 
 	groupCR := &usernautdevv1alpha1.Group{}
 
 	if err := r.Get(ctx, req.NamespacedName, groupCR); err != nil {
-		r.log.WithError(err).Error("Unable to fetch Group CR")
+		log.WithError(err).Error("Unable to fetch Group CR")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	if groupCR.GetDeletionTimestamp() != nil {
-		return ctrl.Result{}, r.handleDeletion(ctx, groupCR)
+		return ctrl.Result{}, r.handleDeletion(ctx, groupCR, log)
 	}
 
 	// Object is not being deleted, add finalizer if missing
@@ -110,31 +110,45 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// Skip expensive reconciliation (LDAP, backends) when nothing changed.
+	// Parent groups (with subgroup references) are never skipped — child membership
+	// changes don't bump the parent's generation, so skipping would delay propagation
+	// until the next periodic requeue. Leaf groups are safe to skip since their
+	// membership only changes via spec edits (which bump generation).
+	// requeueAfter/2 ensures periodic requeues (8h) always exceed the window and
+	// trigger a full reconcile, preserving LDAP membership refresh.
+	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
+	if !hasSubgroups && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
+		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
+		log.Info("skipping reconciliation, generation unchanged")
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
 	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
-		r.log.WithError(err).Warn("spec validation failed")
+		log.WithError(err).Warn("spec validation failed")
 		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, err.Error())
 		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
-			r.log.WithError(statusErr).Error("error updating status after spec validation failure")
+			log.WithError(statusErr).Error("error updating status after spec validation failure")
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, nil
 	}
 
 	// set owner reference to the group CR
-	if err := r.setOwnerReference(ctx, groupCR); err != nil {
-		r.log.WithError(err).Error("error setting owner reference")
+	if err := r.setOwnerReference(ctx, groupCR, log); err != nil {
+		log.WithError(err).Error("error setting owner reference")
 		return ctrl.Result{}, err
 	}
 
 	// set the group status as waiting
 	groupCR.SetWaiting()
 	if err := r.Status().Update(ctx, groupCR); err != nil {
-		r.log.WithError(err).Error("error updating the status")
+		log.WithError(err).Error("error updating the status")
 		return ctrl.Result{}, err
 	}
 
-	r.log = logger.Logger(ctx).WithFields(logrus.Fields{
-		"request":        req.NamespacedName.String(),
+	log = logger.Logger(ctx).WithFields(logrus.Fields{
+		"request":        req.String(),
 		"group":          groupCR.Spec.GroupName,
 		"has_ldap_query": groupCR.Spec.Members.LDAPQuery != nil,
 		"members":        len(groupCR.Spec.Members.Users),
@@ -148,45 +162,63 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		includeManager := groupCR.Spec.Members.LDAPQuery.Options != nil && groupCR.Spec.Members.LDAPQuery.Options.IncludeManager
 		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, includeIndirectReports, nil)
 		if err != nil {
-			r.log.WithError(err).Error("error fetching query members")
-			return ctrl.Result{}, err
+			log.WithError(err).Error("error fetching query members")
+			return ctrl.Result{Priority: &retryPriority}, err
 		}
 		if includeManager {
 			queryMembers = append(queryMembers, extractManagerUIDsFromQuery(groupCR.Spec.Members.LDAPQuery)...)
 		}
-		r.log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
+		log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
 	}
 
 	visitedGroups := make(map[string]struct{})
-	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups)
+	var missingGroups []string
+	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups, &missingGroups, log)
 	if err != nil {
-		r.log.WithError(err).Error("error fetching unique group members")
-		return ctrl.Result{}, err
+		log.WithError(err).Error("error fetching unique group members")
+		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, err.Error())
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after error fetching unique group members")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
+
+	groupCR.SetMissingSubGroups(missingGroups)
 
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
-	r.log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
-
-	r.log.Info("fetching LDAP data for the users in the group")
-
-	// Lock cache for all read/write operations during reconciliation
-	// This prevents race conditions when multiple Group CRs reference the same users/teams
-	// and their reconciliations run concurrently
-	r.CacheMutex.Lock()
-	defer r.CacheMutex.Unlock()
-
-	r.log.Info("Acquired cache lock for entire reconciliation (LDAP + backends)")
-
-	// Step 1: Fetch LDAP data (does NOT update cache indexes)
-	ldapResult, err := r.fetchLDAPData(ctx, uniqueMembers)
-	if err != nil {
-		r.log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
-		return ctrl.Result{}, err
+	if len(uniqueMembers) == 0 {
+		if len(missingGroups) > 0 {
+			log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
+			groupCR.UpdateStatus(usernautdevv1alpha1.MissingSubGroupsReason, fmt.Sprintf(
+				"Reconciled with %d missing sub-groups: %s",
+				len(missingGroups), strings.Join(missingGroups, ", ")))
+		} else {
+			log.Info("no members to reconcile, skipping backend reconciliation")
+			groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "no members to reconcile, skipping backend reconciliation")
+		}
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after no members to reconcile")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
 	}
 
-	// Step 2: Process all backends (cache operations protected by lock)
-	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers)
+	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
+	groupCR.Status.ReconciledUsers = uniqueMembers
+
+	log.Info("fetching LDAP data for the users in the group")
+
+	// Step 1: Fetch LDAP data (no lock needed - read-only from LDAP)
+	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, log)
+	if err != nil {
+		log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
+		return ctrl.Result{Priority: &retryPriority}, err
+	}
+
+	// Step 2: Process all backends (no global lock - individual store ops are atomic)
+	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers, log, allLdapUserData)
 
 	// Step 3: Only update cache indexes if ALL backends succeeded (all-or-nothing)
 	hasErrors := false
@@ -198,25 +230,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if !hasErrors {
-		r.log.Info("All backends succeeded, updating cache indexes")
-		if err := r.updateCacheIndexes(ctx, groupCR.Spec.GroupName, ldapResult); err != nil {
-			r.log.WithError(err).Error("error updating cache indexes")
-			// Continue to update status - cache index errors are logged but not fatal
+		log.Info("All backends succeeded, updating cache indexes")
+		if err := r.updateCacheIndexes(ctx, groupCR.Spec.GroupName, ldapResult, log); err != nil {
+			log.WithError(err).Error("error updating cache indexes")
 		}
 	} else {
-		r.log.Warn("Backend errors detected, skipping cache index updates (all-or-nothing)")
+		log.Warn("Backend errors detected, skipping cache index updates (all-or-nothing)")
 	}
 
 	// Step 4: Remove force reconcile label if present
 	if removeErr := controllerutils.RemoveForceReconcileLabel(ctx, r.Client, groupCR); removeErr != nil {
-		r.log.WithError(removeErr).Error("Failed to remove force reconcile label")
-		return ctrl.Result{}, removeErr
+		log.WithError(removeErr).Error("Failed to remove force reconcile label")
+		return ctrl.Result{Priority: &retryPriority}, removeErr
 	}
 
 	// Step 5: Update status and handle errors
-	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, uniqueMembers, ldapResult.SkippedUsers); err != nil {
-		return ctrl.Result{}, err
+	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, uniqueMembers, ldapResult.SkippedUsers, log); err != nil {
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
+
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
@@ -426,33 +458,30 @@ func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, see
 	}
 }
 
-// fetchLDAPData fetches LDAP data for all unique members and populates allLdapUserData.
+// fetchLDAPData fetches LDAP data for all unique members and returns the result
+// along with the per-user LDAP data map.
 // This function does NOT update any cache indexes - it only fetches data.
 // Members missing from LDAP are skipped and returned in SkippedUsers so reconcile
 // can continue and mark the group PartiallyReconciled. If the bulk LDAP client
 // returns a real error (e.g. server timeout), the entire reconcile should fail
 // so members are not misclassified as missing from LDAP.
-// NOTE: This function assumes CacheMutex is already held by the caller.
 func (r *GroupReconciler) fetchLDAPData(
 	ctx context.Context,
 	uniqueMembers []string,
-) (*LDAPFetchResult, error) {
-	// Initialize LDAP user data map
-	r.allLdapUserData = make(map[string]*structs.LDAPUser, len(uniqueMembers))
+	log *logrus.Entry,
+) (*LDAPFetchResult, map[string]*structs.LDAPUser, error) {
+	allLdapUserData := make(map[string]*structs.LDAPUser, len(uniqueMembers))
 
-	// Use a map to track unique UIDs to avoid duplicates
 	uniqueUIDs := make(map[string]bool)
-
-	// Track current valid members (users with valid LDAP data)
 	currentMembers := make([]string, 0, len(uniqueMembers))
 	skippedUsers := make([]string, 0)
 
-	r.log.WithField("member_count", len(uniqueMembers)).Info("fetching LDAP data in bulk")
+	log.WithField("member_count", len(uniqueMembers)).Info("fetching LDAP data in bulk")
 
 	bulkData, err := r.LdapConn.GetBulkUserLDAPData(ctx, uniqueMembers)
 	if err != nil {
-		r.log.WithError(err).Error("error fetching bulk LDAP data")
-		return nil, fmt.Errorf("get bulk LDAP user data: %w", err)
+		log.WithError(err).Error("error fetching bulk LDAP data")
+		return nil, nil, fmt.Errorf("get bulk LDAP user data: %w", err)
 	}
 	if bulkData == nil {
 		bulkData = make(map[string]map[string]interface{})
@@ -461,19 +490,19 @@ func (r *GroupReconciler) fetchLDAPData(
 	for _, user := range uniqueMembers {
 		userData, ok := bulkData[user]
 		if !ok {
-			r.log.WithField("user", user).Warn("user not found in LDAP, skipping")
+			log.WithField("user", user).Warn("user not found in LDAP, skipping")
 			skippedUsers = append(skippedUsers, user)
 			continue
 		}
 
 		ldapUser := &structs.LDAPUser{}
 		if err := utils.MapToStruct(userData, ldapUser); err != nil {
-			r.log.WithField("user", user).WithError(err).Error("error converting LDAP user data to struct")
+			log.WithField("user", user).WithError(err).Error("error converting LDAP user data to struct")
 			skippedUsers = append(skippedUsers, user)
 			continue
 		}
 
-		r.allLdapUserData[user] = ldapUser
+		allLdapUserData[user] = ldapUser
 
 		if !uniqueUIDs[ldapUser.GetUID()] {
 			uniqueUIDs[ldapUser.GetUID()] = true
@@ -483,7 +512,7 @@ func (r *GroupReconciler) fetchLDAPData(
 	}
 
 	if len(skippedUsers) > 0 {
-		r.log.WithField("skipped_users", skippedUsers).
+		log.WithField("skipped_users", skippedUsers).
 			WithField("skipped_count", len(skippedUsers)).
 			Warn("group members not found in LDAP; continuing with remaining users")
 	}
@@ -499,24 +528,24 @@ func (r *GroupReconciler) fetchLDAPData(
 		CurrentMembers: currentMembers,
 		ActiveUserList: activeUserList,
 		SkippedUsers:   skippedUsers,
-	}, nil
+	}, allLdapUserData, nil
 }
 
 // updateCacheIndexes updates all cache indexes after successful backend reconciliation
 // This includes: user:groups reverse index, group members, and user list
-// NOTE: This function assumes CacheMutex is already held by the caller
 // Returns an error if critical cache updates fail
 func (r *GroupReconciler) updateCacheIndexes(
 	ctx context.Context,
 	groupName string,
 	ldapResult *LDAPFetchResult,
+	log *logrus.Entry,
 ) error {
 	var errors []error
 
 	// Get previous members of this group (for removal detection)
 	previousMembers, err := r.Store.Group.GetMembers(ctx, groupName)
 	if err != nil {
-		r.log.WithError(err).Warn("error fetching previous group members, assuming empty")
+		log.WithError(err).Warn("error fetching previous group members, assuming empty")
 		previousMembers = []string{}
 	}
 	previousMembersSet := make(map[string]struct{}, len(previousMembers))
@@ -531,9 +560,15 @@ func (r *GroupReconciler) updateCacheIndexes(
 	}
 
 	// Update user:groups reverse index - add this group to each current member's group list
+	// Per-operation locking: each AddGroup/RemoveGroup is a read-modify-write on a per-user key.
+	// Locking per-call (~1ms each) instead of batching allows concurrent reconciles to interleave,
+	// which is critical at high concurrency (30-50 workers with 2k CRs).
 	for _, email := range ldapResult.CurrentMembers {
-		if err := r.Store.UserGroups.AddGroup(ctx, email, groupName); err != nil {
-			r.log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error updating user groups index")
+		r.CacheMutex.Lock()
+		err := r.Store.UserGroups.AddGroup(ctx, email, groupName)
+		r.CacheMutex.Unlock()
+		if err != nil {
+			log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error updating user groups index")
 			errors = append(errors, fmt.Errorf("failed to add group %s to user %s: %w", groupName, email, err))
 		}
 	}
@@ -541,18 +576,23 @@ func (r *GroupReconciler) updateCacheIndexes(
 	// Find users who were removed from the group (previous - current)
 	for email := range previousMembersSet {
 		if _, stillMember := currentMembersSet[email]; !stillMember {
-			// User was removed from the group - update their user:groups index
-			r.log.WithField("user", logger.MaskEmail(email)).WithField("group", groupName).Info("removing group from user's group list")
-			if err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName); err != nil {
-				r.log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error removing group from user's groups index")
+			log.WithField("user", logger.MaskEmail(email)).WithField("group", groupName).Info("removing group from user's group list")
+			r.CacheMutex.Lock()
+			err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName)
+			r.CacheMutex.Unlock()
+			if err != nil {
+				log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error removing group from user's groups index")
 				errors = append(errors, fmt.Errorf("failed to remove group %s from user %s: %w", groupName, email, err))
 			}
 		}
 	}
 
-	// Update group members in consolidated store - this is critical
-	if err := r.Store.Group.SetMembers(ctx, groupName, ldapResult.CurrentMembers); err != nil {
-		r.log.WithError(err).Error("error updating group members")
+	// Update group members in consolidated store
+	r.CacheMutex.Lock()
+	err = r.Store.Group.SetMembers(ctx, groupName, ldapResult.CurrentMembers)
+	r.CacheMutex.Unlock()
+	if err != nil {
+		log.WithError(err).Error("error updating group members")
 		return fmt.Errorf("failed to update group members for %s: %w", groupName, err)
 	}
 
@@ -569,6 +609,8 @@ func (r *GroupReconciler) processAllBackends(
 	ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	uniqueMembers []string,
+	log *logrus.Entry,
+	allLdapUserData map[string]*structs.LDAPUser,
 ) map[string]map[string]string {
 	backendErrors := make(map[string]map[string]string, 0)
 
@@ -608,14 +650,14 @@ func (r *GroupReconciler) processAllBackends(
 	}
 
 	for _, backend := range groupCR.Spec.Backends {
-		r.backendLogger = r.log.WithFields(logrus.Fields{
+		backendLogger := log.WithFields(logrus.Fields{
 			"backend":      backend.Name,
 			"backend_type": backend.Type,
 		})
 		backendKey := backend.Name + "_" + backend.Type
 		backendGroupParams := groupParamsByBackend[backendKey]
-		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers, backendGroupParams); err != nil {
-			r.backendLogger.WithError(err).Error("error processing backend")
+		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers, backendLogger, allLdapUserData, backendGroupParams); err != nil {
+			backendLogger.WithError(err).Error("error processing backend")
 			if _, ok := backendErrors[backend.Type]; !ok {
 				backendErrors[backend.Type] = make(map[string]string)
 			}
@@ -631,25 +673,27 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	backend usernautdevv1alpha1.Backend,
 	uniqueMembers []string,
+	backendLogger *logrus.Entry,
+	allLdapUserData map[string]*structs.LDAPUser,
 	backendGroupParams structs.TeamParams,
 ) error {
 	// Create backend client
 	backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error creating backend client")
+		backendLogger.WithError(err).Error("error creating backend client")
 		return err
 	}
-	r.backendLogger.Debug("created backend client successfully")
+	backendLogger.Debug("created backend client successfully")
 
 	isLdapSync, err := r.setupLdapSync(
-		backend.Type, backend.Name, backendClient, groupCR.Spec.GroupName, groupCR.Spec.Backends,
+		backend.Type, backend.Name, backendClient, groupCR.Spec.GroupName, groupCR.Spec.Backends, backendLogger,
 	)
 	if err != nil {
-		r.backendLogger.Errorf("failed to setup ldap sync for %s: %v", backend.Type, err)
+		backendLogger.Errorf("failed to setup ldap sync for %s: %v", backend.Type, err)
 		return err
 	}
 	if !isLdapSync {
-		r.backendLogger.Infof("ldap sync is not setup for %s backend", backend.Type)
+		backendLogger.Infof("ldap sync is not setup for %s backend", backend.Type)
 	}
 
 	// Fetch or create team
@@ -657,68 +701,68 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 		Name: backend.Name,
 		Type: backend.Type,
 	}
-	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams)
+	teamID, err := r.fetchOrCreateTeam(ctx, groupCR.Spec.GroupName, backendClient, backendParams, backendLogger)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error fetching or creating team")
+		backendLogger.WithError(err).Error("error fetching or creating team")
 		return err
 	}
-	r.backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
+	backendLogger.WithField("team_id", teamID).Info("fetched or created team successfully")
 
 	// Independent reconciliation of Group Params for each backend
 	if backendGroupParams.Property != "" {
 		err = backendClient.ReconcileGroupParams(ctx, teamID, backendGroupParams)
 		if err != nil {
-			r.backendLogger.WithError(err).Error("error reconciling group params")
+			backendLogger.WithError(err).Error("error reconciling group params")
 			return err
 		}
-		r.backendLogger.Info("successfully reconciled group params")
+		backendLogger.Info("successfully reconciled group params")
 	}
 
 	// Create users in backend and cache
-	if err := r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient); err != nil {
-		r.backendLogger.WithError(err).Error("error creating users in backend and cache")
+	if err := r.createUsersInBackendAndCache(ctx, uniqueMembers, backend.Name, backend.Type, backendClient, backendLogger, allLdapUserData); err != nil {
+		backendLogger.WithError(err).Error("error creating users in backend and cache")
 		return err
 	}
-	r.backendLogger.Info("created users in backend and cache successfully")
+	backendLogger.Info("created users in backend and cache successfully")
 
 	// Fetch existing team members
 	members, err := backendClient.FetchTeamMembersByTeamID(ctx, teamID)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error fetching team members")
+		backendLogger.WithError(err).Error("error fetching team members")
 		return err
 	}
-	r.backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
+	backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
 	// Process users (determine who to add/remove)
-	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type)
+	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type, backendLogger, allLdapUserData)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error processing users")
+		backendLogger.WithError(err).Error("error processing users")
 		return err
 	}
 
 	// Add users to team if needed
 	if !isLdapSync {
 		if len(usersToAdd) > 0 {
-			r.backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
+			backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
 			if err := backendClient.AddUserToTeam(ctx, teamID, usersToAdd); err != nil {
-				r.backendLogger.WithError(err).Error("error while adding users to the team")
+				backendLogger.WithError(err).Error("error while adding users to the team")
 				return err
 			}
-			r.backendLogger.WithField("num_users_to_add", len(usersToAdd)).Info("added users to team successfully")
+			backendLogger.WithField("num_users_to_add", len(usersToAdd)).Info("added users to team successfully")
 		}
 
 		// Remove users from team if needed
 		if len(usersToRemove) > 0 {
-			r.backendLogger.WithField("user_count", len(usersToRemove)).Info("removing users from a team")
+			backendLogger.WithField("user_count", len(usersToRemove)).Info("removing users from a team")
 			if err := backendClient.RemoveUserFromTeam(ctx, teamID, usersToRemove); err != nil {
-				r.backendLogger.WithError(err).Error("error while removing users from the team")
+				backendLogger.WithError(err).Error("error while removing users from the team")
 				return err
 			}
-			r.backendLogger.WithField("num_users_to_remove", len(usersToRemove)).Info("removed users from team successfully")
+			backendLogger.WithField("num_users_to_remove", len(usersToRemove)).Info("removed users from team successfully")
 		}
 	}
 
-	r.backendLogger.Info("successfully processed backend")
+	backendLogger.Info("successfully processed backend")
 
 	return nil
 }
@@ -727,7 +771,8 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
 	backendErrors map[string]map[string]string,
-	uniqueMembers, skippedUsers []string) error {
+	uniqueMembers, skippedUsers []string,
+	log *logrus.Entry) error {
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
 	// Build status for each backend
@@ -768,6 +813,10 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 		groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
 			"Group partially reconciled: %d user(s) not found or failed",
 			len(skippedUsers)))
+	} else if len(groupCR.Status.MissingSubGroups) > 0 {
+		groupCR.UpdateStatus(usernautdevv1alpha1.MissingSubGroupsReason, fmt.Sprintf(
+			"Reconciled with %d missing sub-groups: %s",
+			len(groupCR.Status.MissingSubGroups), strings.Join(groupCR.Status.MissingSubGroups, ", ")))
 	} else {
 		groupCR.UpdateStatus(usernautdevv1alpha1.SuccessfullyReconciled, "")
 	}
@@ -775,7 +824,7 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 		groupCR.UpdateStatus(usernautdevv1alpha1.ReconcileFailed, "")
 	}
 	if updateStatusErr := r.Status().Update(ctx, groupCR); updateStatusErr != nil {
-		r.log.WithError(updateStatusErr).Error("error while updating final status")
+		log.WithError(updateStatusErr).Error("error while updating final status")
 		return updateStatusErr
 	}
 
@@ -807,23 +856,19 @@ func membersMinusSkipped(members, skipped []string) []string {
 }
 
 // handleDeletion processes the deletion of a Group CR and its finalizer
-func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautdevv1alpha1.Group, log *logrus.Entry) error {
 	if controllerutil.ContainsFinalizer(groupCR, groupFinalizer) {
-		// Lock cache for deletion operations
-		// Multiple Group CRs might reference the same team and delete concurrently
-		r.CacheMutex.Lock()
-		defer r.CacheMutex.Unlock()
-
 		// Clean up user:groups reverse index for all members of this group
-		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName)
+		// Per-operation locking is handled inside cleanupUserGroupsIndex
+		r.cleanupUserGroupsIndex(ctx, groupCR.Spec.GroupName, log)
 
-		if err := r.deleteBackendsTeam(ctx, groupCR); err != nil {
+		if err := r.deleteBackendsTeam(ctx, groupCR, log); err != nil {
 			return err
 		}
 
 		controllerutil.RemoveFinalizer(groupCR, groupFinalizer)
 		if err := r.Update(ctx, groupCR); err != nil {
-			r.log.WithError(err).Error("error while updating group CR")
+			log.WithError(err).Error("error while updating group CR")
 			return err
 		}
 	}
@@ -831,43 +876,45 @@ func (r *GroupReconciler) handleDeletion(ctx context.Context, groupCR *usernautd
 }
 
 // cleanupUserGroupsIndex removes the group from all members' user:groups index
-// NOTE: Caller must hold CacheMutex lock
 // NOTE: This does NOT delete the group entry - that happens in deleteBackendsTeam
-func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName string) {
+func (r *GroupReconciler) cleanupUserGroupsIndex(ctx context.Context, groupName string, log *logrus.Entry) {
 	// Get all members of the group
 	members, err := r.Store.Group.GetMembers(ctx, groupName)
 	if err != nil {
-		r.log.WithError(err).Warn("error fetching group members for cleanup")
+		log.WithError(err).Warn("error fetching group members for cleanup")
 		return // Nothing to clean up
 	}
 
 	// Remove the group from each member's user:groups index
+	// Per-operation locking: RemoveGroup is a read-modify-write on a per-user key
 	for _, email := range members {
-		r.log.WithFields(logrus.Fields{
+		log.WithFields(logrus.Fields{
 			"user":  logger.MaskEmail(email),
 			"group": groupName,
 		}).Info("removing group from user's group list during deletion")
-		if err := r.Store.UserGroups.RemoveGroup(ctx, email, groupName); err != nil {
-			r.log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error removing group from user's groups index during deletion")
-			// Continue processing other members
+		r.CacheMutex.Lock()
+		err = r.Store.UserGroups.RemoveGroup(ctx, email, groupName)
+		r.CacheMutex.Unlock()
+		if err != nil {
+			log.WithError(err).WithField("user", logger.MaskEmail(email)).Error("error removing group from user's groups index during deletion")
 		}
 	}
 
-	r.log.WithField("group", groupName).Info("cleaned up user groups index successfully")
+	log.WithField("group", groupName).Info("cleaned up user groups index successfully")
 }
 
-func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
-	r.log.Info("Finalizer: starting Backends team deletion cleanup")
+func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usernautdevv1alpha1.Group, log *logrus.Entry) error {
+	log.Info("Finalizer: starting Backends team deletion cleanup")
 	groupName := groupCR.Spec.GroupName
 
 	for _, backend := range groupCR.Spec.Backends {
 		transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backend.Type, groupName)
 		if err != nil {
-			r.log.WithError(err).Error("Finalizer: Error in transforming group name, skipping TeamStore cleanup")
+			log.WithError(err).Error("Finalizer: Error in transforming group name, skipping TeamStore cleanup")
 			continue
 		}
 
-		backendLoggerInfo := r.log.WithFields(logrus.Fields{
+		backendLoggerInfo := log.WithFields(logrus.Fields{
 			"group_name":             groupName,
 			"transformed_group_name": transformedGroupName,
 			"backend":                backend.Name,
@@ -882,7 +929,6 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		}
 
 		// Get team ID from consolidated group store (using original group name)
-		// NOTE: CacheMutex is already held by caller (handleDeletion)
 		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backend.Name, backend.Type)
 		if err != nil {
 			backendLoggerInfo.WithError(err).Error("Finalizer: error fetching team details from cache")
@@ -907,10 +953,10 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 
 	// Delete the entire group entry from cache (includes all backends and members)
 	if err := r.Store.Group.Delete(ctx, groupName); err != nil {
-		r.log.WithError(err).Error("Finalizer: failed to delete group from cache")
+		log.WithError(err).Error("Finalizer: failed to delete group from cache")
 		return err
 	}
-	r.log.WithField("group", groupName).Info("Finalizer: Successfully deleted group from cache")
+	log.WithField("group", groupName).Info("Finalizer: Successfully deleted group from cache")
 
 	return nil
 }
@@ -918,37 +964,38 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 func (r *GroupReconciler) processUsers(ctx context.Context,
 	groupUsers []string,
 	existingTeamMembers map[string]*structs.User,
-	backendName, backendType string) ([]string, []string, error) {
+	backendName, backendType string,
+	backendLogger *logrus.Entry,
+	allLdapUserData map[string]*structs.LDAPUser) ([]string, []string, error) {
 
 	userIDsToSync := make([]string, 0)
 	usersToAdd := make([]string, 0)
 	usersToRemove := make([]string, 0)
 
 	for _, user := range groupUsers {
-		userDetails := r.allLdapUserData[user]
+		userDetails := allLdapUserData[user]
 		if userDetails == nil {
-			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping processing for this user")
+			backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping processing for this user")
 
 			// we need to check if the user is already in the existing team members
 			if _, exists := existingTeamMembers[user]; exists {
-				r.backendLogger.WithField("user", user).Info("user is already in existing team members, skipping user creation")
+				backendLogger.WithField("user", user).Info("user is already in existing team members, skipping user creation")
 				usersToRemove = append(usersToRemove, user)
 			}
 			continue
 		}
 
-		// NOTE: CacheMutex is already held by caller (Reconcile)
 		// Get user backends from cache
 		userBackends, err := r.Store.User.GetBackends(ctx, userDetails.GetEmail())
 		if err != nil {
-			r.backendLogger.WithError(err).Error("error fetching user details from cache")
+			backendLogger.WithError(err).Error("error fetching user details from cache")
 			return nil, nil, err
 		}
 
 		backendKey := backendName + "_" + backendType
 		userID := userBackends[backendKey]
 		if userID == "" {
-			r.backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
+			backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
 		}
 		userIDsToSync = append(userIDsToSync, userID)
@@ -975,30 +1022,31 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 	users []string,
 	backendName, backendType string,
-	backendClient clients.Client) error {
+	backendClient clients.Client,
+	backendLogger *logrus.Entry,
+	allLdapUserData map[string]*structs.LDAPUser) error {
 
-	// NOTE: CacheMutex is already held by caller (Reconcile)
 	backendKey := backendName + "_" + backendType
 
 	var errs []error
 	for _, user := range users {
-		userDetails := r.allLdapUserData[user]
+		userDetails := allLdapUserData[user]
 		if userDetails == nil {
-			r.backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping user creation")
+			backendLogger.WithField("user", user).Warn("user not found in LDAP data, skipping user creation")
 			continue
 		}
 
 		// Get user backends from cache
 		userBackends, err := r.Store.User.GetBackends(ctx, userDetails.GetEmail())
 		if err != nil {
-			r.backendLogger.WithField("user", user).WithError(err).Error("error fetching user details from cache")
+			backendLogger.WithField("user", user).WithError(err).Error("error fetching user details from cache")
 			errs = append(errs, err)
 			continue
 		}
 
 		// Check if user already has ID for this backend
 		if userID, exists := userBackends[backendKey]; exists && userID != "" {
-			r.backendLogger.WithField("user", user).Debug("user already exists in cache")
+			backendLogger.WithField("user", user).Debug("user already exists in cache")
 			continue
 		}
 
@@ -1012,26 +1060,31 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 			LastName:  utils.StandardizeNameForBackend(userDetails.GetSN()),
 		})
 		if err != nil {
-			r.backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
+			backendLogger.WithField("user", user).WithError(err).Error("error creating user in backend")
 			errs = append(errs, err)
 			continue
 		}
-		r.backendLogger.WithField("user", user).Debug("created user in backend successfully")
+		backendLogger.WithField("user", user).Debug("created user in backend successfully")
 
-		// Update cache with new user ID
-		if err := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, newUser.ID); err != nil {
-			r.backendLogger.Error(err, "error updating user details in cache")
+		// Update cache with new user ID (lock required: SetBackend is a read-modify-write
+		// and concurrent reconciles for different groups may share the same user)
+		r.CacheMutex.Lock()
+		err = r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, newUser.ID)
+		r.CacheMutex.Unlock()
+		if err != nil {
+			backendLogger.Error(err, "error updating user details in cache")
 			errs = append(errs, err)
 			continue
 		}
-		r.backendLogger.WithField("user", user).Debug("updated user details in cache successfully")
+		backendLogger.WithField("user", user).Debug("updated user details in cache successfully")
 	}
 	return errors.Join(errs...)
 }
 
 func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	groupName string, backendClient clients.Client,
-	backendParams *structs.BackendParams) (string, error) {
+	backendParams *structs.BackendParams,
+	backendLogger *logrus.Entry) (string, error) {
 
 	backendName := backendParams.GetName()
 	backendType := backendParams.GetType()
@@ -1039,7 +1092,7 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Get transformed group name for backend API calls (team name in backend system)
 	transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, backendType, groupName)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error transforming the group Name")
+		backendLogger.WithError(err).Error("error transforming the group Name")
 		return "", err
 	}
 
@@ -1048,37 +1101,37 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 	// Step 1: Check GroupStore first (using original group name)
 	teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backendName, backendType)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error fetching team details from GroupStore")
+		backendLogger.WithError(err).Error("error fetching team details from GroupStore")
 		return "", err
 	}
 
 	if teamID != "" {
-		r.backendLogger.WithField("teamID", teamID).Info("team details found in GroupStore")
+		backendLogger.WithField("teamID", teamID).Info("team details found in GroupStore")
 		return teamID, nil
 	}
 
 	// Step 2: Fallback to TeamStore (using transformed name, populated during preload)
 	teamBackends, err := r.Store.Team.GetBackends(ctx, transformedGroupName)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error fetching team details from TeamStore")
+		backendLogger.WithError(err).Error("error fetching team details from TeamStore")
 		return "", err
 	}
 
 	if id, exists := teamBackends[backendKey]; exists && id != "" {
-		r.backendLogger.WithField("teamID", id).Info("team details found in TeamStore, migrating to GroupStore")
+		backendLogger.WithField("teamID", id).Info("team details found in TeamStore, migrating to GroupStore")
 
 		// Migrate data from TeamStore to GroupStore
 		if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, id); err != nil {
-			r.backendLogger.WithError(err).Error("error migrating team details to GroupStore")
+			backendLogger.WithError(err).Error("error migrating team details to GroupStore")
 			return "", err
 		}
 
-		r.backendLogger.Info("successfully migrated team details from TeamStore to GroupStore")
+		backendLogger.Info("successfully migrated team details from TeamStore to GroupStore")
 		return id, nil
 	}
 
 	// Step 3: Team not found in either store, create a new team
-	r.backendLogger.Info("team details not found in cache, creating a new team")
+	backendLogger.Info("team details not found in cache, creating a new team")
 
 	newTeam, err := backendClient.CreateTeam(ctx, &structs.Team{
 		Name:        transformedGroupName, // Use transformed name for backend API
@@ -1086,19 +1139,19 @@ func (r *GroupReconciler) fetchOrCreateTeam(ctx context.Context,
 		Role:        fivetran.AccountReviewerRole,
 	})
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error creating team in backend")
+		backendLogger.WithError(err).Error("error creating team in backend")
 		return "", err
 	}
 
-	r.backendLogger.Info("created team in backend successfully")
+	backendLogger.Info("created team in backend successfully")
 
 	// Store in GroupStore only - TeamStore is populated by preloadCache and used as read-only fallback
 	if err := r.Store.Group.SetBackend(ctx, groupName, backendName, backendType, newTeam.ID); err != nil {
-		r.backendLogger.WithError(err).Error("error updating team details in GroupStore")
+		backendLogger.WithError(err).Error("error updating team details in GroupStore")
 		return "", err
 	}
 
-	r.backendLogger.Info("updated team details in GroupStore successfully")
+	backendLogger.Info("updated team details in GroupStore successfully")
 
 	return newTeam.ID, nil
 }
@@ -1125,7 +1178,7 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		if err := r.List(ctx, &referencingGroups, client.MatchingFields{
 			indexField: group.Name,
 		}); err != nil {
-			r.log.WithError(err).Error("error listing referencing groups")
+			logger.Logger(ctx).WithError(err).Error("error listing referencing groups")
 			return nil
 		}
 
@@ -1142,7 +1195,6 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	}
 
-	// force reconcile flag
 	labelPredicate := controllerutils.ForceReconcilePredicate()
 
 	maxConcurrentReconciles := r.AppConfig.ControllerConfig.MaxConcurrentReconciles
@@ -1150,7 +1202,6 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		maxConcurrentReconciles = 1 // default value
 	}
 
-	// Log the configured concurrency level
 	logger.Logger(context.Background()).WithFields(logrus.Fields{
 		"maxConcurrentReconciles": maxConcurrentReconciles,
 	}).Info("Configuring MaxConcurrentReconciles for Group controller")
@@ -1164,19 +1215,20 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
+			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](2*time.Second, 1000*time.Second),
 		}).
 		Complete(r)
 }
 
 func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName,
-	namespace string, visitedOnPath map[string]struct{}) ([]string, error) {
+	namespace string, visitedOnPath map[string]struct{}, missingGroups *[]string, log *logrus.Entry) ([]string, error) {
 
-	r.log.WithField("group", groupName).Info("fetching group members")
+	log.WithField("group", groupName).Info("fetching group members")
 
 	groupCR := &usernautdevv1alpha1.Group{}
-	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: groupName}, groupCR); err != nil {
 		if !apierrors.IsNotFound(err) {
-			r.log.WithError(err).Error("error fetching the group CR")
+			log.WithError(err).Error("error fetching the group CR")
 		}
 		return nil, err
 	}
@@ -1184,7 +1236,7 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 	// Handle cyclic dependencies for the current recursion path. This is checked only after the
 	// group CR is resolved so that a cycle is reported once, by the namespace holding the group.
 	if _, ok := visitedOnPath[groupName]; ok {
-		r.log.WithField("group", groupName).Warn("cyclic group dependency detected; returning empty member list")
+		log.WithField("group", groupName).Warn("cyclic group dependency detected; returning empty member list")
 		return []string{}, nil
 	}
 	visitedOnPath[groupName] = struct{}{}
@@ -1197,7 +1249,7 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 		foundIn := make([]string, 0, 1)
 		membersToAdd := make([]string, 0)
 		for _, searchNamespace := range r.WatchedNamespaces {
-			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath)
+			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath, missingGroups, log)
 			if err != nil {
 				if apierrors.IsNotFound(err) {
 					continue
@@ -1212,8 +1264,9 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 		// with the same name in different namespaces
 		switch {
 		case len(foundIn) == 0:
-			return nil, fmt.Errorf("no group %s found in namespaces %s",
-				subGroup, strings.Join(r.WatchedNamespaces, ", "))
+			log.WithField("group", subGroup).
+				Warn("no group found in namespaces, skipping group members")
+			*missingGroups = append(*missingGroups, subGroup)
 		case len(foundIn) > 1:
 			return nil, fmt.Errorf("multiple groups %s found in namespaces %s", subGroup, strings.Join(foundIn, ", "))
 		default:
@@ -1237,23 +1290,23 @@ func (r *GroupReconciler) deduplicateMembers(members []string) []string {
 	return uniqueMembers
 }
 
-func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *usernautdevv1alpha1.Group) error {
+func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *usernautdevv1alpha1.Group, log *logrus.Entry) error {
 	// Determine the desired owner references from parent groups
 	desiredOwnerRefs := make(map[types.UID]metav1.OwnerReference)
 	for _, parentGroupName := range groupCR.Spec.Members.Groups {
 		parentGroupCR := &usernautdevv1alpha1.Group{}
-		if err := r.Client.Get(ctx,
+		if err := r.Get(ctx,
 			client.ObjectKey{Namespace: groupCR.Namespace, Name: parentGroupName}, parentGroupCR); err != nil {
 			if apierrors.IsNotFound(err) {
 				// Kubernetes resolves owner references within the namespace of the dependent, and
 				// garbage collects the dependent when the owner is absent there. A group referenced
 				// from another watched namespace therefore cannot own this CR. Membership
 				// resolution reports the reference if it does not exist in any watched namespace.
-				r.log.WithField("group", parentGroupName).
+				log.WithField("group", parentGroupName).
 					Info("referenced group not present in this namespace; skipping owner reference")
 				continue
 			}
-			r.log.WithError(err).Error("error fetching the parent group CR")
+			log.WithError(err).Error("error fetching the parent group CR")
 			return err
 		}
 		blockOwnerDeletion := true
@@ -1303,7 +1356,7 @@ func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *userna
 
 	groupCR.OwnerReferences = newOwnerRefs
 	if err := r.Update(ctx, groupCR); err != nil {
-		r.log.WithError(err).Error("error updating the group CR with owner reference")
+		log.WithError(err).Error("error updating the group CR with owner reference")
 		return err
 	}
 
@@ -1315,18 +1368,19 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 	backendClient clients.Client,
 	groupName string,
 	backends []usernautdevv1alpha1.Backend,
+	backendLogger *logrus.Entry,
 ) (bool, error) {
 	switch backendType {
 	case "gitlab":
 		dependsOn := r.AppConfig.BackendMap["gitlab"][backendName].DependsOn
 
 		if dependsOn.Type == "" && dependsOn.Name == "" {
-			r.backendLogger.Infof("no ldap dependant found for %s backend", dependsOn.Type)
+			backendLogger.Infof("no ldap dependant found for %s backend", dependsOn.Type)
 			return false, nil
 		}
 
 		// Check if the dependent backend exists in cache (using original group name)
-		err := r.ldapDependantChecks(dependsOn, groupName)
+		err := r.ldapDependantChecks(dependsOn, groupName, backendLogger)
 		if err != nil {
 			return false, err
 		}
@@ -1340,13 +1394,13 @@ func (r *GroupReconciler) setupLdapSync(backendType string,
 			return false, errors.New("backend client is not a GitlabClient")
 		}
 		gitlabClient.SetLdapSync(true, groupName)
-		r.backendLogger.Infof("ldap sync setup successfully for %s", backendType)
+		backendLogger.Infof("ldap sync setup successfully for %s", backendType)
 		return true, nil
 	}
 	return false, nil
 }
 
-func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupName string) error {
+func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupName string, backendLogger *logrus.Entry) error {
 	dependantType, ok := r.AppConfig.BackendMap[dependsOn.Type]
 	if !ok {
 		return fmt.Errorf("ldap dependant type %s not found in BackendMap", dependsOn.Type)
@@ -1360,7 +1414,6 @@ func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupN
 	}
 
 	// Check if the group exists in cache with the dependent backend configured
-	// NOTE: This is called without holding CacheMutex (called from ldap sync)
 
 	// First check GroupStore (using original group name)
 	exists, err := r.Store.Group.BackendExists(context.Background(), groupName, dependsOn.Name, dependsOn.Type)
@@ -1371,14 +1424,14 @@ func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupN
 	// Fallback to TeamStore (using transformed name)
 	transformedGroupName, err := utils.GetTransformedGroupName(r.AppConfig, dependsOn.Type, groupName)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error transforming group name for ldap dependant check")
+		backendLogger.WithError(err).Error("error transforming group name for ldap dependant check")
 		return err
 	}
 
 	backendKey := dependsOn.Name + "_" + dependsOn.Type
 	teamBackends, err := r.Store.Team.GetBackends(context.Background(), transformedGroupName)
 	if err != nil {
-		r.backendLogger.WithError(err).Error("error fetching team from TeamStore for ldap dependant check")
+		backendLogger.WithError(err).Error("error fetching team from TeamStore for ldap dependant check")
 		return err
 	}
 
@@ -1386,7 +1439,7 @@ func (r *GroupReconciler) ldapDependantChecks(dependsOn config.Dependant, groupN
 		return nil
 	}
 
-	r.backendLogger.Error("dependent backend not found in cache for group, skipping ldap sync")
+	backendLogger.Error("dependent backend not found in cache for group, skipping ldap sync")
 	return fmt.Errorf("dependent backend %s not found in cache for group %s", backendKey, groupName)
 }
 

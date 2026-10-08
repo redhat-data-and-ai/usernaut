@@ -18,7 +18,7 @@ var standardizeNameReplacer = strings.NewReplacer(".", " ", "(", " ", ")", " ", 
 // target must be a pointer to a struct
 func MapToStruct(data map[string]interface{}, target interface{}) error {
 	targetValue := reflect.ValueOf(target)
-	if targetValue.Kind() != reflect.Ptr {
+	if targetValue.Kind() != reflect.Pointer {
 		return errors.New("target must be a pointer to a struct")
 	}
 

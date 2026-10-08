@@ -28,7 +28,7 @@ import (
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 )
 
-// CRD CEL on spec.members (see api/v1alpha1/group_types.go): users must be non-empty when ldap_query is omitted.
+// CRD CEL on spec.members (see api/v1alpha1/group_types.go): at least one of ldap_query, non-empty users, or non-empty groups must be provided.
 var _ = Describe("Group spec.members validation", func() {
 	ctx := context.Background()
 
@@ -59,8 +59,7 @@ var _ = Describe("Group spec.members validation", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/members): %v", err)
 		msg := err.Error()
-		Expect(strings.Contains(msg, "users must be a non-empty list when ldap_query is omitted") ||
-			strings.Contains(msg, "ldap_query is omitted")).To(BeTrue(), "unexpected error: %v", err)
+		Expect(strings.Contains(msg, "users or groups must be a non-empty list when ldap_query is omitted")).To(BeTrue(), "unexpected error: %v", err)
 	}
 
 	It("rejects members with no ldap_query and empty users list", func() {
@@ -71,12 +70,21 @@ var _ = Describe("Group spec.members validation", func() {
 		expectInvalidMembers(k8sClient.Create(ctx, g))
 	})
 
-	It("rejects members with no ldap_query and users omitted", func() {
-		name := "group-members-reject-no-users-field"
+	It("rejects members with no ldap_query, users, or groups", func() {
+		name := "group-members-reject-all-empty"
+		g := newGroup(name, usernautdevv1alpha1.Members{})
+		expectInvalidMembers(k8sClient.Create(ctx, g))
+	})
+
+	It("accepts non-empty groups without users or ldap_query", func() {
+		name := "group-members-accept-groups-only"
 		g := newGroup(name, usernautdevv1alpha1.Members{
 			Groups: []string{"some-group"},
 		})
-		expectInvalidMembers(k8sClient.Create(ctx, g))
+		Expect(k8sClient.Create(ctx, g)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, g)
+		})
 	})
 
 	It("accepts ldap_query with no users (query-only membership)", func() {

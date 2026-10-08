@@ -30,8 +30,8 @@ import (
 
 func (g *GitlabClient) FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 	})
 	log.Info("fetching team members by team ID")
 
@@ -52,9 +52,9 @@ func (g *GitlabClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 
 func (g *GitlabClient) AddUserToTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"teamID":  teamID,
-		"userIDs": userIDs,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
+		"userIDs":     userIDs,
 	})
 	log.Info("adding users to team")
 
@@ -85,9 +85,9 @@ func (g *GitlabClient) AddUserToTeam(ctx context.Context, teamID string, userIDs
 
 func (g *GitlabClient) RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "gitlab",
-		"teamID":  teamID,
-		"userIDs": userIDs,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
+		"userIDs":     userIDs,
 	})
 	log.Info("removing users from team")
 
@@ -113,8 +113,8 @@ func (g *GitlabClient) RemoveUserFromTeam(ctx context.Context, teamID string, us
 
 func (g *GitlabClient) ReconcileGroupParams(ctx context.Context, teamID string, groupParams structs.TeamParams) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":     "gitlab",
-		"teamID":      teamID,
+		logKeyService: serviceName,
+		logKeyTeamID:  teamID,
 		"groupParams": groupParams,
 	})
 	log.Info("reconciling group params")

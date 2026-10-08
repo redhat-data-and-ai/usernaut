@@ -34,7 +34,7 @@ var errGroupNotFound = errors.New("group not found")
 // FetchAllTeams retrieves all SCIM groups from Preset
 func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
+		logKeyService: serviceName,
 	})
 	log.Info("fetching all SCIM groups from Preset")
 
@@ -80,8 +80,8 @@ func (pc *PresetClient) FetchAllTeams(ctx context.Context) (map[string]structs.T
 // FetchTeamDetails retrieves a specific SCIM group by ID.
 func (pc *PresetClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 	log.Info("fetching SCIM group details from Preset")
 
@@ -113,8 +113,8 @@ func scimGroupToTeam(g *scimGroup) *structs.Team {
 // If a group with the same displayName already exists, returns the existing group.
 func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":   "preset",
-		"team_name": team.Name,
+		logKeyService: serviceName,
+		"team_name":   team.Name,
 	})
 	log.Info("creating SCIM group in Preset")
 
@@ -164,8 +164,8 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 // DeleteTeamByID deletes a SCIM group by its ID
 func (pc *PresetClient) DeleteTeamByID(ctx context.Context, teamID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "preset",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 	log.Info("deleting SCIM group from Preset")
 
@@ -186,8 +186,8 @@ func (pc *PresetClient) DeleteTeamByID(ctx context.Context, teamID string) error
 
 func (pc *PresetClient) findGroupByDisplayName(ctx context.Context, displayName string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":   "preset",
-		"team_name": displayName,
+		logKeyService: serviceName,
+		"team_name":   displayName,
 	})
 
 	filter := fmt.Sprintf(`displayName eq "%s"`, escapeSCIMLiteral(displayName))
