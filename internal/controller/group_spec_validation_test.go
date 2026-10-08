@@ -168,13 +168,63 @@ var _ = Describe("Group spec validation", func() {
 						Key:      "manager",
 						Criteria: "equals",
 						Value:    "pbhattac",
-						Options: &usernautv1alpha1.LDAPOptions{
+						Options: &usernautv1alpha1.LDAPFilterOptions{
 							IncludeIndirectReports: true,
 						},
 					},
 				},
 			}
 			Expect(validateLDAPQuery(query)).NotTo(HaveOccurred())
+		})
+
+		It("allows includeOnlyManagers with include_indirect_reports", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "equals",
+						Value:    "pbhattac",
+						Options: &usernautv1alpha1.LDAPFilterOptions{
+							IncludeIndirectReports: true,
+							IncludeOnlyManagers:    true,
+						},
+					},
+				},
+			}
+			Expect(validateLDAPQuery(query)).NotTo(HaveOccurred())
+		})
+
+		It("rejects root includeOnlyManagers without includeIndirectReports", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Options:  &usernautv1alpha1.LDAPQueryOptions{IncludeOnlyManagers: true},
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{Key: "manager", Criteria: "equals", Value: "pbhattac"},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("includeOnlyManagers is only allowed when includeIndirectReports is true"))
+		})
+
+		It("rejects includeOnlyManagers without include_indirect_reports", func() {
+			query := &usernautv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "equals",
+						Value:    "pbhattac",
+						Options: &usernautv1alpha1.LDAPFilterOptions{
+							IncludeOnlyManagers: true,
+						},
+					},
+				},
+			}
+			err := validateLDAPQuery(query)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("includeOnlyManagers is only allowed when include_indirect_reports is true"))
 		})
 
 		It("rejects options on a non-manager filter", func() {
@@ -185,7 +235,7 @@ var _ = Describe("Group spec validation", func() {
 						Key:      "title",
 						Criteria: "contains",
 						Value:    "engineer",
-						Options:  &usernautv1alpha1.LDAPOptions{IncludeIndirectReports: true},
+						Options:  &usernautv1alpha1.LDAPFilterOptions{IncludeIndirectReports: true},
 					},
 				},
 			}
@@ -204,7 +254,7 @@ var _ = Describe("Group spec validation", func() {
 							Operator: "or",
 							Filters: []usernautv1alpha1.LDAPFilter{
 								{
-									Options: &usernautv1alpha1.LDAPOptions{IncludeManager: true},
+									Options: &usernautv1alpha1.LDAPFilterOptions{IncludeManagers: true},
 									LDAPQuery: &usernautv1alpha1.LDAPQuery{
 										Operator: "and",
 										Filters: []usernautv1alpha1.LDAPFilter{
@@ -235,7 +285,7 @@ var _ = Describe("Group spec validation", func() {
 									Key:      "manager",
 									Criteria: "equals",
 									Value:    "mgrAlpha",
-									Options:  &usernautv1alpha1.LDAPOptions{IncludeIndirectReports: true},
+									Options:  &usernautv1alpha1.LDAPFilterOptions{IncludeIndirectReports: true},
 								},
 							},
 						},

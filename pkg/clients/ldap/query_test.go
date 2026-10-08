@@ -636,9 +636,9 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ManagerOptionsIgnoredInFi
 				Key:      "manager",
 				Criteria: "equals",
 				Value:    "mgrAlpha",
-				Options: &v1alpha1.LDAPOptions{
+				Options: &v1alpha1.LDAPFilterOptions{
 					IncludeIndirectReports: true,
-					IncludeManager:         true,
+					IncludeManagers:        true,
 				},
 			},
 		},
@@ -663,7 +663,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NonManagerOptionsIgnoredI
 				Key:      "title",
 				Criteria: "contains",
 				Value:    "engineer",
-				Options: &v1alpha1.LDAPOptions{
+				Options: &v1alpha1.LDAPFilterOptions{
 					IncludeIndirectReports: true,
 				},
 			},
@@ -686,7 +686,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedQueryItemOptionsIgn
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				Options: &v1alpha1.LDAPOptions{IncludeManager: true},
+				Options: &v1alpha1.LDAPFilterOptions{IncludeManagers: true},
 				LDAPQuery: &v1alpha1.LDAPQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{

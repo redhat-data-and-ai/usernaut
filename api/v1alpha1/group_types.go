@@ -54,7 +54,7 @@ type LDAPFilter struct {
 	Value string `json:"value,omitempty"`
 	// Options is only valid when key is manager.
 	// +optional
-	Options *LDAPOptions `json:"options,omitempty"`
+	Options *LDAPFilterOptions `json:"options,omitempty"`
 	// +optional
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:pruning:PreserveUnknownFields
@@ -62,16 +62,41 @@ type LDAPFilter struct {
 }
 
 type LDAPQuery struct {
+	// Options are query-level defaults. includeManagers, includeOnlyManagers, and
+	// includeIndirectReports apply to manager filters that omit options.
+	// includeOnlyManagersOfMembers is query-level only.
+	// +optional
+	Options *LDAPQueryOptions `json:"options,omitempty"`
 	// +kubebuilder:validation:Enum=and;or
 	Operator string `json:"operator"`
 	// +kubebuilder:validation:MinItems=1
 	Filters []LDAPFilter `json:"filters"`
 }
 
-// LDAPOptions applies to a manager filter. Missing or false fields are treated as disabled.
-type LDAPOptions struct {
+// LDAPQueryOptions are root ldap_query options.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.includeOnlyManagers) || self.includeIndirectReports",message="includeOnlyManagers is only allowed when includeIndirectReports is true"
+type LDAPQueryOptions struct {
+	IncludeIndirectReports bool `json:"includeIndirectReports,omitempty"`
+	IncludeManagers        bool `json:"includeManagers,omitempty"`
+	IncludeOnlyManagers    bool `json:"includeOnlyManagers,omitempty"`
+	// IncludeOnlyManagersOfMembers adds each resolved member's manager (from LDAP).
+	// +optional
+	IncludeOnlyManagersOfMembers bool `json:"includeOnlyManagersOfMembers,omitempty"`
+}
+
+// LDAPFilterOptions applies to a manager filter. Missing or false fields are treated as disabled.
+// When a manager filter omits options, includeIndirectReports, includeManagers, and
+// includeOnlyManagers fall back to the enclosing ldap_query.options values.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.includeOnlyManagers) || self.include_indirect_reports",message="includeOnlyManagers is only allowed when include_indirect_reports is true"
+type LDAPFilterOptions struct {
 	IncludeIndirectReports bool `json:"include_indirect_reports,omitempty"`
-	IncludeManager         bool `json:"include_manager,omitempty"`
+	IncludeManagers        bool `json:"includeManagers,omitempty"`
+	// IncludeOnlyManagers keeps people in the org tree who have reports (managers),
+	// dropping individual contributors. Valid only when include_indirect_reports is true.
+	// +optional
+	IncludeOnlyManagers bool `json:"includeOnlyManagers,omitempty"`
 }
 
 // GroupSpec defines the desired state of Group

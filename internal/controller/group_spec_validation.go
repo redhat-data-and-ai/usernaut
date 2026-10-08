@@ -97,6 +97,9 @@ func validateLDAPQueryAt(query *usernautv1alpha1.LDAPQuery, path string, depth i
 	if len(query.Filters) == 0 {
 		return fmt.Errorf("%s: filters are empty", path)
 	}
+	if query.Options != nil && query.Options.IncludeOnlyManagers && !query.Options.IncludeIndirectReports {
+		return fmt.Errorf("%s: includeOnlyManagers is only allowed when includeIndirectReports is true", path)
+	}
 
 	for i, filter := range query.Filters {
 		filterPath := fmt.Sprintf("%s.filters[%d]", path, i)
@@ -120,6 +123,9 @@ func validateLDAPFilter(filter usernautv1alpha1.LDAPFilter, path string, depth i
 
 	if filter.Options != nil && !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
 		return fmt.Errorf("%s: options is only allowed when key is manager", path)
+	}
+	if filter.Options != nil && filter.Options.IncludeOnlyManagers && !filter.Options.IncludeIndirectReports {
+		return fmt.Errorf("%s: includeOnlyManagers is only allowed when include_indirect_reports is true", path)
 	}
 
 	if hasNested {

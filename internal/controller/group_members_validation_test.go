@@ -121,6 +121,28 @@ var _ = Describe("Group spec.members validation", func() {
 		})
 	})
 
+	It("accepts root ldap_query options", func() {
+		name := "group-members-accept-query-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Options: &usernautdevv1alpha1.LDAPQueryOptions{
+					IncludeIndirectReports:       true,
+					IncludeManagers:              true,
+					IncludeOnlyManagers:          true,
+					IncludeOnlyManagersOfMembers: true,
+				},
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{Key: "manager", Criteria: "equals", Value: "jsmith"},
+				},
+			},
+		})
+		Expect(k8sClient.Create(ctx, g)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, g)
+		})
+	})
+
 	It("accepts options on a manager filter", func() {
 		name := "group-members-accept-manager-options"
 		g := newGroup(name, usernautdevv1alpha1.Members{
@@ -131,9 +153,9 @@ var _ = Describe("Group spec.members validation", func() {
 						Key:      "manager",
 						Criteria: "equals",
 						Value:    "jsmith",
-						Options: &usernautdevv1alpha1.LDAPOptions{
+						Options: &usernautdevv1alpha1.LDAPFilterOptions{
 							IncludeIndirectReports: true,
-							IncludeManager:         true,
+							IncludeManagers:        true,
 						},
 					},
 				},
@@ -143,6 +165,53 @@ var _ = Describe("Group spec.members validation", func() {
 		DeferCleanup(func() {
 			_ = k8sClient.Delete(ctx, g)
 		})
+	})
+
+	It("accepts includeOnlyManagers with include_indirect_reports", func() {
+		name := "group-members-accept-only-managers"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "equals",
+						Value:    "jsmith",
+						Options: &usernautdevv1alpha1.LDAPFilterOptions{
+							IncludeIndirectReports: true,
+							IncludeOnlyManagers:    true,
+						},
+					},
+				},
+			},
+		})
+		Expect(k8sClient.Create(ctx, g)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, g)
+		})
+	})
+
+	It("rejects includeOnlyManagers without include_indirect_reports", func() {
+		name := "group-members-reject-only-managers"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "equals",
+						Value:    "jsmith",
+						Options: &usernautdevv1alpha1.LDAPFilterOptions{
+							IncludeOnlyManagers: true,
+						},
+					},
+				},
+			},
+		})
+		err := k8sClient.Create(ctx, g)
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/includeOnlyManagers): %v", err)
+		Expect(err.Error()).To(ContainSubstring("includeOnlyManagers is only allowed when include_indirect_reports is true"))
 	})
 
 	It("rejects options on a non-manager filter", func() {
@@ -155,7 +224,7 @@ var _ = Describe("Group spec.members validation", func() {
 						Key:      "title",
 						Criteria: "contains",
 						Value:    "engineer",
-						Options: &usernautdevv1alpha1.LDAPOptions{
+						Options: &usernautdevv1alpha1.LDAPFilterOptions{
 							IncludeIndirectReports: true,
 						},
 					},
