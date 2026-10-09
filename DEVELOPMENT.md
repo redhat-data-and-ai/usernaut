@@ -264,14 +264,20 @@ spec:
       - "dataverse-platform-admin"
     # Optional: LDAP query to resolve members dynamically
     ldap_query:
-      options:    # Optional LDAP query options
-        include_indirect_reports: false
+      options:  # defaults when a manager filter omits options
+        include_indirect_reports: true
         include_manager: false
+        include_only_managers: true
+        include_only_managers_of_members: false
       operator: and   # "and" or "or"
       filters:
         - key: manager       # See below for all possible keys
           criteria: equals   # equals | contains | not
           value: "jsmith"    # for key=manager, use user ID only (expanded to uid=value,baseUserDN)
+          options:           # only valid when key is manager
+            include_indirect_reports: true
+            include_manager: false
+            include_only_managers: true   # requires include_indirect_reports; keeps managers, drops ICs
         - key: title
           criteria: contains
           value: "engineer"
@@ -306,9 +312,9 @@ status:
 | `GroupSpec`   | Desired state: group name, members, target backends                         |
 | `GroupStatus` | Observed state: reconciled users, conditions, backend statuses             |
 | `Members`     | `users` (direct), `groups` (nested), `ldap_query` (optional) |
-| `LDAPQuery`   | `options` (optional), `operator` (`and` or `or`) and `filters` (array of LDAPFilter)              |
-| `LDAPFilter`  | `key` (LDAP attribute name), `criteria` (`equals`, `contains`, `not`), `value`. See **Valid filter keys** below. For `key=manager`, use user ID only (username); it is expanded to full DN. |
-| `LDAPOptions` | `include_indirect_reports` (bool, optional), `include_manager` (bool, optional) |
+| `LDAPQuery`   | `operator` (`and` or `or`), `filters`, optional `options` (`include_indirect_reports`, `include_manager`, `include_only_managers`, `include_only_managers_of_members`). The first three are defaults for manager filters that omit `options`. |
+| `LDAPFilter`  | `key` (LDAP attribute name), `criteria` (`equals`, `contains`, `not`), `value`, optional `options` (only when `key` is `manager`). See **Valid filter keys** below. For `key=manager`, use user ID only (username); it is expanded to full DN. |
+| `LDAPFilterOptions` | Per manager filter: `include_indirect_reports`, `include_manager`, `include_only_managers` (bool, optional). `include_only_managers` is valid only with `include_indirect_reports` and keeps people in the org tree who have reports. |
 | `Backend`     | Backend identifier with `name` and `type`                                   |
 
 **Valid filter keys** (LDAP attribute names supported in `ldap_query.filters[].key`):
@@ -331,7 +337,7 @@ status:
 | `rhatOfficeFloor`    | Office Floor       |
 | `roomNumber`         | Desk Number        |
 
-Members from `ldap_query` are resolved at reconcile time via LDAP search and merged with `users` and nested `groups` (after cycle-aware expansion). For **`key=manager`**, always use just the **user ID** (username) as `value`; the controller expands it to `uid=<value>,<baseUserDN>` when building the LDAP filter. For other keys, use the literal attribute value.
+Members from `ldap_query` are resolved at reconcile time via LDAP search and merged with `users` and nested `groups` (after cycle-aware expansion). For **`key=manager`**, always use just the **user ID** (username) as `value`; the controller expands it to `uid=<value>,<baseUserDN>` when building the LDAP filter. Manager-filter `options` override query-level `ldap_query.options` when present; if a manager filter omits `options`, `include_indirect_reports`, `include_manager`, and `include_only_managers` fall back to the query-level values. `include_only_managers_of_members` is query-level only and adds each resolved member's LDAP manager. `include_only_managers` requires `include_indirect_reports`. For other keys, use the literal attribute value.
 
 ---
 

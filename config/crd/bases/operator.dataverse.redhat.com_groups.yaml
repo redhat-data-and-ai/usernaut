@@ -94,6 +94,9 @@ spec:
                     properties:
                       filters:
                         items:
+                          description: |-
+                            LDAPFilter is a single LDAP filter item. Options may be set only when key is manager.
+                            Nested ldap_query is schemaless, so CEL cannot check it; the query builder rejects options on nested items.
                           properties:
                             criteria:
                               enum:
@@ -121,9 +124,30 @@ spec:
                               type: string
                             ldap_query:
                               x-kubernetes-preserve-unknown-fields: true
+                            options:
+                              description: Options is only valid when key is manager.
+                              properties:
+                                include_indirect_reports:
+                                  type: boolean
+                                include_manager:
+                                  type: boolean
+                                include_only_managers:
+                                  description: |-
+                                    IncludeOnlyManagers keeps people in the org tree who have reports (managers),
+                                    dropping individual contributors. Valid only when include_indirect_reports is true.
+                                  type: boolean
+                              type: object
+                              x-kubernetes-validations:
+                              - message: include_only_managers is only allowed when
+                                  include_indirect_reports is true
+                                rule: '!has(self.include_only_managers) || self.include_indirect_reports'
                             value:
                               type: string
                           type: object
+                          x-kubernetes-validations:
+                          - message: options is only allowed when key is manager
+                            rule: '!has(self.options) || (has(self.key) && self.key
+                              == ''manager'')'
                         minItems: 1
                         type: array
                       operator:
@@ -132,12 +156,33 @@ spec:
                         - or
                         type: string
                       options:
+                        description: |-
+                          Options are query-level defaults. include_manager, include_only_managers, and
+                          include_indirect_reports apply to manager filters that omit options.
+                          include_only_managers_of_members is query-level only.
                         properties:
                           include_indirect_reports:
+                            description: |-
+                              IncludeIndirectReports includes people in the org tree who are reportees of managers
+                              recursively.
                             type: boolean
                           include_manager:
+                            description: IncludeManager keeps people in the org tree
+                              who are managers along with their reportees.
+                            type: boolean
+                          include_only_managers:
+                            description: IncludeOnlyManagers keeps people in the org
+                              tree who are managers.
+                            type: boolean
+                          include_only_managers_of_members:
+                            description: IncludeOnlyManagersOfMembers adds each resolved
+                              member's manager (from LDAP).
                             type: boolean
                         type: object
+                        x-kubernetes-validations:
+                        - message: include_only_managers is only allowed when include_indirect_reports
+                            is true
+                          rule: '!has(self.include_only_managers) || self.include_indirect_reports'
                     required:
                     - filters
                     - operator
