@@ -134,14 +134,19 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	if err := validateLDAPQuery(groupCR.Spec.Members.LDAPQuery); err != nil {
-		log.WithError(err).Warn("ldap_query validation failed")
-		groupCR.UpdateStatusWithErrMessage(err.Error())
-		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
-			log.WithError(statusErr).Error("error updating status after ldap_query validation failure")
-			return ctrl.Result{}, statusErr
+	if q := groupCR.Spec.Members.LDAPQuery; q != nil {
+		if err := validateLDAPNestedQuery(&usernautdevv1alpha1.LDAPNestedQuery{
+			Operator: q.Operator,
+			Filters:  q.Filters,
+		}, "spec.members.ldap_query", 1); err != nil {
+			log.WithError(err).Warn("ldap_query validation failed")
+			groupCR.UpdateStatusWithErrMessage(err.Error())
+			if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+				log.WithError(statusErr).Error("error updating status after ldap_query validation failure")
+				return ctrl.Result{}, statusErr
+			}
+			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, nil
 	}
 
 	// set owner reference to the group CR
@@ -265,7 +270,7 @@ type LDAPFetchResult struct {
 // include_indirect_reports, recursively expands each member's reports (people who
 // report to them) and returns the combined set. visited tracks UIDs already expanded to
 // avoid cycles; pass nil for the top-level call (a new map is allocated).
-// When includeOnlyManagers is set, the returned set is people in that tree who have reports.
+// When include_only_managers is set, the returned set is people in that tree who have reports.
 func (r *GroupReconciler) fetchQueryMembers(
 	ctx context.Context,
 	query *usernautdevv1alpha1.LDAPQuery,
@@ -401,7 +406,7 @@ func replaceManagerInFilters(
 	seenManagers := make(map[string]struct{})
 	for _, filter := range filters {
 		if filter.LDAPQuery != nil {
-			nested := replaceManagerInQuery(filter.LDAPQuery, managerUID, inherited)
+			nested := replaceManagerInNestedQuery(filter.LDAPQuery, managerUID, inherited)
 			result = append(result, usernautdevv1alpha1.LDAPFilter{
 				LDAPQuery: nested,
 			})
@@ -425,18 +430,17 @@ func replaceManagerInFilters(
 	return result
 }
 
-func replaceManagerInQuery(
-	query *usernautdevv1alpha1.LDAPQuery,
+func replaceManagerInNestedQuery(
+	query *usernautdevv1alpha1.LDAPNestedQuery,
 	managerUID string,
 	inherited *usernautdevv1alpha1.LDAPQueryOptions,
-) *usernautdevv1alpha1.LDAPQuery {
+) *usernautdevv1alpha1.LDAPNestedQuery {
 	if query == nil {
 		return nil
 	}
-	return &usernautdevv1alpha1.LDAPQuery{
+	return &usernautdevv1alpha1.LDAPNestedQuery{
 		Operator: query.Operator,
-		Filters:  replaceManagerInFilters(query.Filters, managerUID, coalesceQueryOptions(query.Options, inherited)),
-		Options:  query.Options,
+		Filters:  replaceManagerInFilters(query.Filters, managerUID, inherited),
 	}
 }
 
@@ -457,13 +461,6 @@ func isManagerFilter(filter usernautdevv1alpha1.LDAPFilter) bool {
 	return strings.EqualFold(strings.TrimSpace(filter.Key), "manager")
 }
 
-func coalesceQueryOptions(queryOpts, inherited *usernautdevv1alpha1.LDAPQueryOptions) *usernautdevv1alpha1.LDAPQueryOptions {
-	if queryOpts != nil {
-		return queryOpts
-	}
-	return inherited
-}
-
 func managerFilterHasIndirectReports(filter usernautdevv1alpha1.LDAPFilter, inherited *usernautdevv1alpha1.LDAPQueryOptions) bool {
 	if !isManagerFilter(filter) {
 		return false
@@ -479,9 +476,9 @@ func managerFilterHasIncludeManagers(filter usernautdevv1alpha1.LDAPFilter, inhe
 		return false
 	}
 	if filter.Options != nil {
-		return filter.Options.IncludeManagers
+		return filter.Options.IncludeManager
 	}
-	return inherited != nil && inherited.IncludeManagers
+	return inherited != nil && inherited.IncludeManager
 }
 
 func managerFilterHasOnlyManagers(filter usernautdevv1alpha1.LDAPFilter, inherited *usernautdevv1alpha1.LDAPQueryOptions) bool {
@@ -513,7 +510,7 @@ func filtersHaveOnlyManagers(filters []usernautdevv1alpha1.LDAPFilter, inherited
 		if managerFilterHasOnlyManagers(filter, inherited) {
 			return true
 		}
-		if filter.LDAPQuery != nil && filtersHaveOnlyManagers(filter.LDAPQuery.Filters, coalesceQueryOptions(filter.LDAPQuery.Options, inherited)) {
+		if filter.LDAPQuery != nil && filtersHaveOnlyManagers(filter.LDAPQuery.Filters, inherited) {
 			return true
 		}
 	}
@@ -525,7 +522,7 @@ func filtersHaveIndirectReports(filters []usernautdevv1alpha1.LDAPFilter, inheri
 		if managerFilterHasIndirectReports(filter, inherited) {
 			return true
 		}
-		if filter.LDAPQuery != nil && filtersHaveIndirectReports(filter.LDAPQuery.Filters, coalesceQueryOptions(filter.LDAPQuery.Options, inherited)) {
+		if filter.LDAPQuery != nil && filtersHaveIndirectReports(filter.LDAPQuery.Filters, inherited) {
 			return true
 		}
 	}
@@ -537,7 +534,7 @@ func filtersHaveManager(filters []usernautdevv1alpha1.LDAPFilter) bool {
 		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
 			return true
 		}
-		if filter.LDAPQuery != nil && queryHasManagerFilter(filter.LDAPQuery) {
+		if filter.LDAPQuery != nil && filtersHaveManager(filter.LDAPQuery.Filters) {
 			return true
 		}
 	}
@@ -553,7 +550,7 @@ func queryHasManagerFilter(query *usernautdevv1alpha1.LDAPQuery) bool {
 }
 
 // extractManagerUIDsFromQuery returns unique manager UIDs from manager filters that have
-// includeManagers set, anywhere in the query tree.
+// include_manager set, anywhere in the query tree.
 func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string {
 	if query == nil {
 		return []string{}
@@ -572,7 +569,7 @@ func collectManagerUIDsFromFilters(
 ) {
 	for _, filter := range filters {
 		if filter.LDAPQuery != nil {
-			collectManagerUIDsFromFilters(filter.LDAPQuery.Filters, coalesceQueryOptions(filter.LDAPQuery.Options, inherited), seen, result)
+			collectManagerUIDsFromFilters(filter.LDAPQuery.Filters, inherited, seen, result)
 			continue
 		}
 		if !managerFilterHasIncludeManagers(filter, inherited) {

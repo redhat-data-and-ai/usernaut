@@ -25,6 +25,16 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 )
 
+func validateRootLDAPQueryForTest(query *usernautv1alpha1.LDAPQuery) error {
+	if query == nil {
+		return nil
+	}
+	return validateLDAPNestedQuery(&usernautv1alpha1.LDAPNestedQuery{
+		Operator: query.Operator,
+		Filters:  query.Filters,
+	}, "spec.members.ldap_query", 1)
+}
+
 var _ = Describe("Group spec validation", func() {
 	const (
 		aifNamespace      = "ddis-asteroid--usernaut-aif-rhplatformtest"
@@ -155,9 +165,9 @@ var _ = Describe("Group spec validation", func() {
 		})
 	})
 
-	Describe("validateLDAPQuery", func() {
+	Describe("validateLDAPNestedQuery", func() {
 		It("allows a nil query", func() {
-			Expect(validateLDAPQuery(nil)).NotTo(HaveOccurred())
+			Expect(validateRootLDAPQueryForTest(nil)).NotTo(HaveOccurred())
 		})
 
 		It("allows options on a manager filter", func() {
@@ -174,10 +184,10 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			Expect(validateLDAPQuery(query)).NotTo(HaveOccurred())
+			Expect(validateRootLDAPQueryForTest(query)).NotTo(HaveOccurred())
 		})
 
-		It("allows includeOnlyManagers with include_indirect_reports", func() {
+		It("allows include_only_managers with include_indirect_reports", func() {
 			query := &usernautv1alpha1.LDAPQuery{
 				Operator: "and",
 				Filters: []usernautv1alpha1.LDAPFilter{
@@ -192,23 +202,10 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			Expect(validateLDAPQuery(query)).NotTo(HaveOccurred())
+			Expect(validateRootLDAPQueryForTest(query)).NotTo(HaveOccurred())
 		})
 
-		It("rejects root includeOnlyManagers without includeIndirectReports", func() {
-			query := &usernautv1alpha1.LDAPQuery{
-				Operator: "and",
-				Options:  &usernautv1alpha1.LDAPQueryOptions{IncludeOnlyManagers: true},
-				Filters: []usernautv1alpha1.LDAPFilter{
-					{Key: "manager", Criteria: "equals", Value: "pbhattac"},
-				},
-			}
-			err := validateLDAPQuery(query)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("includeOnlyManagers is only allowed when includeIndirectReports is true"))
-		})
-
-		It("rejects includeOnlyManagers without include_indirect_reports", func() {
+		It("rejects include_only_managers without include_indirect_reports", func() {
 			query := &usernautv1alpha1.LDAPQuery{
 				Operator: "and",
 				Filters: []usernautv1alpha1.LDAPFilter{
@@ -222,9 +219,9 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("includeOnlyManagers is only allowed when include_indirect_reports is true"))
+			Expect(err.Error()).To(ContainSubstring("include_only_managers is only allowed when include_indirect_reports is true"))
 		})
 
 		It("rejects options on a non-manager filter", func() {
@@ -239,7 +236,7 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("spec.members.ldap_query.filters[0]"))
 			Expect(err.Error()).To(ContainSubstring("options is only allowed when key is manager"))
@@ -250,12 +247,12 @@ var _ = Describe("Group spec validation", func() {
 				Operator: "and",
 				Filters: []usernautv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautv1alpha1.LDAPFilter{
 								{
-									Options: &usernautv1alpha1.LDAPFilterOptions{IncludeManagers: true},
-									LDAPQuery: &usernautv1alpha1.LDAPQuery{
+									Options: &usernautv1alpha1.LDAPFilterOptions{IncludeManager: true},
+									LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{
 										Operator: "and",
 										Filters: []usernautv1alpha1.LDAPFilter{
 											{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
@@ -267,7 +264,7 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("spec.members.ldap_query.filters[0].ldap_query.filters[0]"))
 			Expect(err.Error()).To(ContainSubstring("options is only allowed when key is manager"))
@@ -278,7 +275,7 @@ var _ = Describe("Group spec validation", func() {
 				Operator: "or",
 				Filters: []usernautv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{
 							Operator: "and",
 							Filters: []usernautv1alpha1.LDAPFilter{
 								{
@@ -292,7 +289,7 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			Expect(validateLDAPQuery(query)).NotTo(HaveOccurred())
+			Expect(validateRootLDAPQueryForTest(query)).NotTo(HaveOccurred())
 		})
 
 		It("rejects an invalid nested operator", func() {
@@ -300,7 +297,7 @@ var _ = Describe("Group spec validation", func() {
 				Operator: "and",
 				Filters: []usernautv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{
 							Operator: "xor",
 							Filters: []usernautv1alpha1.LDAPFilter{
 								{Key: "co", Criteria: "equals", Value: "US"},
@@ -309,7 +306,7 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("spec.members.ldap_query.filters[0].ldap_query"))
 			Expect(err.Error()).To(ContainSubstring(`unsupported operator "xor"`))
@@ -320,14 +317,14 @@ var _ = Describe("Group spec validation", func() {
 				Operator: "and",
 				Filters: []usernautv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters:  nil,
 						},
 					},
 				},
 			}
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("filters are empty"))
 		})
@@ -337,21 +334,21 @@ var _ = Describe("Group spec validation", func() {
 				Operator: "and",
 				Filters: []usernautv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautv1alpha1.LDAPFilter{
 								{
 									Key:       "title",
 									Criteria:  "contains",
 									Value:     "engineer",
-									LDAPQuery: &usernautv1alpha1.LDAPQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{Key: "co", Criteria: "equals", Value: "US"}}},
+									LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{Key: "co", Criteria: "equals", Value: "US"}}},
 								},
 							},
 						},
 					},
 				},
 			}
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("cannot have both key/criteria/value and ldap_query"))
 		})
@@ -361,7 +358,7 @@ var _ = Describe("Group spec validation", func() {
 				Operator: "and",
 				Filters: []usernautv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautv1alpha1.LDAPFilter{
 								{Key: "mail", Criteria: "equals", Value: "user@example.com"},
@@ -370,22 +367,22 @@ var _ = Describe("Group spec validation", func() {
 					},
 				},
 			}
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring(`unsupported filter key "mail"`))
 		})
 
 		It("rejects nesting that exceeds max depth", func() {
-			level4 := &usernautv1alpha1.LDAPQuery{
+			level4 := &usernautv1alpha1.LDAPNestedQuery{
 				Operator: "and",
 				Filters:  []usernautv1alpha1.LDAPFilter{{Key: "co", Criteria: "equals", Value: "US"}},
 			}
-			level3 := &usernautv1alpha1.LDAPQuery{Operator: "or", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level4}}}
-			level2 := &usernautv1alpha1.LDAPQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level3}}}
-			level1 := &usernautv1alpha1.LDAPQuery{Operator: "or", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level2}}}
+			level3 := &usernautv1alpha1.LDAPNestedQuery{Operator: "or", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level4}}}
+			level2 := &usernautv1alpha1.LDAPNestedQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level3}}}
+			level1 := &usernautv1alpha1.LDAPNestedQuery{Operator: "or", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level2}}}
 			query := &usernautv1alpha1.LDAPQuery{Operator: "and", Filters: []usernautv1alpha1.LDAPFilter{{LDAPQuery: level1}}}
 
-			err := validateLDAPQuery(query)
+			err := validateRootLDAPQueryForTest(query)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("exceeds maximum depth"))
 		})

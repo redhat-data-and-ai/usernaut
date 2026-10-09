@@ -15,8 +15,8 @@ func irOptions() *usernautdevv1alpha1.LDAPFilterOptions {
 	return &usernautdevv1alpha1.LDAPFilterOptions{IncludeIndirectReports: true}
 }
 
-func includeManagersOptions() *usernautdevv1alpha1.LDAPFilterOptions {
-	return &usernautdevv1alpha1.LDAPFilterOptions{IncludeManagers: true}
+func includeManagerOptions() *usernautdevv1alpha1.LDAPFilterOptions {
+	return &usernautdevv1alpha1.LDAPFilterOptions{IncludeManager: true}
 }
 
 func onlyManagersOptions() *usernautdevv1alpha1.LDAPFilterOptions {
@@ -114,7 +114,7 @@ func TestReplaceManagerInFilters_NestedQuery(t *testing.T) {
 
 	filters := []usernautdevv1alpha1.LDAPFilter{
 		{
-			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+			LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 				Operator: "or",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: irOptions()},
@@ -123,12 +123,12 @@ func TestReplaceManagerInFilters_NestedQuery(t *testing.T) {
 			},
 		},
 		{
-			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+			LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 				Operator: "and",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{Key: "manager", Criteria: "equals", Value: "mgrGamma", Options: irOptions()},
 					{
-						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautdevv1alpha1.LDAPFilter{
 								{Key: "manager", Criteria: "equals", Value: "mgrDelta", Options: irOptions()},
@@ -160,7 +160,7 @@ func TestReplaceManagerInFilters_CollapsesDuplicateManagersInNestedQuery(t *test
 
 	filters := []usernautdevv1alpha1.LDAPFilter{
 		{
-			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+			LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 				Operator: "or",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: irOptions()},
@@ -206,16 +206,16 @@ func TestQueryHasManagerFilter(t *testing.T) {
 				Operator: "and",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautdevv1alpha1.LDAPFilter{
 								{Key: "title", Criteria: "contains", Value: "engineer"},
 								{
-									LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+									LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 										Operator: "and",
 										Filters: []usernautdevv1alpha1.LDAPFilter{
 											{
-												LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+												LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 													Operator: "or",
 													Filters: []usernautdevv1alpha1.LDAPFilter{
 														{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
@@ -291,7 +291,7 @@ func TestQueryHasIndirectReports(t *testing.T) {
 				Operator: "and",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautdevv1alpha1.LDAPFilter{
 								{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: irOptions()},
@@ -303,7 +303,7 @@ func TestQueryHasIndirectReports(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "root includeIndirectReports when filter options are empty",
+			name: "root include_indirect_reports when filter options are empty",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
 				Options:  &usernautdevv1alpha1.LDAPQueryOptions{IncludeIndirectReports: true},
@@ -314,7 +314,7 @@ func TestQueryHasIndirectReports(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "filter options override empty root includeIndirectReports",
+			name: "filter options override empty root include_indirect_reports",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
 				Options:  &usernautdevv1alpha1.LDAPQueryOptions{IncludeIndirectReports: true},
@@ -348,12 +348,12 @@ func TestExtractManagerUIDsFromQuery(t *testing.T) {
 			want:  []string{},
 		},
 		{
-			name: "skips manager without includeManagers",
+			name: "skips manager without include_manager",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "or",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
-					{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: includeManagersOptions()},
+					{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: includeManagerOptions()},
 				},
 			},
 			want: []string{"mgrBeta"},
@@ -363,8 +363,8 @@ func TestExtractManagerUIDsFromQuery(t *testing.T) {
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "or",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
-					{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: includeManagersOptions()},
-					{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: includeManagersOptions()},
+					{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: includeManagerOptions()},
+					{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: includeManagerOptions()},
 				},
 			},
 			want: []string{"mgrAlpha", "mgrBeta"},
@@ -375,16 +375,16 @@ func TestExtractManagerUIDsFromQuery(t *testing.T) {
 				Operator: "and",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautdevv1alpha1.LDAPFilter{
-								{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: includeManagersOptions()},
+								{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: includeManagerOptions()},
 								{
-									LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+									LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 										Operator: "and",
 										Filters: []usernautdevv1alpha1.LDAPFilter{
-											{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: includeManagersOptions()},
-											{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: includeManagersOptions()},
+											{Key: "manager", Criteria: "equals", Value: "mgrAlpha", Options: includeManagerOptions()},
+											{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: includeManagerOptions()},
 										},
 									},
 								},
@@ -396,10 +396,10 @@ func TestExtractManagerUIDsFromQuery(t *testing.T) {
 			want: []string{"mgrAlpha", "mgrBeta"},
 		},
 		{
-			name: "root includeManagers when filter options are empty",
+			name: "root include_manager when filter options are empty",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "or",
-				Options:  &usernautdevv1alpha1.LDAPQueryOptions{IncludeManagers: true},
+				Options:  &usernautdevv1alpha1.LDAPQueryOptions{IncludeManager: true},
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
 					{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
@@ -431,7 +431,7 @@ func TestQueryHasOnlyManagers(t *testing.T) {
 			want:  false,
 		},
 		{
-			name: "indirect reports without includeOnlyManagers",
+			name: "indirect reports without include_only_managers",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
@@ -441,7 +441,7 @@ func TestQueryHasOnlyManagers(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "includeOnlyManagers with indirect reports",
+			name: "include_only_managers with indirect reports",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
@@ -451,7 +451,7 @@ func TestQueryHasOnlyManagers(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "root includeOnlyManagers when filter options are empty",
+			name: "root include_only_managers when filter options are empty",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
 				Options: &usernautdevv1alpha1.LDAPQueryOptions{
@@ -465,12 +465,12 @@ func TestQueryHasOnlyManagers(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "nested includeOnlyManagers",
+			name: "nested include_only_managers",
 			query: &usernautdevv1alpha1.LDAPQuery{
 				Operator: "and",
 				Filters: []usernautdevv1alpha1.LDAPFilter{
 					{
-						LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+						LDAPQuery: &usernautdevv1alpha1.LDAPNestedQuery{
 							Operator: "or",
 							Filters: []usernautdevv1alpha1.LDAPFilter{
 								{Key: "manager", Criteria: "equals", Value: "mgrBeta", Options: onlyManagersOptions()},
@@ -530,12 +530,18 @@ func managerUIDFromQuery(query *usernautdevv1alpha1.LDAPQuery) string {
 	if query == nil {
 		return ""
 	}
-	for _, filter := range query.Filters {
+	return managerUIDFromFilters(query.Filters)
+}
+
+func managerUIDFromFilters(filters []usernautdevv1alpha1.LDAPFilter) string {
+	for _, filter := range filters {
 		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
 			return strings.TrimSpace(filter.Value)
 		}
-		if uid := managerUIDFromQuery(filter.LDAPQuery); uid != "" {
-			return uid
+		if filter.LDAPQuery != nil {
+			if uid := managerUIDFromFilters(filter.LDAPQuery.Filters); uid != "" {
+				return uid
+			}
 		}
 	}
 	return ""
@@ -590,7 +596,7 @@ func TestFetchQueryMembers_RootOptionsFallback(t *testing.T) {
 		Options: &usernautdevv1alpha1.LDAPQueryOptions{
 			IncludeIndirectReports: true,
 			IncludeOnlyManagers:    true,
-			IncludeManagers:        true,
+			IncludeManager:         true,
 		},
 		Filters: []usernautdevv1alpha1.LDAPFilter{
 			{Key: "manager", Criteria: "equals", Value: "pbhattac"},

@@ -12,10 +12,8 @@ spec:
     ldap_query:
       operator: and
       filters:
-        - key: employeeType
-          criteria: not
-          value: "external employee"
         - ldap_query:
+            dummy: dummy
             operator: or
             filters:
               - key: title
@@ -29,31 +27,25 @@ spec:
             filters:
               - key: manager
                 criteria: equals
-                value: mgrAlpha
+                value: pbhattac
                 options:
                   include_indirect_reports: true
-                  include_manager: true
-              - key: manager
-                criteria: equals
-                value: mgrBeta
-                options:
-                  include_indirect_reports: true
-                  include_manager: true
+                  include_manager: false
               - ldap_query:
                   operator: and
                   filters:
                     - key: manager
                       criteria: equals
-                      value: mgrGamma
+                      value: rnikhal
                       options:
-                        include_indirect_reports: true
+                        include_indirect_reports: false
                         include_manager: true
                     - ldap_query:
                         operator: or
                         filters:
                           - key: rhatGeo
                             criteria: equals
-                            value: na
+                            value: nas
                           - key: rhatGeo
                             criteria: equals
                             value: apac

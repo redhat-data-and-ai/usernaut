@@ -73,18 +73,11 @@ func validateGroupName(group *usernautv1alpha1.Group, rule config.GroupNameValid
 	return nil
 }
 
-// validateLDAPQuery walks the full ldap_query tree, including nested ldap_query items
-// that the CRD cannot validate (schemaless).
-func validateLDAPQuery(query *usernautv1alpha1.LDAPQuery) error {
+// validateLDAPNestedQuery walks an ldap_query tree. Nested ldap_query items are
+// schemaless in the CRD, so this validates operators, filters, and filter items.
+func validateLDAPNestedQuery(query *usernautv1alpha1.LDAPNestedQuery, path string, depth int) error {
 	if query == nil {
 		return nil
-	}
-	return validateLDAPQueryAt(query, "spec.members.ldap_query", 1)
-}
-
-func validateLDAPQueryAt(query *usernautv1alpha1.LDAPQuery, path string, depth int) error {
-	if query == nil {
-		return fmt.Errorf("%s: ldap_query is empty", path)
 	}
 	if depth > usernautv1alpha1.MaxLDAPQueryDepth {
 		return fmt.Errorf("%s: ldap query nesting exceeds maximum depth of %d", path, usernautv1alpha1.MaxLDAPQueryDepth)
@@ -94,11 +87,9 @@ func validateLDAPQueryAt(query *usernautv1alpha1.LDAPQuery, path string, depth i
 	if !slices.Contains(ldapQueryOperators, op) {
 		return fmt.Errorf("%s: unsupported operator %q", path, query.Operator)
 	}
+
 	if len(query.Filters) == 0 {
 		return fmt.Errorf("%s: filters are empty", path)
-	}
-	if query.Options != nil && query.Options.IncludeOnlyManagers && !query.Options.IncludeIndirectReports {
-		return fmt.Errorf("%s: includeOnlyManagers is only allowed when includeIndirectReports is true", path)
 	}
 
 	for i, filter := range query.Filters {
@@ -125,11 +116,11 @@ func validateLDAPFilter(filter usernautv1alpha1.LDAPFilter, path string, depth i
 		return fmt.Errorf("%s: options is only allowed when key is manager", path)
 	}
 	if filter.Options != nil && filter.Options.IncludeOnlyManagers && !filter.Options.IncludeIndirectReports {
-		return fmt.Errorf("%s: includeOnlyManagers is only allowed when include_indirect_reports is true", path)
+		return fmt.Errorf("%s: include_only_managers is only allowed when include_indirect_reports is true", path)
 	}
 
 	if hasNested {
-		return validateLDAPQueryAt(filter.LDAPQuery, path+".ldap_query", depth+1)
+		return validateLDAPNestedQuery(filter.LDAPQuery, path+".ldap_query", depth+1)
 	}
 
 	key := strings.TrimSpace(filter.Key)

@@ -123,9 +123,19 @@ func buildFilterItem(filter v1alpha1.LDAPFilter, baseUserDN string, depth int) (
 	}
 
 	if hasNested {
-		return buildQueryFromSpec(filter.LDAPQuery, baseUserDN, depth+1)
+		return buildNestedQueryFromSpec(filter.LDAPQuery, baseUserDN, depth+1)
 	}
 	return buildSimpleFilter(filter, baseUserDN)
+}
+
+func buildNestedQueryFromSpec(query *v1alpha1.LDAPNestedQuery, baseUserDN string, depth int) (string, error) {
+	if query == nil {
+		return "", errors.New("ldap query is nil")
+	}
+	return buildQueryFromSpec(&v1alpha1.LDAPQuery{
+		Operator: query.Operator,
+		Filters:  query.Filters,
+	}, baseUserDN, depth)
 }
 
 func buildSimpleFilter(filter v1alpha1.LDAPFilter, baseUserDN string) (string, error) {

@@ -302,7 +302,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedOrInsideAnd() {
 				Value:    "external employee",
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -334,7 +334,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedAndInsideOr() {
 		Operator: "or",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -343,7 +343,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedAndInsideOr() {
 				},
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "developer"},
@@ -375,7 +375,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MultipleNestedQueries() {
 		Filters: []v1alpha1.LDAPFilter{
 			{Key: "employeeType", Criteria: "not", Value: "external employee"},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -384,7 +384,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MultipleNestedQueries() {
 				},
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
@@ -416,7 +416,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_QueriesOnly() {
 		Operator: "or",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
@@ -424,7 +424,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_QueriesOnly() {
 				},
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
@@ -470,7 +470,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_InvalidNestedOperator() {
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "xor",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -496,7 +496,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_EmptyNestedFilters() {
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters:  []v1alpha1.LDAPFilter{},
 				},
@@ -525,7 +525,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_BothSimpleAndNestedOnSame
 				Key:      "title",
 				Criteria: "contains",
 				Value:    "engineer",
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "rhatGeo", Criteria: "equals", Value: "APAC"},
@@ -552,17 +552,17 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_FourLevelNesting() {
 		Filters: []v1alpha1.LDAPFilter{
 			{Key: "employeeType", Criteria: "not", Value: "external employee"},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
 						{
-							LDAPQuery: &v1alpha1.LDAPQuery{
+							LDAPQuery: &v1alpha1.LDAPNestedQuery{
 								Operator: "and",
 								Filters: []v1alpha1.LDAPFilter{
 									{Key: "co", Criteria: "equals", Value: "US"},
 									{
-										LDAPQuery: &v1alpha1.LDAPQuery{
+										LDAPQuery: &v1alpha1.LDAPNestedQuery{
 											Operator: "or",
 											Filters: []v1alpha1.LDAPFilter{
 												{Key: "rhatCostCenter", Criteria: "equals", Value: "123"},
@@ -594,21 +594,21 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ExceedsMaxDepth() {
 		baseUserDN: "ou=users,dc=redhat,dc=com",
 	}
 
-	level4 := &v1alpha1.LDAPQuery{
+	level4 := &v1alpha1.LDAPNestedQuery{
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{Key: "co", Criteria: "equals", Value: "US"},
 		},
 	}
-	level3 := &v1alpha1.LDAPQuery{
+	level3 := &v1alpha1.LDAPNestedQuery{
 		Operator: "or",
 		Filters:  []v1alpha1.LDAPFilter{{LDAPQuery: level4}},
 	}
-	level2 := &v1alpha1.LDAPQuery{
+	level2 := &v1alpha1.LDAPNestedQuery{
 		Operator: "and",
 		Filters:  []v1alpha1.LDAPFilter{{LDAPQuery: level3}},
 	}
-	level1 := &v1alpha1.LDAPQuery{
+	level1 := &v1alpha1.LDAPNestedQuery{
 		Operator: "or",
 		Filters:  []v1alpha1.LDAPFilter{{LDAPQuery: level2}},
 	}
@@ -638,7 +638,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ManagerOptionsIgnoredInFi
 				Value:    "mgrAlpha",
 				Options: &v1alpha1.LDAPFilterOptions{
 					IncludeIndirectReports: true,
-					IncludeManagers:        true,
+					IncludeManager:         true,
 				},
 			},
 		},
@@ -686,8 +686,8 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedQueryItemOptionsIgn
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				Options: &v1alpha1.LDAPFilterOptions{IncludeManagers: true},
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				Options: &v1alpha1.LDAPFilterOptions{IncludeManager: true},
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},

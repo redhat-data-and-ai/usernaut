@@ -129,18 +129,18 @@ spec:
                               properties:
                                 include_indirect_reports:
                                   type: boolean
-                                includeManagers:
+                                include_manager:
                                   type: boolean
-                                includeOnlyManagers:
+                                include_only_managers:
                                   description: |-
                                     IncludeOnlyManagers keeps people in the org tree who have reports (managers),
                                     dropping individual contributors. Valid only when include_indirect_reports is true.
                                   type: boolean
                               type: object
                               x-kubernetes-validations:
-                              - message: includeOnlyManagers is only allowed when
+                              - message: include_only_managers is only allowed when
                                   include_indirect_reports is true
-                                rule: '!has(self.includeOnlyManagers) || self.include_indirect_reports'
+                                rule: '!has(self.include_only_managers) || self.include_indirect_reports'
                             value:
                               type: string
                           type: object
@@ -157,25 +157,32 @@ spec:
                         type: string
                       options:
                         description: |-
-                          Options are query-level defaults. includeManagers, includeOnlyManagers, and
-                          includeIndirectReports apply to manager filters that omit options.
-                          includeOnlyManagersOfMembers is query-level only.
+                          Options are query-level defaults. include_manager, include_only_managers, and
+                          include_indirect_reports apply to manager filters that omit options.
+                          include_only_managers_of_members is query-level only.
                         properties:
-                          includeIndirectReports:
+                          include_indirect_reports:
+                            description: |-
+                              IncludeIndirectReports includes people in the org tree who are reportees of managers
+                              recursively.
                             type: boolean
-                          includeManagers:
+                          include_manager:
+                            description: IncludeManager keeps people in the org tree
+                              who are managers along with their reportees.
                             type: boolean
-                          includeOnlyManagers:
+                          include_only_managers:
+                            description: IncludeOnlyManagers keeps people in the org
+                              tree who are managers.
                             type: boolean
-                          includeOnlyManagersOfMembers:
+                          include_only_managers_of_members:
                             description: IncludeOnlyManagersOfMembers adds each resolved
                               member's manager (from LDAP).
                             type: boolean
                         type: object
                         x-kubernetes-validations:
-                        - message: includeOnlyManagers is only allowed when includeIndirectReports
+                        - message: include_only_managers is only allowed when include_indirect_reports
                             is true
-                          rule: '!has(self.includeOnlyManagers) || self.includeIndirectReports'
+                          rule: '!has(self.include_only_managers) || self.include_indirect_reports'
                     required:
                     - filters
                     - operator

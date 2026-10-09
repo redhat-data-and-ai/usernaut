@@ -128,7 +128,7 @@ var _ = Describe("Group spec.members validation", func() {
 				Operator: "and",
 				Options: &usernautdevv1alpha1.LDAPQueryOptions{
 					IncludeIndirectReports:       true,
-					IncludeManagers:              true,
+					IncludeManager:               true,
 					IncludeOnlyManagers:          true,
 					IncludeOnlyManagersOfMembers: true,
 				},
@@ -155,7 +155,7 @@ var _ = Describe("Group spec.members validation", func() {
 						Value:    "jsmith",
 						Options: &usernautdevv1alpha1.LDAPFilterOptions{
 							IncludeIndirectReports: true,
-							IncludeManagers:        true,
+							IncludeManager:         true,
 						},
 					},
 				},
@@ -167,7 +167,7 @@ var _ = Describe("Group spec.members validation", func() {
 		})
 	})
 
-	It("accepts includeOnlyManagers with include_indirect_reports", func() {
+	It("accepts include_only_managers with include_indirect_reports", func() {
 		name := "group-members-accept-only-managers"
 		g := newGroup(name, usernautdevv1alpha1.Members{
 			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
@@ -191,7 +191,7 @@ var _ = Describe("Group spec.members validation", func() {
 		})
 	})
 
-	It("rejects includeOnlyManagers without include_indirect_reports", func() {
+	It("rejects include_only_managers without include_indirect_reports", func() {
 		name := "group-members-reject-only-managers"
 		g := newGroup(name, usernautdevv1alpha1.Members{
 			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
@@ -210,8 +210,8 @@ var _ = Describe("Group spec.members validation", func() {
 		})
 		err := k8sClient.Create(ctx, g)
 		Expect(err).To(HaveOccurred())
-		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/includeOnlyManagers): %v", err)
-		Expect(err.Error()).To(ContainSubstring("includeOnlyManagers is only allowed when include_indirect_reports is true"))
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/include_only_managers): %v", err)
+		Expect(err.Error()).To(ContainSubstring("include_only_managers is only allowed when include_indirect_reports is true"))
 	})
 
 	It("rejects options on a non-manager filter", func() {
