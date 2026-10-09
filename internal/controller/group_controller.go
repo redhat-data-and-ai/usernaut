@@ -809,14 +809,14 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 	}
 	// Stamp LastAppliedGeneration for a valid spec first. ReconcileFailed overwrites
 	// the condition but must not clear the generation (used after a later invalid spec).
-	if len(skippedUsers) > 0 {
-		groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
-			"Group partially reconciled: %d user(s) not found or failed",
-			len(skippedUsers)))
-	} else if len(groupCR.Status.MissingSubGroups) > 0 {
+	if len(groupCR.Status.MissingSubGroups) > 0 {
 		groupCR.UpdateStatus(usernautdevv1alpha1.MissingSubGroupsReason, fmt.Sprintf(
 			"Reconciled with %d missing sub-groups: %s",
 			len(groupCR.Status.MissingSubGroups), strings.Join(groupCR.Status.MissingSubGroups, ", ")))
+	} else if len(skippedUsers) > 0 {
+		groupCR.UpdateStatus(usernautdevv1alpha1.PartiallyReconciled, fmt.Sprintf(
+			"Group partially reconciled: %d user(s) not found or failed",
+			len(skippedUsers)))
 	} else {
 		groupCR.UpdateStatus(usernautdevv1alpha1.SuccessfullyReconciled, "")
 	}
