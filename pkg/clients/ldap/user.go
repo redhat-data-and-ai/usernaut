@@ -42,12 +42,9 @@ func (l *LDAPConn) executeSearch(ctx context.Context,
 
 	resp, err := conn.Search(searchRequest)
 	if err != nil {
-		// Handle LDAP "No Such Object" error (code 32)
-		if ldapErr, ok := err.(*ldap.Error); ok {
-			if ldapErr.ResultCode == ldap.LDAPResultNoSuchObject {
-				log.WithError(err).Debug("LDAP Result Code 32: No Such Object")
-				return nil, ErrNoUserFound
-			}
+		if ldap.IsErrorWithCode(err, ldap.LDAPResultNoSuchObject) {
+			log.WithError(err).Debug("LDAP Result Code 32: No Such Object")
+			return nil, ErrNoUserFound
 		}
 		return nil, err
 	}
@@ -95,10 +92,14 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 }
 
 // GetBulkUserLDAPData retrieves LDAP data for multiple users in batched OR queries,
-// returning a map keyed by uid. Users not found in LDAP are silently omitted from
-// the result. Batches are capped at bulkLDAPBatchSize to stay within server size limits.
-// If ctx is canceled or times out, the function returns any data fetched so far together
-// with ctx.Err(); it does not start further batches. An in-flight Search is not aborted.
+// returning a map keyed by uid. Users not found in LDAP are omitted from the
+// result. If a batch search returns LDAP 32 (No Such Object), each user in that
+// batch is looked up individually so one missing object does not drop the rest.
+// Other LDAP errors fail the call so a server failure is not treated as
+// "users missing". Batches are capped at bulkLDAPBatchSize to stay within
+// server size limits. If ctx is canceled or times out, the function returns
+// any data fetched so far together with ctx.Err(); it does not start further
+// batches. An in-flight Search is not aborted.
 func (l *LDAPConn) GetBulkUserLDAPData(
 	ctx context.Context,
 	userIDs []string,
@@ -155,6 +156,22 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 
 		resp, err := conn.Search(searchRequest)
 		if err != nil {
+			log.WithError(err).Error("bulk LDAP search failed")
+
+			if ldap.IsErrorWithCode(err, ldap.LDAPResultNoSuchObject) {
+				log.WithError(err).
+					WithField("batch_start", batchStart).
+					WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches)).
+					WithField("batch_user_ids", batch).
+					Warn("bulk LDAP search failed; retrying users individually")
+				if retryErr := l.lookupUsersIndividually(ctx, batch, result); retryErr != nil {
+					return result, fmt.Errorf(
+						"individual LDAP lookup failed after bulk batch %d/%d: %w",
+						batchNum, totalBatches, retryErr,
+					)
+				}
+				continue
+			}
 			log.WithError(err).
 				WithField("batch_start", batchStart).
 				WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches)).
@@ -179,6 +196,29 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 	}
 
 	return result, nil
+}
+
+// lookupUsersIndividually fills result with LDAP data for each userID, omitting
+// users that are not found. Any other lookup error is returned.
+func (l *LDAPConn) lookupUsersIndividually(
+	ctx context.Context,
+	userIDs []string,
+	result map[string]map[string]interface{},
+) error {
+	for _, uid := range userIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		userData, err := l.GetUserLDAPData(ctx, uid)
+		if err != nil {
+			if errors.Is(err, ErrNoUserFound) {
+				continue
+			}
+			return fmt.Errorf("user %s: %w", uid, err)
+		}
+		result[uid] = userData
+	}
+	return nil
 }
 
 // GetUserLDAPDataByEmail retrieves user data from LDAP using the email address.

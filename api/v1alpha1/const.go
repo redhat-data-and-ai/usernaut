@@ -2,6 +2,7 @@ package v1alpha1
 
 const (
 	SuccessfullyReconciled   = "SuccessfullyReconciled"
+	PartiallyReconciled      = "PartiallyReconciled"
 	ReconcileFailed          = "ReconcileFailed"
 	MissingSubGroupsReason   = "MissingSubGroups"
 	MembersResolvedCondition = "MembersResolved"

@@ -460,3 +460,125 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledStopsAfterFir
 	assertions.Len(out, 1)
 	assertions.Contains(out, "a1")
 }
+
+func bulkLDAPEntry(uid string) *ldap.Entry {
+	return &ldap.Entry{
+		DN: "uid=" + uid + ",ou=users,dc=example,dc=com",
+		Attributes: []*ldap.EntryAttribute{
+			{Name: "uid", Values: []string{uid}},
+			{Name: "mail", Values: []string{uid + "@example.com"}},
+		},
+	}
+}
+
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_OmitsUsersMissingFromResults() {
+	assertions := assert.New(suite.T())
+
+	suite.ldapClient.EXPECT().IsClosing().Return(false)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{
+		Entries: []*ldap.Entry{bulkLDAPEntry("found")},
+	}, nil)
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail", "uid"},
+	}
+
+	out, err := ldapConn.GetBulkUserLDAPData(suite.ctx, []string{"found", "missing"})
+
+	assertions.NoError(err)
+	assertions.Len(out, 1)
+	assertions.Contains(out, "found")
+	assertions.NotContains(out, "missing")
+}
+
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_NoSuchObjectRetriesUsersIndividually() {
+	assertions := assert.New(suite.T())
+
+	prev := bulkLDAPBatchSize
+	bulkLDAPBatchSize = 2
+	defer func() { bulkLDAPBatchSize = prev }()
+
+	gomock.InOrder(
+		suite.ldapClient.EXPECT().IsClosing().Return(false),
+		suite.ldapClient.EXPECT().Search(gomock.Any()).
+			Return(nil, ldap.NewError(ldap.LDAPResultNoSuchObject, errors.New("no such object"))),
+		suite.ldapClient.EXPECT().IsClosing().Return(false),
+		suite.ldapClient.EXPECT().Search(gomock.Any()).
+			Return(&ldap.SearchResult{Entries: []*ldap.Entry{bulkLDAPEntry("a1")}}, nil),
+		suite.ldapClient.EXPECT().IsClosing().Return(false),
+		suite.ldapClient.EXPECT().Search(gomock.Any()).
+			Return(&ldap.SearchResult{Entries: []*ldap.Entry{}}, nil),
+		suite.ldapClient.EXPECT().IsClosing().Return(false),
+		suite.ldapClient.EXPECT().Search(gomock.Any()).
+			Return(&ldap.SearchResult{Entries: []*ldap.Entry{bulkLDAPEntry("b1")}}, nil),
+	)
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		userDN:           "uid=%s,ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail", "uid"},
+	}
+
+	out, err := ldapConn.GetBulkUserLDAPData(suite.ctx, []string{"a1", "a2", "b1"})
+
+	assertions.NoError(err)
+	assertions.Len(out, 2)
+	assertions.Contains(out, "a1")
+	assertions.Contains(out, "b1")
+	assertions.NotContains(out, "a2")
+}
+
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_IndividualRetryErrorStillFails() {
+	assertions := assert.New(suite.T())
+
+	gomock.InOrder(
+		suite.ldapClient.EXPECT().IsClosing().Return(false),
+		suite.ldapClient.EXPECT().Search(gomock.Any()).
+			Return(nil, ldap.NewError(ldap.LDAPResultNoSuchObject, errors.New("no such object"))),
+		suite.ldapClient.EXPECT().IsClosing().Return(false),
+		suite.ldapClient.EXPECT().Search(gomock.Any()).
+			Return(nil, ldap.NewError(ldap.LDAPResultTimeLimitExceeded, errors.New("timeout"))),
+	)
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		userDN:           "uid=%s,ou=users,dc=example,dc=com",
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail", "uid"},
+	}
+
+	out, err := ldapConn.GetBulkUserLDAPData(suite.ctx, []string{"u1"})
+
+	assertions.Error(err)
+	assertions.Empty(out)
+}
+
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_SearchErrorStillFails() {
+	assertions := assert.New(suite.T())
+
+	suite.ldapClient.EXPECT().IsClosing().Return(false)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).
+		Return(nil, ldap.NewError(ldap.LDAPResultTimeLimitExceeded, errors.New("timeout")))
+
+	ldapConn := &LDAPConn{
+		conn:             suite.ldapClient,
+		baseUserDN:       "ou=users,dc=example,dc=com",
+		server:           "ldap://ldap.com:389",
+		userSearchFilter: "(objectClass=person)",
+		attributes:       []string{"mail", "uid"},
+	}
+
+	out, err := ldapConn.GetBulkUserLDAPData(suite.ctx, []string{"u1", "u2"})
+
+	assertions.Error(err)
+	assertions.Empty(out)
+}

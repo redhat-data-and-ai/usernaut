@@ -97,6 +97,7 @@ type GroupParam struct {
 // GroupStatus defines the observed state of Group
 type GroupStatus struct {
 	ReconciledUsers       []string           `json:"reconciledUsers,omitempty"`
+	SkippedUsers          []string           `json:"skippedUsers,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
@@ -134,34 +135,49 @@ func (c *Group) SetWaiting() {
 	c.setReadyCondition(metav1.ConditionUnknown, "Waiting", "Group is getting reconciled")
 }
 
-func (c *Group) UpdateStatus(isError bool) {
-	if isError {
-		c.setReadyCondition(metav1.ConditionFalse, ReconcileFailed, "Group reconcile failed")
-		return
+// UpdateStatus sets GroupReadyCondition from a reconcile reason.
+// SuccessfullyReconciled and PartiallyReconciled are ready (True).
+// MissingSubGroupsReason is not ready. Those three stamp LastAppliedGeneration.
+// Any other reason is ReconcileFailed and does not clear a generation already stamped.
+func (c *Group) UpdateStatus(reason, message string) {
+	var status metav1.ConditionStatus
+	switch reason {
+	case SuccessfullyReconciled:
+		status = metav1.ConditionTrue
+		if message == "" {
+			message = "Group reconciled successfully"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	case PartiallyReconciled:
+		status = metav1.ConditionTrue
+		if message == "" {
+			message = "Group partially reconciled"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	case MissingSubGroupsReason:
+		status = metav1.ConditionFalse
+		if message == "" {
+			message = "Group reconciled with missing sub-groups"
+		}
+		c.Status.LastAppliedGeneration = c.Generation
+	default:
+		status = metav1.ConditionFalse
+		reason = ReconcileFailed
+		if message == "" {
+			message = "Group reconcile failed"
+		}
 	}
-
-	c.Status.LastAppliedGeneration = c.Generation
-	if len(c.Status.MissingSubGroups) > 0 {
-		c.setReadyCondition(metav1.ConditionFalse, MissingSubGroupsReason,
-			fmt.Sprintf("Reconciled with %d missing sub-groups: %s",
-				len(c.Status.MissingSubGroups), strings.Join(c.Status.MissingSubGroups, ", ")))
-		return
-	}
-	c.setReadyCondition(metav1.ConditionTrue, SuccessfullyReconciled, "Group reconciled successfully")
-}
-
-func (c *Group) UpdateStatusWithErrMessage(errMessage string) {
-	c.setReadyCondition(metav1.ConditionFalse, ReconcileFailed, errMessage)
+	c.setReadyCondition(status, reason, message)
 }
 
 func (c *Group) SetMissingSubGroups(missing []string) {
 	c.Status.MissingSubGroups = missing
 	if len(missing) == 0 {
 		c.setCondition(MembersResolvedCondition, metav1.ConditionTrue, "Resolved", "All sub-groups resolved")
-	} else {
-		c.setCondition(MembersResolvedCondition, metav1.ConditionFalse, MissingSubGroupsReason,
-			fmt.Sprintf("Missing sub-groups: %s", strings.Join(missing, ", ")))
+		return
 	}
+	c.setCondition(MembersResolvedCondition, metav1.ConditionFalse, MissingSubGroupsReason,
+		fmt.Sprintf("Missing sub-groups: %s", strings.Join(missing, ", ")))
 }
 
 func (c *Group) setCondition(condType string, status metav1.ConditionStatus, reason, message string) {

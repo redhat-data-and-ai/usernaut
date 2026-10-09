@@ -281,13 +281,16 @@ spec:
     - name: gitlab
       type: gitlab
 status:
-  reconciledUsers: # List of reconciled users
+  reconciledUsers: # Members that were synced (excludes skippedUsers)
     - "jsmith"
     - "mjohnson"
+  skippedUsers: # Members not found in LDAP (condition message only has the count)
+    - "missing-user"
   conditions: # Standard Kubernetes conditions
     - type: GroupReadyCondition
       status: "True"
-      message: "Group reconciled successfully"
+      reason: SuccessfullyReconciled # SuccessfullyReconciled | PartiallyReconciled | ReconcileFailed
+      message: "Group reconciled successfully" # PartiallyReconciled when some members are missing from LDAP or fail to process; message is a count only
   backends: # Per-backend status
     - name: fivetran
       type: fivetran
