@@ -2,6 +2,7 @@ package fivetran
 
 import (
 	"context"
+	"strings"
 
 	"github.com/fivetran/go-fivetran/teams"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -152,6 +153,10 @@ func (fc *FivetranClient) DeleteTeamByID(ctx context.Context, teamID string) err
 	log.Info("deleting the team")
 	resp, err := fc.fivetranClient.NewTeamsDelete().TeamId(teamID).Do(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "status code: 404") {
+			log.Info("team already deleted or does not exist, treating as successful deletion")
+			return nil
+		}
 		log.WithField("response", resp).WithError(err).Error("error deleting the team")
 		return err
 	}

@@ -125,6 +125,10 @@ apiServer:
 usernautUserOffboardingInterval: "2h"
 offboardUserExclusionListConfigPath: "default_offboard_user_exclusion_list"
 
+# Backend types that support automatic team deletion when removed from a Group CR's spec.backends
+backendTypesWithRemovalSupport:
+  - fivetran
+  
 # Controller configuration
 controllerConfig:
   maxConcurrentReconciles: 1
