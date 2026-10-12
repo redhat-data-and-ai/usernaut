@@ -215,10 +215,13 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
-	// Step 2: Process all backends (no global lock - individual store ops are atomic)
+	// Step 2: Process all active backends (no global lock - individual store ops are atomic)
 	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers, log, allLdapUserData)
 
-	// Step 3: Only update cache indexes if ALL backends succeeded (all-or-nothing)
+	// Step 2.5: Clean up backends that were removed from the CR spec
+	removedBackendErrors := r.cleanupRemovedBackends(ctx, groupCR, log)
+
+	// Step 3: Only update cache indexes if ALL active backends succeeded (all-or-nothing)
 	hasErrors := false
 	for _, m := range backendErrors {
 		if len(m) > 0 {
@@ -235,6 +238,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	} else {
 		log.Warn("Backend errors detected, skipping cache index updates (all-or-nothing)")
 	}
+
+	// Merge cleanup errors after cache index decision so cleanup failures don't block active backend indexes
+	mergeBackendErrors(backendErrors, removedBackendErrors)
 
 	// Step 4: Remove force reconcile label if present
 	if removeErr := controllerutils.RemoveForceReconcileLabel(ctx, r.Client, groupCR); removeErr != nil {
@@ -653,6 +659,153 @@ func (r *GroupReconciler) processAllBackends(
 	return backendErrors
 }
 
+// mergeBackendErrors merges source errors into dest, creating inner maps as needed.
+func mergeBackendErrors(dest, source map[string]map[string]string) {
+	for backendType, typeErrors := range source {
+		if _, ok := dest[backendType]; !ok {
+			dest[backendType] = make(map[string]string)
+		}
+		for name, msg := range typeErrors {
+			dest[backendType][name] = msg
+		}
+	}
+}
+
+// cleanupRemovedBackends deletes teams from backends that were previously reconciled
+// but are no longer listed in the Group CR's spec.backends.
+// Only backend types listed in AppConfig.BackendTypesWithRemovalSupport are cleaned up.
+func (r *GroupReconciler) cleanupRemovedBackends(
+	ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group,
+	log *logrus.Entry,
+) map[string]map[string]string {
+	errs := make(map[string]map[string]string)
+	groupName := groupCR.Spec.GroupName
+
+	// Read previously reconciled backends from CR status (persisted in etcd, survives pod restarts)
+	if len(groupCR.Status.BackendsStatus) == 0 {
+		return errs
+	}
+
+	// Build a set of current backends from the CR spec
+	currentBackends := make(map[string]struct{}, len(groupCR.Spec.Backends))
+	for _, backend := range groupCR.Spec.Backends {
+		currentBackends[backend.Name+"_"+backend.Type] = struct{}{}
+	}
+
+	for _, prevBackend := range groupCR.Status.BackendsStatus {
+		if _, stillPresent := currentBackends[prevBackend.Name+"_"+prevBackend.Type]; stillPresent {
+			continue
+		}
+
+		backendLogger := log.WithFields(logrus.Fields{
+			"backend":      prevBackend.Name,
+			"backend_type": prevBackend.Type,
+			"action":       "cleanup_removed_backend",
+		})
+
+		if !slices.Contains(r.AppConfig.BackendTypesWithRemovalSupport, strings.ToLower(prevBackend.Type)) {
+			backendLogger.Info("backend type does not support automatic removal, skipping cleanup")
+			continue
+		}
+
+		// Look up team ID: check GroupStore first (populated during reconcile),
+		// fall back to TeamStore (populated by preload on startup)
+		backendKey := prevBackend.Name + "_" + prevBackend.Type
+		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, prevBackend.Name, prevBackend.Type)
+		if err != nil {
+			backendLogger.WithError(err).Warn("failed to fetch team ID from GroupStore")
+			if _, ok := errs[prevBackend.Type]; !ok {
+				errs[prevBackend.Type] = make(map[string]string)
+			}
+			errs[prevBackend.Type][prevBackend.Name] = err.Error()
+			continue
+		}
+
+		transformedGroupName := ""
+		if teamID == "" {
+			transformedGroupName, err = utils.GetTransformedGroupName(r.AppConfig, prevBackend.Type, groupName)
+			if err != nil {
+				backendLogger.WithError(err).Warn("failed to transform group name for TeamStore lookup")
+				if _, ok := errs[prevBackend.Type]; !ok {
+					errs[prevBackend.Type] = make(map[string]string)
+				}
+				errs[prevBackend.Type][prevBackend.Name] = err.Error()
+				continue
+			}
+
+			teamBackends, err := r.Store.Team.GetBackends(ctx, transformedGroupName)
+			if err != nil {
+				backendLogger.WithError(err).Warn("failed to fetch team ID from TeamStore")
+				if _, ok := errs[prevBackend.Type]; !ok {
+					errs[prevBackend.Type] = make(map[string]string)
+				}
+				errs[prevBackend.Type][prevBackend.Name] = err.Error()
+				continue
+			}
+
+			if id, exists := teamBackends[backendKey]; exists && id != "" {
+				teamID = id
+			}
+		}
+
+		if teamID == "" {
+			backendLogger.Warn("team ID not found in cache, skipping deletion")
+			continue
+		}
+
+		backendLogger = backendLogger.WithField("team_id", teamID)
+		backendLogger.Info("backend removed from CR spec, deleting team from backend")
+
+		backendClient, err := clients.New(prevBackend.Name, prevBackend.Type, r.AppConfig.BackendMap)
+		if err != nil {
+			backendLogger.WithError(err).Error("failed to create client for removed backend cleanup")
+			if _, ok := errs[prevBackend.Type]; !ok {
+				errs[prevBackend.Type] = make(map[string]string)
+			}
+			errs[prevBackend.Type][prevBackend.Name] = err.Error()
+			continue
+		}
+
+		if err := backendClient.DeleteTeamByID(ctx, teamID); err != nil {
+			backendLogger.WithError(err).Error("failed to delete team from removed backend")
+			if _, ok := errs[prevBackend.Type]; !ok {
+				errs[prevBackend.Type] = make(map[string]string)
+			}
+			errs[prevBackend.Type][prevBackend.Name] = err.Error()
+			continue
+		}
+
+		backendLogger.Info("successfully deleted team from removed backend")
+
+		// Clean up GroupStore entry
+		if err := r.Store.Group.DeleteBackend(ctx, groupName, prevBackend.Name, prevBackend.Type); err != nil {
+			backendLogger.WithError(err).Error("failed to remove backend from GroupStore after successful deletion")
+			if _, ok := errs[prevBackend.Type]; !ok {
+				errs[prevBackend.Type] = make(map[string]string)
+			}
+			errs[prevBackend.Type][prevBackend.Name] = err.Error()
+			continue
+		}
+
+		// Clean up TeamStore entry if we resolved the transformed name
+		if transformedGroupName != "" {
+			if err := r.Store.Team.DeleteBackend(ctx, transformedGroupName, backendKey); err != nil {
+				backendLogger.WithError(err).Error("failed to remove backend from TeamStore after successful deletion")
+				if _, ok := errs[prevBackend.Type]; !ok {
+					errs[prevBackend.Type] = make(map[string]string)
+				}
+				errs[prevBackend.Type][prevBackend.Name] = err.Error()
+				continue
+			}
+		}
+
+		backendLogger.Info("successfully cleaned up removed backend from cache")
+	}
+
+	return errs
+}
+
 // processSingleBackend handles processing of a single backend
 func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
@@ -759,8 +912,10 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 	log *logrus.Entry) error {
 	backendStatus := make([]usernautdevv1alpha1.BackendStatus, 0, len(groupCR.Spec.Backends))
 
-	// Build status for each backend
+	// Build status for each active backend
+	activeBackendKeys := make(map[string]struct{}, len(groupCR.Spec.Backends))
 	for _, backend := range groupCR.Spec.Backends {
+		activeBackendKeys[backend.Name+"_"+backend.Type] = struct{}{}
 		status := usernautdevv1alpha1.BackendStatus{
 			Name: backend.Name,
 			Type: backend.Type,
@@ -778,6 +933,22 @@ func (r *GroupReconciler) updateStatusAndHandleErrors(ctx context.Context,
 			status.Message = "Successful"
 		}
 		backendStatus = append(backendStatus, status)
+	}
+
+	// Include status for removed backends that failed cleanup
+	for backendType, typeErrors := range backendErrors {
+		for backendName, msg := range typeErrors {
+			key := backendName + "_" + backendType
+			if _, isActive := activeBackendKeys[key]; isActive {
+				continue // already handled above
+			}
+			backendStatus = append(backendStatus, usernautdevv1alpha1.BackendStatus{
+				Name:    backendName,
+				Type:    backendType,
+				Status:  false,
+				Message: "Removed backend cleanup failed: " + msg,
+			})
+		}
 	}
 
 	// Update CR status
