@@ -21,6 +21,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/astro"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/fivetran"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/gitlab"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/preset"
@@ -118,6 +119,14 @@ func New(backendName, backendType string, backends map[string]map[string]config.
 			return nil, err
 		}
 		return preset.NewClient(backend.Connection,
+			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
+	case "astro":
+		appConfig, err := config.GetConfig()
+		if err != nil {
+			return nil, err
+		}
+
+		return astro.NewClient(backend.Connection,
 			appConfig.HttpClient.ConnectionPoolConfig, appConfig.HttpClient.HystrixResiliencyConfig)
 	default:
 		// If no valid backend type is matched, return an error
