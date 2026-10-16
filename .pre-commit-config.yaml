@@ -6,8 +6,9 @@
 # Gitleaks (pre-commit hook) scans staged changes; scripts/check-secrets.sh covers
 # additional project-specific patterns. Use `make setup-pre-commit` only if you
 # prefer the legacy git hook without the pre-commit framework.
-
-exclude: ^vendor/
+#
+# vendor/ is excluded only from auto-fixers / noisy hygiene hooks so we do not
+# rewrite third-party code. Secret and conflict hooks still cover vendor/.
 
 repos:
   # Generic file and repo hygiene (pre-commit/pre-commit-hooks)
@@ -15,10 +16,13 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^vendor/
       - id: end-of-file-fixer
-        exclude: ^CODEOWNERS$  # script + CI validate; avoid pre-commit changing trailing newlines
+        # CODEOWNERS: script + CI validate; avoid changing trailing newlines
+        exclude: ^(vendor/|CODEOWNERS$)
       - id: check-yaml
         args: [--allow-multiple-documents]
+        exclude: ^vendor/
       - id: detect-private-key
       - id: check-merge-conflict
 
