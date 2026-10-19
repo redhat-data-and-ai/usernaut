@@ -39,6 +39,11 @@ type Backend struct {
 	Type string `json:"type"`
 }
 
+// LDAPFilter is a single LDAP filter item. Options may be set only when key is manager
+// and criteria is equals. Nested ldap_query is schemaless, so CEL cannot fully check it;
+// reconcile-time validation enforces manager+equals on nested items.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.options) || (has(self.key) && self.key == 'manager' && has(self.criteria) && self.criteria == 'equals')",message="options is only allowed when key is manager and criteria is equals"
 type LDAPFilter struct {
 	// +optional
 	// +kubebuilder:validation:Enum=givenName;displayName;rhatJobTitle;title;employeeType;manager;rhatCostCenter;rhatCostCenterDesc;rhatGeo;co;st;rhatLocation;rhatOfficeLocation;rhatOfficeFloor;roomNumber
@@ -48,22 +53,68 @@ type LDAPFilter struct {
 	Criteria string `json:"criteria,omitempty"`
 	// +optional
 	Value string `json:"value,omitempty"`
+	// Options is only valid when key is manager and criteria is equals.
+	// +optional
+	Options *LDAPFilterOptions `json:"options,omitempty"`
 	// +optional
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:pruning:PreserveUnknownFields
-	LDAPQuery *LDAPQuery `json:"ldap_query,omitempty"`
+	LDAPQuery *LDAPNestedQuery `json:"ldap_query,omitempty"`
 }
 
+// LDAPQuery is the root membership query. Root options are deprecated and only
+// valid when at least one root filter is manager equals (fallback target).
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.options) || self.filters.exists(f, has(f.key) && f.key == 'manager' && has(f.criteria) && f.criteria == 'equals')",message="options requires at least one filter with key manager and criteria equals"
 type LDAPQuery struct {
+	// Options: deprecated search fallbacks (include_indirect_reports / include_manager)
+	// for root-level manager filters that omit filter options.
+	// +optional
+	Options *LDAPQueryOptions `json:"options,omitempty"`
+	// ResultOptions transforms the resolved member set after search/expansion.
+	// +optional
+	ResultOptions *LDAPQueryResultOptions `json:"result_options,omitempty"`
+	// +kubebuilder:validation:Enum=and;or
+	Operator string `json:"operator"`
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
+	Filters []LDAPFilter `json:"filters"`
+}
+
+type LDAPNestedQuery struct {
 	// +kubebuilder:validation:Enum=and;or
 	Operator string `json:"operator"`
 	// +kubebuilder:validation:MinItems=1
 	Filters []LDAPFilter `json:"filters"`
-	// +optional
-	Options *LDAPOptions `json:"options,omitempty"`
 }
 
-type LDAPOptions struct {
+// LDAPQueryOptions are deprecated root ldap_query search fallbacks (backward-compatible).
+// Prefer filter-level options for new CRs. Not inherited into nested ldap_query filters.
+type LDAPQueryOptions struct {
+	// IncludeIndirectReports falls back onto root-level manager filters that omit
+	// options, expanding reportees recursively. Not inherited into nested filters.
+	// TODO: Remove this once the old CR's are fully migrated.
+	IncludeIndirectReports bool `json:"include_indirect_reports,omitempty"`
+	// IncludeManager falls back onto root-level manager filters that omit options,
+	// adding those filter manager UIDs to the result. Not inherited into nested filters.
+	IncludeManager bool `json:"include_manager,omitempty"`
+}
+
+// LDAPQueryResultOptions are applied to the member set after the query (and optional IR) completes.
+type LDAPQueryResultOptions struct {
+	// IncludeOnlyManagers filters the resolved member set to people who have reports.
+	IncludeOnlyManagers bool `json:"include_only_managers,omitempty"`
+	// IncludeOnlyManagersOfResult replaces the resolved member set with each member's
+	// manager (from LDAP).
+	IncludeOnlyManagersOfResult bool `json:"include_only_managers_of_result,omitempty"`
+	// IncludeManagersOfResult appends each member's manager (from LDAP) to the resolved set.
+	IncludeManagersOfResult bool `json:"include_managers_of_result,omitempty"`
+}
+
+// LDAPFilterOptions applies to a manager filter. Missing or false fields are treated as disabled.
+// When a root-level manager filter omits options, include_indirect_reports and
+// include_manager fall back from ldap_query.options.
+type LDAPFilterOptions struct {
 	IncludeIndirectReports bool `json:"include_indirect_reports,omitempty"`
 	IncludeManager         bool `json:"include_manager,omitempty"`
 }

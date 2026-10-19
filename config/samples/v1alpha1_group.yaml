@@ -10,7 +10,7 @@ spec:
   group_name: dataverse-aggregate-mygroup
   members:
    users:
-    - subhatta
+    - dbaskarr
     - bdebnath
     - 783m
     - 5dlb

@@ -33,10 +33,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
-	"github.com/redhat-data-and-ai/usernaut/internal/controller/mocks"
+	"github.com/redhat-data-and-ai/usernaut/internal/groupmembers"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap/mocks"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
@@ -92,12 +93,13 @@ var _ = Describe("Group Controller", func() {
 		ldapClient := mocks.NewMockLDAPClient(ctrl)
 
 		return &GroupReconciler{
-			Client:     k8sClient,
-			Scheme:     k8sClient.Scheme(),
-			AppConfig:  appConfig,
-			Store:      store.New(Cache),
-			LdapConn:   ldapClient,
-			CacheMutex: &sync.RWMutex{},
+			Client:       k8sClient,
+			Scheme:       k8sClient.Scheme(),
+			AppConfig:    appConfig,
+			Store:        store.New(Cache),
+			LdapConn:     ldapClient,
+			QueryMembers: groupmembers.New(ldapClient),
+			CacheMutex:   &sync.RWMutex{},
 		}, ldapClient
 	}
 

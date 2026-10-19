@@ -264,14 +264,21 @@ spec:
       - "dataverse-platform-admin"
     # Optional: LDAP query to resolve members dynamically
     ldap_query:
-      options:    # Optional LDAP query options
-        include_indirect_reports: false
+      options:  # deprecated search fallbacks (backward-compatible)
+        include_indirect_reports: true
         include_manager: false
+      result_options:  # post-search member-set transforms
+        include_only_managers: true
+        include_only_managers_of_result: false
+        include_managers_of_result: false
       operator: and   # "and" or "or"
       filters:
         - key: manager       # See below for all possible keys
           criteria: equals   # equals | contains | not
           value: "jsmith"    # for key=manager, use user ID only (expanded to uid=value,baseUserDN)
+          options:           # only valid when key is manager
+            include_indirect_reports: true
+            include_manager: false
         - key: title
           criteria: contains
           value: "engineer"
@@ -306,9 +313,9 @@ status:
 | `GroupSpec`   | Desired state: group name, members, target backends                         |
 | `GroupStatus` | Observed state: reconciled users, conditions, backend statuses             |
 | `Members`     | `users` (direct), `groups` (nested), `ldap_query` (optional) |
-| `LDAPQuery`   | `options` (optional), `operator` (`and` or `or`) and `filters` (array of LDAPFilter)              |
-| `LDAPFilter`  | `key` (LDAP attribute name), `criteria` (`equals`, `contains`, `not`), `value`. See **Valid filter keys** below. For `key=manager`, use user ID only (username); it is expanded to full DN. |
-| `LDAPOptions` | `include_indirect_reports` (bool, optional), `include_manager` (bool, optional) |
+| `LDAPQuery`   | `operator` (`and` or `or`), `filters`, optional `options` / `result_options`. `options.include_indirect_reports` / `include_manager` fall back onto root-level manager filters that omit filter `options` (backward-compatible; not nested). `result_options.include_only_managers`, `include_only_managers_of_result`, and `include_managers_of_result` transform the final member set after search. |
+| `LDAPFilter`  | `key` (LDAP attribute name), `criteria` (`equals`, `contains`, `not`), `value`, optional `options` (only when `key` is `manager` and `criteria` is `equals`). See **Valid filter keys** below. For `key=manager`, use user ID only (username); it is expanded to full DN. |
+| `LDAPFilterOptions` | Per manager filter: `include_indirect_reports`, `include_manager` (bool, optional). |
 | `Backend`     | Backend identifier with `name` and `type`                                   |
 
 **Valid filter keys** (LDAP attribute names supported in `ldap_query.filters[].key`):
@@ -331,7 +338,7 @@ status:
 | `rhatOfficeFloor`    | Office Floor       |
 | `roomNumber`         | Desk Number        |
 
-Members from `ldap_query` are resolved at reconcile time via LDAP search and merged with `users` and nested `groups` (after cycle-aware expansion). For **`key=manager`**, always use just the **user ID** (username) as `value`; the controller expands it to `uid=<value>,<baseUserDN>` when building the LDAP filter. For other keys, use the literal attribute value.
+Members from `ldap_query` are resolved at reconcile time via LDAP search and merged with `users` and nested `groups` (after cycle-aware expansion). For **`key=manager`**, always use just the **user ID** (username) as `value`; the controller expands it to `uid=<value>,<baseUserDN>` when building the LDAP filter. Filter `options` are allowed only on `key=manager` with `criteria=equals` (nested filters enforced at reconcile). Root `options.include_indirect_reports` / `include_manager` fall back onto root-level manager filters that omit filter `options` (backward-compatible; not nested). Filters that set `options` explicitly are not overridden. After search, `result_options.include_only_managers` filters the set to people who have reports, `include_only_managers_of_result` replaces the set with each member's LDAP manager, and `include_managers_of_result` appends those managers. For other keys, use the literal attribute value.
 
 ---
 

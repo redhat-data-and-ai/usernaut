@@ -9,6 +9,7 @@ import (
 
 	ldapv3 "github.com/go-ldap/ldap/v3"
 	v1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap/types"
 )
 
 type LDAP struct {
@@ -47,11 +48,12 @@ type LDAPClientConfig struct {
 	bindPassword string
 }
 
+// LDAPClient is the high-level LDAP API used by controllers and group membership.
 type LDAPClient interface {
 	GetUserLDAPData(ctx context.Context, userID string) (map[string]interface{}, error)
 	GetBulkUserLDAPData(ctx context.Context, userIDs []string) (map[string]map[string]interface{}, error)
-	GetQueryMembers(ctx context.Context, query string) ([]string, error)
-	BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error)
+	GetQueryMembers(ctx context.Context, query string) (types.QueryMembers, error)
+	BuildLDAPQueryString(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error)
 	GetUserLDAPDataByEmail(ctx context.Context, email string) (map[string]interface{}, error)
 }
 

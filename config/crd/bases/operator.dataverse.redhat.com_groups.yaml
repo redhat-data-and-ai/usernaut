@@ -91,9 +91,16 @@ spec:
                       type: string
                     type: array
                   ldap_query:
+                    description: |-
+                      LDAPQuery is the root membership query. Root options are deprecated and only
+                      valid when at least one root filter is manager equals (fallback target).
                     properties:
                       filters:
                         items:
+                          description: |-
+                            LDAPFilter is a single LDAP filter item. Options may be set only when key is manager
+                            and criteria is equals. Nested ldap_query is schemaless, so CEL cannot fully check it;
+                            reconcile-time validation enforces manager+equals on nested items.
                           properties:
                             criteria:
                               enum:
@@ -121,9 +128,25 @@ spec:
                               type: string
                             ldap_query:
                               x-kubernetes-preserve-unknown-fields: true
+                            options:
+                              description: Options is only valid when key is manager
+                                and criteria is equals.
+                              properties:
+                                include_indirect_reports:
+                                  type: boolean
+                                include_manager:
+                                  type: boolean
+                              type: object
                             value:
                               type: string
                           type: object
+                          x-kubernetes-validations:
+                          - message: options is only allowed when key is manager and
+                              criteria is equals
+                            rule: '!has(self.options) || (has(self.key) && self.key
+                              == ''manager'' && has(self.criteria) && self.criteria
+                              == ''equals'')'
+                        maxItems: 32
                         minItems: 1
                         type: array
                       operator:
@@ -132,16 +155,49 @@ spec:
                         - or
                         type: string
                       options:
+                        description: |-
+                          Options: deprecated search fallbacks (include_indirect_reports / include_manager)
+                          for root-level manager filters that omit filter options.
                         properties:
                           include_indirect_reports:
+                            description: |-
+                              IncludeIndirectReports falls back onto root-level manager filters that omit
+                              options, expanding reportees recursively. Not inherited into nested filters.
                             type: boolean
                           include_manager:
+                            description: |-
+                              IncludeManager falls back onto root-level manager filters that omit options,
+                              adding those filter manager UIDs to the result. Not inherited into nested filters.
+                            type: boolean
+                        type: object
+                      result_options:
+                        description: ResultOptions transforms the resolved member
+                          set after search/expansion.
+                        properties:
+                          include_managers_of_result:
+                            description: IncludeManagersOfResult appends each member's
+                              manager (from LDAP) to the resolved set.
+                            type: boolean
+                          include_only_managers:
+                            description: IncludeOnlyManagers filters the resolved
+                              member set to people who have reports.
+                            type: boolean
+                          include_only_managers_of_result:
+                            description: |-
+                              IncludeOnlyManagersOfResult replaces the resolved member set with each member's
+                              manager (from LDAP).
                             type: boolean
                         type: object
                     required:
                     - filters
                     - operator
                     type: object
+                    x-kubernetes-validations:
+                    - message: options requires at least one filter with key manager
+                        and criteria equals
+                      rule: '!has(self.options) || self.filters.exists(f, has(f.key)
+                        && f.key == ''manager'' && has(f.criteria) && f.criteria ==
+                        ''equals'')'
                   users:
                     items:
                       type: string

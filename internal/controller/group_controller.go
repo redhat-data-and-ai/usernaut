@@ -65,6 +65,11 @@ const (
 
 var retryPriority = -200
 
+// QueryMembers resolves an LDAPQuery into member UIDs.
+type QueryMembers interface {
+	Members(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery) ([]string, error)
+}
+
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
 	client.Client
@@ -72,6 +77,7 @@ type GroupReconciler struct {
 	AppConfig         *config.AppConfig
 	Store             *store.Store
 	LdapConn          ldap.LDAPClient
+	QueryMembers      QueryMembers
 	WatchedNamespaces []string
 	// CacheMutex prevents concurrent cache index updates during group reconciliation.
 	// This shared mutex ensures that bulk read-modify-write operations on cache indexes
@@ -158,15 +164,10 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var err error
 	queryMembers := []string{}
 	if groupCR.Spec.Members.LDAPQuery != nil {
-		includeIndirectReports := groupCR.Spec.Members.LDAPQuery.Options != nil && groupCR.Spec.Members.LDAPQuery.Options.IncludeIndirectReports
-		includeManager := groupCR.Spec.Members.LDAPQuery.Options != nil && groupCR.Spec.Members.LDAPQuery.Options.IncludeManager
-		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, includeIndirectReports, nil)
+		queryMembers, err = r.QueryMembers.Members(ctx, groupCR.Spec.Members.LDAPQuery)
 		if err != nil {
 			log.WithError(err).Error("error fetching query members")
 			return ctrl.Result{Priority: &retryPriority}, err
-		}
-		if includeManager {
-			queryMembers = append(queryMembers, extractManagerUIDsFromQuery(groupCR.Spec.Members.LDAPQuery)...)
 		}
 		log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
 	}
@@ -254,205 +255,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 type LDAPFetchResult struct {
 	CurrentMembers []string // emails of users with valid LDAP data
 	ActiveUserList []string // UIDs of active users
-}
-
-// fetchQueryMembers runs the LDAP query and, when the query has a manager filter and
-// includeIndirectReports is true, recursively expands each member's reports (people who
-// report to them) and returns the combined set. visited tracks UIDs already expanded to
-// avoid cycles; pass nil for the top-level call (a new map is allocated).
-func (r *GroupReconciler) fetchQueryMembers(ctx context.Context, query *usernautdevv1alpha1.LDAPQuery, includeIndirectReports bool, visited map[string]struct{}) ([]string, error) {
-	log := logger.Logger(ctx).WithField("fetching query members", query)
-
-	if visited == nil {
-		visited = make(map[string]struct{})
-	}
-
-	log.WithField("ldap_query", query).Info("building query string from YAML")
-
-	queryString, err := r.LdapConn.BuildLDAPQueryFromSpec(ctx, query)
-	if err != nil {
-		log.WithError(err).Error("failed to build ldap query from spec")
-		return nil, err
-	}
-
-	log.WithField("query_string", queryString).Info("query string built successfully")
-	var queryMembers []string
-	// Retry LDAP query up to 3 times for transient failures.
-	for attempt := 1; attempt <= 3; attempt++ {
-		queryMembers, err = r.LdapConn.GetQueryMembers(ctx, queryString)
-		if err == nil {
-			break
-		}
-		log.WithError(err).WithField("attempt", attempt).Warn("error fetching users from LDAP using the query")
-		if attempt < 3 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(200 * time.Millisecond):
-			}
-		}
-	}
-	if err != nil {
-		log.WithError(err).Error("failed to fetch users from LDAP using the query after retries")
-		return nil, err
-	}
-
-	if len(queryMembers) == 0 {
-		log.Info("no users found in LDAP using the query")
-		return nil, nil
-	}
-
-	log.WithField("query_members_count", len(queryMembers)).Info("query members fetched successfully")
-
-	hasManagerFilter := queryHasManagerFilter(query)
-
-	// Manager filter present but indirect reports disabled: return only direct reports of the manager in the query (no recursion).
-	if hasManagerFilter && !includeIndirectReports {
-		return r.deduplicateMembers(queryMembers), nil
-	}
-
-	if hasManagerFilter && includeIndirectReports {
-		log.Info("has manager filter, fetching indirect reports")
-
-		queue := make([]string, 0, len(queryMembers))
-		queue = append(queue, queryMembers...)
-
-		// Using DFS search based on a queue.
-		// We can use this queue later for parallelization using goroutine and semaphore.
-		for len(queue) > 0 {
-			// Check if the context is done
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-
-			// Use DFS
-			member := queue[len(queue)-1]
-			queue = queue[:len(queue)-1]
-
-			if _, seen := visited[member]; seen {
-				log.WithField("member", member).Debug("skipping already-expanded member to avoid cycle")
-				continue
-			}
-			visited[member] = struct{}{}
-
-			nestedQuery := usernautdevv1alpha1.LDAPQuery{
-				Operator: query.Operator,
-				Filters:  replaceManagerInFilters(query.Filters, member),
-				Options:  query.Options,
-			}
-			nestedQueryMembers, err := r.fetchQueryMembers(ctx, &nestedQuery, includeIndirectReports, visited)
-			if err != nil {
-				log.WithError(err).WithField("manager", member).Error("error fetching indirect reports")
-				continue
-			}
-			if len(nestedQueryMembers) > 0 {
-				log.WithField("manager", member).WithField("reports", nestedQueryMembers).Info("reports found")
-				queue = append(queue, nestedQueryMembers...)
-				queryMembers = append(queryMembers, nestedQueryMembers...)
-			}
-		}
-	}
-
-	return r.deduplicateMembers(queryMembers), nil
-}
-
-// replaceManagerInFilters returns a copy of filters where every manager filter value
-// is replaced with managerUID. Duplicate manager filters with the same criteria and
-// value after replacement are collapsed to a single entry.
-func replaceManagerInFilters(filters []usernautdevv1alpha1.LDAPFilter, managerUID string) []usernautdevv1alpha1.LDAPFilter {
-	if len(filters) == 0 {
-		return []usernautdevv1alpha1.LDAPFilter{}
-	}
-	result := make([]usernautdevv1alpha1.LDAPFilter, 0, len(filters))
-	seenManagers := make(map[string]struct{})
-	for _, filter := range filters {
-		if filter.LDAPQuery != nil {
-			nested := replaceManagerInQuery(filter.LDAPQuery, managerUID)
-			result = append(result, usernautdevv1alpha1.LDAPFilter{
-				LDAPQuery: nested,
-			})
-			continue
-		}
-
-		value := filter.Value
-		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
-			value = managerUID
-			dedupeKey := strings.ToLower(strings.TrimSpace(filter.Criteria)) + "|" + value
-			if _, ok := seenManagers[dedupeKey]; ok {
-				continue
-			}
-			seenManagers[dedupeKey] = struct{}{}
-		}
-		result = append(result, usernautdevv1alpha1.LDAPFilter{
-			Key:      filter.Key,
-			Criteria: filter.Criteria,
-			Value:    value,
-		})
-	}
-	return result
-}
-
-func replaceManagerInQuery(query *usernautdevv1alpha1.LDAPQuery, managerUID string) *usernautdevv1alpha1.LDAPQuery {
-	if query == nil {
-		return nil
-	}
-	return &usernautdevv1alpha1.LDAPQuery{
-		Operator: query.Operator,
-		Filters:  replaceManagerInFilters(query.Filters, managerUID),
-		Options:  query.Options,
-	}
-}
-
-func filtersHaveManager(filters []usernautdevv1alpha1.LDAPFilter) bool {
-	for _, filter := range filters {
-		if strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
-			return true
-		}
-		if filter.LDAPQuery != nil && queryHasManagerFilter(filter.LDAPQuery) {
-			return true
-		}
-	}
-	return false
-}
-
-// queryHasManagerFilter reports whether a manager filter exists anywhere in the query tree.
-func queryHasManagerFilter(query *usernautdevv1alpha1.LDAPQuery) bool {
-	if query == nil {
-		return false
-	}
-	return filtersHaveManager(query.Filters)
-}
-
-// extractManagerUIDsFromQuery returns unique manager UIDs referenced anywhere in the query tree.
-func extractManagerUIDsFromQuery(query *usernautdevv1alpha1.LDAPQuery) []string {
-	if query == nil {
-		return []string{}
-	}
-	seen := make(map[string]struct{})
-	result := []string{}
-	collectManagerUIDsFromFilters(query.Filters, seen, &result)
-	return result
-}
-
-func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, seen map[string]struct{}, result *[]string) {
-	for _, filter := range filters {
-		if filter.LDAPQuery != nil {
-			collectManagerUIDsFromFilters(filter.LDAPQuery.Filters, seen, result)
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(filter.Key), "manager") {
-			continue
-		}
-		uid := filter.Value
-		if uid == "" {
-			continue
-		}
-		if _, ok := seen[uid]; ok {
-			continue
-		}
-		seen[uid] = struct{}{}
-		*result = append(*result, uid)
-	}
 }
 
 // fetchLDAPData fetches LDAP data for all unique members and returns the result

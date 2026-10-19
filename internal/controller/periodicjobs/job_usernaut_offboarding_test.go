@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	ldapmocks "github.com/redhat-data-and-ai/usernaut/internal/controller/mocks"
 	clientmocks "github.com/redhat-data-and-ai/usernaut/internal/controller/periodicjobs/mocks"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	ldapmocks "github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap/mocks"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"

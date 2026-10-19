@@ -46,14 +46,14 @@ func (suite *LDAPTestSuite) TestGetQueryMembers() {
 	resp, err := ldapConn.GetQueryMembers(suite.ctx, query)
 
 	assertions.NoError(err)
-	assertions.Equal("example-user", resp[0])
+	assertions.Equal("example-user", resp[0].UID)
 
 	// Verify the search request is constructed correctly.
 	if assertions.NotNil(capturedReq) {
 		assertions.Equal(ldapConn.baseUserDN, capturedReq.BaseDN)
 		assertions.Equal(ldap.ScopeWholeSubtree, capturedReq.Scope)
 		assertions.Equal(query, capturedReq.Filter)
-		assertions.Equal([]string{"uid"}, capturedReq.Attributes)
+		assertions.Equal(defaultAttributes, capturedReq.Attributes)
 	}
 }
 
@@ -94,7 +94,7 @@ func (suite *LDAPTestSuite) TestGetQueryMembers_NoEntriesFound() {
 	assertions.Empty(resp)
 }
 
-func (suite *LDAPTestSuite) TestGetQueryMembers_EmptyAttributes() {
+func (suite *LDAPTestSuite) TestGetQueryMembers_UIDFromDN() {
 	assertions := assert.New(suite.T())
 
 	searchResult := &ldap.SearchResult{
@@ -119,7 +119,7 @@ func (suite *LDAPTestSuite) TestGetQueryMembers_EmptyAttributes() {
 	resp, err := ldapConn.GetQueryMembers(suite.ctx, "(objectClass=groupOfNames)")
 
 	assertions.NoError(err)
-	assertions.Equal("dn-only-user", resp[0])
+	assertions.Equal("dn-only-user", resp[0].UID)
 }
 
 func (suite *LDAPTestSuite) TestGetQueryMembers_SearchError() {
@@ -173,7 +173,7 @@ func (suite *LDAPTestSuite) TestGetQueryMembers_EmptyQuery() {
 	assertions.Empty(resp)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_AndOperator() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_AndOperator() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -196,13 +196,13 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_AndOperator() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	assertions.Equal("(&(manager=uid=mgrAlpha,ou=users,dc=redhat,dc=com)(title=*senior*))", filter)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OrOperator() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_OrOperator() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -224,7 +224,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OrOperator() {
 			},
 		},
 	}
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	assertions.Equal(
@@ -233,7 +233,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_OrOperator() {
 	)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ManagerContains() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_ManagerContains() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -251,13 +251,13 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ManagerContains() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	assertions.Equal("(&(manager=uid=*foobar*,ou=users,dc=redhat,dc=com))", filter)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MixOperator() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_MixOperator() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -280,13 +280,13 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MixOperator() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	assertions.Equal("(&(manager=uid=mgrDelta,ou=users,dc=redhat,dc=com)(!(employeeType=external employee)))", filter)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedOrInsideAnd() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_NestedOrInsideAnd() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -302,7 +302,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedOrInsideAnd() {
 				Value:    "external employee",
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -314,7 +314,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedOrInsideAnd() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	assertions.Equal(
@@ -323,7 +323,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedOrInsideAnd() {
 	)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedAndInsideOr() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_NestedAndInsideOr() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -334,7 +334,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedAndInsideOr() {
 		Operator: "or",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -343,7 +343,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedAndInsideOr() {
 				},
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "developer"},
@@ -354,7 +354,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedAndInsideOr() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	assertions.Equal(
@@ -363,7 +363,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_NestedAndInsideOr() {
 	)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MultipleNestedQueries() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_MultipleNestedQueries() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -375,7 +375,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MultipleNestedQueries() {
 		Filters: []v1alpha1.LDAPFilter{
 			{Key: "employeeType", Criteria: "not", Value: "external employee"},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -384,7 +384,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MultipleNestedQueries() {
 				},
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
@@ -395,7 +395,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MultipleNestedQueries() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	expected := "(&(!(employeeType=external employee))" +
@@ -405,7 +405,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_MultipleNestedQueries() {
 	assertions.Equal(expected, filter)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_QueriesOnly() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_QueriesOnly() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -416,7 +416,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_QueriesOnly() {
 		Operator: "or",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
@@ -424,7 +424,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_QueriesOnly() {
 				},
 			},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "and",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "manager", Criteria: "equals", Value: "mgrBeta"},
@@ -434,7 +434,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_QueriesOnly() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 
 	assertions.NoError(err)
 	assertions.Equal(
@@ -443,7 +443,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_QueriesOnly() {
 	)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_EmptyFiltersAndQueries() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_EmptyFiltersAndQueries() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -454,12 +454,12 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_EmptyFiltersAndQueries() 
 		Operator: "and",
 	}
 
-	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	_, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 	assertions.Error(err)
 	assertions.Contains(err.Error(), "filters are empty")
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_InvalidNestedOperator() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_InvalidNestedOperator() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -470,7 +470,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_InvalidNestedOperator() {
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "xor",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
@@ -480,12 +480,12 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_InvalidNestedOperator() {
 		},
 	}
 
-	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	_, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 	assertions.Error(err)
 	assertions.Contains(err.Error(), "unsupported operator")
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_EmptyNestedFilters() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_EmptyNestedFilters() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -496,7 +496,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_EmptyNestedFilters() {
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters:  []v1alpha1.LDAPFilter{},
 				},
@@ -504,14 +504,14 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_EmptyNestedFilters() {
 		},
 	}
 
-	_, err := ldapConn.BuildLDAPQueryFromSpec(context.Background(), query)
+	_, err := ldapConn.BuildLDAPQueryString(context.Background(), query)
 	assertions.Error(err)
 	assertions.Contains(err.Error(), "filters are empty")
 }
 
-// TestBuildLDAPQueryFromSpec_BothSimpleAndNestedOnSameFilter verifies buildFilterItem rejects
+// TestBuildLDAPQueryString_BothSimpleAndNestedOnSameFilter verifies buildFilterItem rejects
 // a filter item that sets both key/criteria/value and ldap_query.
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_BothSimpleAndNestedOnSameFilter() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_BothSimpleAndNestedOnSameFilter() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -525,7 +525,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_BothSimpleAndNestedOnSame
 				Key:      "title",
 				Criteria: "contains",
 				Value:    "engineer",
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "rhatGeo", Criteria: "equals", Value: "APAC"},
@@ -535,12 +535,12 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_BothSimpleAndNestedOnSame
 		},
 	}
 
-	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	_, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 	assertions.Error(err)
 	assertions.Contains(err.Error(), "filter item cannot have both key/criteria/value and ldap_query")
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_FourLevelNesting() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_FourLevelNesting() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -552,17 +552,17 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_FourLevelNesting() {
 		Filters: []v1alpha1.LDAPFilter{
 			{Key: "employeeType", Criteria: "not", Value: "external employee"},
 			{
-				LDAPQuery: &v1alpha1.LDAPQuery{
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
 					Operator: "or",
 					Filters: []v1alpha1.LDAPFilter{
 						{Key: "title", Criteria: "contains", Value: "engineer"},
 						{
-							LDAPQuery: &v1alpha1.LDAPQuery{
+							LDAPQuery: &v1alpha1.LDAPNestedQuery{
 								Operator: "and",
 								Filters: []v1alpha1.LDAPFilter{
 									{Key: "co", Criteria: "equals", Value: "US"},
 									{
-										LDAPQuery: &v1alpha1.LDAPQuery{
+										LDAPQuery: &v1alpha1.LDAPNestedQuery{
 											Operator: "or",
 											Filters: []v1alpha1.LDAPFilter{
 												{Key: "rhatCostCenter", Criteria: "equals", Value: "123"},
@@ -579,7 +579,7 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_FourLevelNesting() {
 		},
 	}
 
-	filter, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 	assertions.NoError(err)
 	assertions.Equal(
 		"(&(!(employeeType=external employee))(|(title=*engineer*)(&(co=US)(|(rhatCostCenter=123)(rhatCostCenter=456)))))",
@@ -587,28 +587,28 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_FourLevelNesting() {
 	)
 }
 
-func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ExceedsMaxDepth() {
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_ExceedsMaxDepth() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
 		baseUserDN: "ou=users,dc=redhat,dc=com",
 	}
 
-	level4 := &v1alpha1.LDAPQuery{
+	level4 := &v1alpha1.LDAPNestedQuery{
 		Operator: "and",
 		Filters: []v1alpha1.LDAPFilter{
 			{Key: "co", Criteria: "equals", Value: "US"},
 		},
 	}
-	level3 := &v1alpha1.LDAPQuery{
+	level3 := &v1alpha1.LDAPNestedQuery{
 		Operator: "or",
 		Filters:  []v1alpha1.LDAPFilter{{LDAPQuery: level4}},
 	}
-	level2 := &v1alpha1.LDAPQuery{
+	level2 := &v1alpha1.LDAPNestedQuery{
 		Operator: "and",
 		Filters:  []v1alpha1.LDAPFilter{{LDAPQuery: level3}},
 	}
-	level1 := &v1alpha1.LDAPQuery{
+	level1 := &v1alpha1.LDAPNestedQuery{
 		Operator: "or",
 		Filters:  []v1alpha1.LDAPFilter{{LDAPQuery: level2}},
 	}
@@ -617,7 +617,87 @@ func (suite *LDAPTestSuite) TestBuildLDAPQueryFromSpec_ExceedsMaxDepth() {
 		Filters:  []v1alpha1.LDAPFilter{{LDAPQuery: level1}},
 	}
 
-	_, err := ldapConn.BuildLDAPQueryFromSpec(suite.ctx, query)
+	_, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
 	assertions.Error(err)
 	assertions.Contains(err.Error(), "exceeds maximum depth")
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_ManagerOptionsIgnoredInFilterString() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "manager",
+				Criteria: "equals",
+				Value:    "mgrAlpha",
+				Options: &v1alpha1.LDAPFilterOptions{
+					IncludeIndirectReports: true,
+					IncludeManager:         true,
+				},
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
+	assertions.NoError(err)
+	assertions.Equal("(&(manager=uid=mgrAlpha,ou=users,dc=redhat,dc=com))", filter)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_NonManagerOptionsIgnoredInFilterString() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Key:      "title",
+				Criteria: "contains",
+				Value:    "engineer",
+				Options: &v1alpha1.LDAPFilterOptions{
+					IncludeIndirectReports: true,
+				},
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
+	assertions.NoError(err)
+	assertions.Equal("(&(title=*engineer*))", filter)
+}
+
+func (suite *LDAPTestSuite) TestBuildLDAPQueryString_NestedQueryItemOptionsIgnoredInFilterString() {
+	assertions := assert.New(suite.T())
+
+	ldapConn := &LDAPConn{
+		baseUserDN: "ou=users,dc=redhat,dc=com",
+	}
+
+	query := &v1alpha1.LDAPQuery{
+		Operator: "and",
+		Filters: []v1alpha1.LDAPFilter{
+			{
+				Options: &v1alpha1.LDAPFilterOptions{IncludeManager: true},
+				LDAPQuery: &v1alpha1.LDAPNestedQuery{
+					Operator: "or",
+					Filters: []v1alpha1.LDAPFilter{
+						{Key: "manager", Criteria: "equals", Value: "mgrAlpha"},
+					},
+				},
+			},
+		},
+	}
+
+	filter, err := ldapConn.BuildLDAPQueryString(suite.ctx, query)
+	assertions.NoError(err)
+	assertions.Equal("(&(|(manager=uid=mgrAlpha,ou=users,dc=redhat,dc=com)))", filter)
 }

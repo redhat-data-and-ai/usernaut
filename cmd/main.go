@@ -48,6 +48,7 @@ import (
 
 	usernautdevv1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
 	"github.com/redhat-data-and-ai/usernaut/internal/controller"
+	"github.com/redhat-data-and-ai/usernaut/internal/groupmembers"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
@@ -219,6 +220,7 @@ func main() {
 		AppConfig:         appConf,
 		Store:             dataStore,
 		LdapConn:          ldapConn,
+		QueryMembers:      groupmembers.New(ldapConn),
 		CacheMutex:        sharedCacheMutex,
 		WatchedNamespaces: namespaces,
 	}).SetupWithManager(mgr); err != nil {
