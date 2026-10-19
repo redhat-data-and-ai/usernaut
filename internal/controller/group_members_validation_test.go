@@ -120,4 +120,117 @@ var _ = Describe("Group spec.members validation", func() {
 			_ = k8sClient.Delete(ctx, g)
 		})
 	})
+
+	It("accepts root ldap_query options and result", func() {
+		name := "group-members-accept-query-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Options: &usernautdevv1alpha1.LDAPQueryOptions{
+					IncludeIndirectReports: true,
+					IncludeManager:         true,
+				},
+				ResultOptions: &usernautdevv1alpha1.LDAPQueryResultOptions{
+					IncludeOnlyManagers:         true,
+					IncludeOnlyManagersOfResult: true,
+				},
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{Key: "manager", Criteria: "equals", Value: "jsmith"},
+				},
+			},
+		})
+		Expect(k8sClient.Create(ctx, g)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, g)
+		})
+	})
+
+	It("accepts options on a manager filter", func() {
+		name := "group-members-accept-manager-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "equals",
+						Value:    "jsmith",
+						Options: &usernautdevv1alpha1.LDAPFilterOptions{
+							IncludeIndirectReports: true,
+							IncludeManager:         true,
+						},
+					},
+				},
+			},
+		})
+		Expect(k8sClient.Create(ctx, g)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, g)
+		})
+	})
+
+	It("rejects options on a non-manager filter", func() {
+		name := "group-members-reject-title-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{
+						Key:      "title",
+						Criteria: "contains",
+						Value:    "engineer",
+						Options: &usernautdevv1alpha1.LDAPFilterOptions{
+							IncludeIndirectReports: true,
+						},
+					},
+				},
+			},
+		})
+		err := k8sClient.Create(ctx, g)
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/options): %v", err)
+		Expect(err.Error()).To(ContainSubstring("options is only allowed when key is manager and criteria is equals"))
+	})
+
+	It("rejects options on a manager filter that is not equals", func() {
+		name := "group-members-reject-manager-contains-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{
+						Key:      "manager",
+						Criteria: "contains",
+						Value:    "smith",
+						Options: &usernautdevv1alpha1.LDAPFilterOptions{
+							IncludeIndirectReports: true,
+						},
+					},
+				},
+			},
+		})
+		err := k8sClient.Create(ctx, g)
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/options): %v", err)
+		Expect(err.Error()).To(ContainSubstring("options is only allowed when key is manager and criteria is equals"))
+	})
+
+	It("rejects root ldap_query options without a manager equals filter", func() {
+		name := "group-members-reject-root-options"
+		g := newGroup(name, usernautdevv1alpha1.Members{
+			LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+				Operator: "and",
+				Options: &usernautdevv1alpha1.LDAPQueryOptions{
+					IncludeManager: true,
+				},
+				Filters: []usernautdevv1alpha1.LDAPFilter{
+					{Key: "title", Criteria: "contains", Value: "engineer"},
+				},
+			},
+		})
+		err := k8sClient.Create(ctx, g)
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected invalid Group (CEL/root options): %v", err)
+		Expect(err.Error()).To(ContainSubstring("options requires at least one filter with key manager and criteria equals"))
+	})
 })

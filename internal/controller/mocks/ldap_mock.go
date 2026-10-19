@@ -11,6 +11,7 @@ import (
 	ldap "github.com/go-ldap/ldap/v3"
 	gomock "github.com/golang/mock/gomock"
 	v1alpha1 "github.com/redhat-data-and-ai/usernaut/api/v1alpha1"
+	types "github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap/types"
 )
 
 // MockLDAPConnClient is a mock of LDAPConnClient interface.
@@ -116,19 +117,19 @@ func (m *MockLDAPClient) EXPECT() *MockLDAPClientMockRecorder {
 	return m.recorder
 }
 
-// BuildLDAPQueryFromSpec mocks base method.
-func (m *MockLDAPClient) BuildLDAPQueryFromSpec(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error) {
+// BuildLDAPQueryString mocks base method.
+func (m *MockLDAPClient) BuildLDAPQueryString(ctx context.Context, query *v1alpha1.LDAPQuery) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BuildLDAPQueryFromSpec", ctx, query)
+	ret := m.ctrl.Call(m, "BuildLDAPQueryString", ctx, query)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// BuildLDAPQueryFromSpec indicates an expected call of BuildLDAPQueryFromSpec.
-func (mr *MockLDAPClientMockRecorder) BuildLDAPQueryFromSpec(ctx, query interface{}) *gomock.Call {
+// BuildLDAPQueryString indicates an expected call of BuildLDAPQueryString.
+func (mr *MockLDAPClientMockRecorder) BuildLDAPQueryString(ctx, query interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BuildLDAPQueryFromSpec", reflect.TypeOf((*MockLDAPClient)(nil).BuildLDAPQueryFromSpec), ctx, query)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BuildLDAPQueryString", reflect.TypeOf((*MockLDAPClient)(nil).BuildLDAPQueryString), ctx, query)
 }
 
 // GetBulkUserLDAPData mocks base method.
@@ -147,10 +148,10 @@ func (mr *MockLDAPClientMockRecorder) GetBulkUserLDAPData(ctx, userIDs interface
 }
 
 // GetQueryMembers mocks base method.
-func (m *MockLDAPClient) GetQueryMembers(ctx context.Context, query string) ([]string, error) {
+func (m *MockLDAPClient) GetQueryMembers(ctx context.Context, query string) (types.QueryMembers, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetQueryMembers", ctx, query)
-	ret0, _ := ret[0].([]string)
+	ret0, _ := ret[0].(types.QueryMembers)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

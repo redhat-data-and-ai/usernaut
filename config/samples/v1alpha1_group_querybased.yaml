@@ -10,17 +10,30 @@ spec:
   group_name: dataverse-aggregate-mygroupquerybased
   members:
     ldap_query:
-      options:
-        include_indirect_reports: true
-        include_manager: true
-      operator: and
+      options:  # deprecated search fallbacks (backward-compatible)
+        include_indirect_reports: false
+        include_manager: false
+      result_options:
+        include_only_managers: false
+        include_managers_of_result: true
+        include_only_managers_of_result: false
+      operator: or
       filters:  # key: LDAP attribute (e.g. manager, title, givenName, employeeType, rhatGeo, co, st). See DEVELOPMENT.md for full list.
+        - ldap_query:
+            operator: or
+            filters:
+              - key: manager
+                criteria: equals
+                value: bar  # user ID only (expanded to uid=bar,<baseUserDN>)
+                options:
+                  include_manager: false
+                  include_indirect_reports: false
         - key: manager
           criteria: equals
-          value: pbhattac  # user ID only (expanded to uid=pbhattac,<baseUserDN>)
-        - key: co
-          criteria: equals
-          value: "IND"
+          value: foo  # user ID only (expanded to uid=foo,<baseUserDN>)
+          options:
+            include_manager: false
+            include_indirect_reports: false
     users:
       - subhatta
       - arijroy

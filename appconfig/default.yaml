@@ -43,7 +43,7 @@ ldap:
   baseUserDN: "ou=users,dc=org,dc=com"
   userDN: "uid=%s,ou=users,dc=org,dc=com"
   userSearchFilter: "(objectClass=filterClass)"
-  attributes: ["mail", "uid", "cn", "sn", "displayName"]
+  attributes: ["mail", "uid", "cn", "sn", "displayName", "manager"]
   bindUsername: file|/path/to/ldap_key
   bindPassword: file|/path/to/ldap_secret
 
