@@ -10,23 +10,29 @@ We welcome contributions to Usernaut! If you find a bug, have a feature request,
    ```
 
 3. **Make Changes**: Implement your changes and ensure they are well-tested.
-4. **Commit Your Changes**: Commit your changes with a descriptive commit message:
+4. **Install pre-commit** (recommended):
+
+   ```bash
+   pip install pre-commit && pre-commit install
+   ```
+
+5. **Commit Your Changes**: Commit your changes with a descriptive commit message:
 
    ```bash
    git commit -m "Add my feature"
    ```
 
-5. **Push to Your Fork**: Push your changes to your forked repository:
+6. **Push to Your Fork**: Push your changes to your forked repository:
 
    ```bash
    git push origin feature/my-feature
    ```
 
-6. **Create a Pull Request**: Open a pull request against the `main` branch of the Usernaut repository. Provide a clear description of your changes and why they are needed.
-7. **Review Process**: Your pull request will be reviewed by the Usernaut maintainers. They may request changes or provide feedback.
-8. **Address Feedback**: If changes are requested, make the necessary updates in your branch and push the changes. The pull request will automatically update.
-9. **Merge**: Once your pull request is approved, it will be merged into the main branch.
-10. **Celebrate**: Congratulations! You've contributed to Usernaut.
+7. **Create a Pull Request**: Open a pull request against the `main` branch of the Usernaut repository. Provide a clear description of your changes and why they are needed.
+8. **Review Process**: Your pull request will be reviewed by the Usernaut maintainers. They may request changes or provide feedback.
+9. **Address Feedback**: If changes are requested, make the necessary updates in your branch and push the changes. The pull request will automatically update.
+10. **Merge**: Once your pull request is approved, it will be merged into the main branch.
+11. **Celebrate**: Congratulations! You've contributed to Usernaut.
 
 ## License
 
