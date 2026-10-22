@@ -133,6 +133,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, nil
 	}
+	if allowServiceAccounts(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules) {
+		ctx = config.WithAllowServiceAccounts(ctx)
+	}
 
 	// set owner reference to the group CR
 	if err := r.setOwnerReference(ctx, groupCR, log); err != nil {

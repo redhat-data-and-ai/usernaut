@@ -32,6 +32,9 @@ type RoverClient struct {
 	client             heimdall.Doer
 	serviceAccountName string
 	url                string
+	// memberTypeByTeam is filled by FetchTeamMembersByTeamID so later add/remove
+	// calls use the rover member type (user or serviceaccount) for that id.
+	memberTypeByTeam map[string]map[string]string
 }
 
 type RoverConfig struct {

@@ -26,10 +26,13 @@ import (
 	ot "github.com/opentracing/opentracing-go"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
 
-// Fetch all the members and owners of a team by teamID ignoring the serviceaccount members
+// FetchTeamMembersByTeamID returns rover group members.
+// Service-account members are included only when the reconcile context was marked
+// after spec validation passed for a namespace with allowServiceAccounts set.
 func (rC *RoverClient) FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error) {
 	span, ctx := ot.StartSpanFromContext(ctx, "backend.redhatrover.FetchTeamMembersByTeamID")
 	defer span.Finish()
@@ -57,10 +60,13 @@ func (rC *RoverClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 		return nil, errors.New("failed to decode rover group response: " + err.Error())
 	}
 
+	allowServiceAccounts := config.AllowServiceAccounts(ctx)
+	rC.rememberMemberTypes(teamID, roverGroup.Members)
+
 	members := make(map[string]*structs.User)
 	for _, member := range roverGroup.Members {
-		if member.Type != MemberTypeUser {
-			continue // Only process user type members
+		if !keepRoverMember(member.Type, allowServiceAccounts) {
+			continue
 		}
 		user := &structs.User{
 			ID: member.ID,
@@ -69,6 +75,35 @@ func (rC *RoverClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 	}
 
 	return members, nil
+}
+
+func keepRoverMember(memberType string, allowServiceAccounts bool) bool {
+	switch memberType {
+	case MemberTypeUser:
+		return true
+	case MemberTypeServiceAccount:
+		return allowServiceAccounts
+	default:
+		return false
+	}
+}
+
+func (rC *RoverClient) rememberMemberTypes(teamID string, groupMembers []Member) {
+	if rC.memberTypeByTeam == nil {
+		rC.memberTypeByTeam = make(map[string]map[string]string)
+	}
+	types := make(map[string]string, len(groupMembers))
+	for _, member := range groupMembers {
+		types[member.ID] = member.Type
+	}
+	rC.memberTypeByTeam[teamID] = types
+}
+
+func (rC *RoverClient) memberType(teamID, id string) string {
+	if t := rC.memberTypeByTeam[teamID][id]; t != "" {
+		return t
+	}
+	return MemberTypeUser
 }
 
 const roverBatchSize = 500
@@ -106,7 +141,7 @@ func (rC *RoverClient) modify(
 
 		members := make([]Member, 0, len(batch))
 		for _, id := range batch {
-			members = append(members, Member{ID: id, Type: MemberTypeUser})
+			members = append(members, Member{ID: id, Type: rC.memberType(teamID, id)})
 		}
 
 		var req MemberModRequest

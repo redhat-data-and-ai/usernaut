@@ -28,6 +28,7 @@ Welcome to Usernaut! This guide provides a comprehensive overview of the project
     - [User Offboarding Flow (Automatic)](#user-offboarding-flow-automatic)
   - [Configuration](#configuration)
     - [Configuration Structure](#configuration-structure)
+    - [Spec validation rules](#spec-validation-rules)
     - [Secret Loading](#secret-loading)
     - [Environment Selection](#environment-selection)
   - [Project Structure](#project-structure)
@@ -800,6 +801,29 @@ apiServer:
   cors:
     allowed_origins: ["http://localhost:3000"]
 ```
+
+### Spec validation rules
+
+`controllerConfig.specValidationRules` is keyed by namespace. A namespace with no entry is not checked. When an entry exists, reconcile rejects the Group CR unless `spec.group_name` and `spec.backends` match that entry.
+
+```yaml
+controllerConfig:
+  maxConcurrentReconciles: 15
+  specValidationRules:
+    ddis-asteroid--usernaut-aif-rhprod:
+      allowServiceAccounts: true
+      group:
+        groupName:
+          prefix: "aif" # spec.group_name must start with this
+        backends:
+          allowedBackendTypes: ["rover"] # each spec.backends[].type must be in this list
+```
+
+| Field | Effect |
+| ----- | ------ |
+| `group.groupName.prefix` | When set, `spec.group_name` must start with this value. An empty prefix allows any name. |
+| `group.backends.allowedBackendTypes` | When non-empty, every `spec.backends[].type` must be in this list. An empty list allows any backend type. |
+| `allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. |
 
 ### Secret Loading
 

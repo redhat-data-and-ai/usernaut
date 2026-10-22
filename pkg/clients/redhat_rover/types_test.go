@@ -22,6 +22,28 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestKeepRoverMember(t *testing.T) {
+	assert.True(t, keepRoverMember(MemberTypeUser, false))
+	assert.True(t, keepRoverMember(MemberTypeUser, true))
+	assert.False(t, keepRoverMember(MemberTypeServiceAccount, false))
+	assert.True(t, keepRoverMember(MemberTypeServiceAccount, true))
+	assert.False(t, keepRoverMember("group", true))
+}
+
+func TestMemberTypeUsesRememberedServiceAccount(t *testing.T) {
+	rc := &RoverClient{
+		memberTypeByTeam: map[string]map[string]string{
+			"aif-group": {
+				"svc":   MemberTypeServiceAccount,
+				"alice": MemberTypeUser,
+			},
+		},
+	}
+	assert.Equal(t, MemberTypeServiceAccount, rc.memberType("aif-group", "svc"))
+	assert.Equal(t, MemberTypeUser, rc.memberType("aif-group", "alice"))
+	assert.Equal(t, MemberTypeUser, rc.memberType("aif-group", "missing"))
+}
+
 func TestMemberGetters(t *testing.T) {
 	m := Member{Type: MemberTypeUser, ID: "user-123"}
 	assert.Equal(t, MemberTypeUser, m.GetType())

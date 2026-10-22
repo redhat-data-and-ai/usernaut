@@ -37,6 +37,16 @@ func validate(namespace string, group *usernautv1alpha1.Group, rules config.Spec
 	return validateBackends(group, nsRules.Group.Backends)
 }
 
+// allowServiceAccounts reports whether rover should include service-account members.
+// It is true only when this namespace has rules, those rules pass, and the rule opts in.
+func allowServiceAccounts(namespace string, group *usernautv1alpha1.Group, rules config.SpecValidationRulesConfig) bool {
+	if err := validate(namespace, group, rules); err != nil {
+		return false
+	}
+	nsRules, ok := rules[namespace]
+	return ok && nsRules.AllowServiceAccounts
+}
+
 func validateBackends(group *usernautv1alpha1.Group, rule config.BackendsValidationConfig) error {
 	if len(rule.AllowedBackendTypes) == 0 {
 		return nil
