@@ -170,6 +170,11 @@ func (in *GroupStatus) DeepCopyInto(out *GroupStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.SkippedUsers != nil {
+		in, out := &in.SkippedUsers, &out.SkippedUsers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))
