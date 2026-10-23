@@ -1,5 +1,7 @@
 package structs
 
+import "strings"
+
 type User struct {
 	ID          string `json:"id,omitempty"`
 	UserName    string `json:"username,omitempty"`
@@ -44,6 +46,14 @@ type LDAPUser struct {
 	Email       string `json:"mail,omitempty"`
 	SN          string `json:"sn,omitempty"`
 	UID         string `json:"uid,omitempty"`
+	// ObjectClass is a space-separated list of LDAP object classes.
+	ObjectClass string `json:"objectClass,omitempty"`
+}
+
+// IsServiceAccount reports whether the LDAP entry is a Red Hat service account.
+// ObjectClass can have multiple values, so we need to check if "rhatserviceaccount" is present.
+func (u *LDAPUser) IsServiceAccount() bool {
+	return u != nil && strings.Contains(strings.ToLower(u.ObjectClass), "rhatserviceaccount")
 }
 
 func (u *LDAPUser) GetCN() string {

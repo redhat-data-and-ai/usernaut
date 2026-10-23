@@ -206,9 +206,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
 	}
 
-	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
-	groupCR.Status.ReconciledUsers = uniqueMembers
-
 	log.Info("fetching LDAP data for the users in the group")
 
 	// Step 1: Fetch LDAP data (no lock needed - read-only from LDAP)
@@ -217,6 +214,10 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
 		return ctrl.Result{Priority: &retryPriority}, err
 	}
+
+	uniqueMembers = ignoreServiceAccounts(ctx, uniqueMembers, allLdapUserData, log)
+	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
+	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	// Step 2: Process all backends (no global lock - individual store ops are atomic)
 	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers, log, allLdapUserData)
@@ -498,6 +499,9 @@ func (r *GroupReconciler) fetchLDAPData(
 		}
 
 		allLdapUserData[user] = ldapUser
+		if !config.AllowServiceAccounts(ctx) && ldapUser.IsServiceAccount() {
+			continue
+		}
 
 		if !uniqueUIDs[ldapUser.GetUID()] {
 			uniqueUIDs[ldapUser.GetUID()] = true
@@ -517,6 +521,21 @@ func (r *GroupReconciler) fetchLDAPData(
 		CurrentMembers: currentMembers,
 		ActiveUserList: activeUserList,
 	}, allLdapUserData, nil
+}
+
+// ignoreServiceAccounts drops service-account ids when this reconcile did not opt in.
+func ignoreServiceAccounts(ctx context.Context, members []string, ldapData map[string]*structs.LDAPUser, log *logrus.Entry) []string {
+	if config.AllowServiceAccounts(ctx) {
+		return members
+	}
+	return slices.DeleteFunc(slices.Clone(members), func(id string) bool {
+		user := ldapData[id]
+		if user == nil || !user.IsServiceAccount() {
+			return false
+		}
+		log.WithField("user", id).Info("ignoring service account")
+		return true
+	})
 }
 
 // updateCacheIndexes updates all cache indexes after successful backend reconciliation

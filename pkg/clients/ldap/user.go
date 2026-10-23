@@ -20,14 +20,25 @@ var (
 // parseLDAPEntry is a helper method that extracts attribute values from an LDAP entry.
 func (l *LDAPConn) parseLDAPEntry(entry *ldap.Entry) map[string]interface{} {
 	userData := make(map[string]interface{})
-	for _, attr := range l.attributes {
-		if len(entry.GetAttributeValues(attr)) > 0 {
-			userData[attr] = entry.GetAttributeValue(attr)
-		} else {
+	for _, attr := range l.searchAttributes() {
+		values := entry.GetAttributeValues(attr)
+		if len(values) == 0 {
 			userData[attr] = ""
+			continue
 		}
+		if attr == "objectClass" {
+			userData[attr] = strings.Join(values, " ")
+			continue
+		}
+		userData[attr] = values[0]
 	}
 	return userData
+}
+
+// searchAttributes returns the configured attributes plus objectClass,
+// which distinguishes people from service accounts.
+func (l *LDAPConn) searchAttributes() []string {
+	return append([]string{"objectClass"}, l.attributes...)
 }
 
 // executeSearch is a helper method that executes the provided search request.
@@ -76,7 +87,7 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 		fmt.Sprintf(l.userDN, ldap.EscapeFilter(userID)),
 		ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
 		filter,
-		l.attributes,
+		l.searchAttributes(),
 		nil,
 	)
 
@@ -144,7 +155,7 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 			l.baseUserDN,
 			ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 			filter,
-			l.attributes,
+			l.searchAttributes(),
 			nil,
 		)
 
@@ -199,7 +210,7 @@ func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (ma
 		l.baseUserDN,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		filter,
-		l.attributes,
+		l.searchAttributes(),
 		nil,
 	)
 

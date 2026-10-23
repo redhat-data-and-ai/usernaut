@@ -171,6 +171,17 @@ func TestLoadConfigFromPathInvalidURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported URL scheme")
 }
 
+func TestAllowServiceAccountsContext(t *testing.T) {
+	ctx := context.Background()
+	assert.False(t, AllowServiceAccounts(ctx))
+
+	ctx = WithAllowServiceAccounts(ctx)
+	assert.True(t, AllowServiceAccounts(ctx))
+
+	ctx = context.WithValue(context.Background(), allowServiceAccountsCtxKey{}, "nope")
+	assert.False(t, AllowServiceAccounts(ctx))
+}
+
 func TestLoadConfigFromPathHTTPError(t *testing.T) {
 	type TestConfig struct {
 		Value string
