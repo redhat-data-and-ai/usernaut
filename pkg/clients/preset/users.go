@@ -129,20 +129,21 @@ func scimUserToStruct(su *scimUser) *structs.User {
 }
 
 // CreateUser creates a new user in Preset using SCIM.
-// userName is the RH uid (same identifier Snowflake uses for name/login_name);
+// The SCIM userName is the LDAP rhatUUID. User.UserName stays the RH uid.
 func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
 		"username":    user.UserName,
+		"rhatUUID":    user.RhatUUID,
 	})
 
 	log.Info("creating user")
 	reqURL := fmt.Sprintf("%s/Users", pc.scimURL())
 
 	email := strings.TrimSpace(user.Email)
-	userName := strings.TrimSpace(user.UserName)
+	userName := strings.TrimSpace(user.RhatUUID)
 	if email == "" || userName == "" {
-		return nil, fmt.Errorf("email and username are required for Preset user creation")
+		return nil, fmt.Errorf("email and rhatUUID are required for Preset user creation")
 	}
 
 	reqBody := scimUserCreateRequest{

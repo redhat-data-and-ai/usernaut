@@ -173,7 +173,8 @@ func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
 	pc := newTestPresetClient(t, srv.URL)
 	user, err := pc.CreateUser(context.Background(), &structs.User{
 		Email:     "existing@example.com",
-		UserName:  "existing",
+		UserName:  "ctolosa",
+		RhatUUID:  "existing",
 		FirstName: "Existing",
 		LastName:  "User",
 	})
@@ -271,20 +272,34 @@ func TestNewClient_success(t *testing.T) {
 	assert.Equal(t, "token", pc.scimToken)
 }
 
-func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
+func TestCreateUser_requiresEmailAndRhatUUID(t *testing.T) {
 	pc := newTestPresetClient(t, "https://example.com")
-	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "ctolosa"})
+	_, err := pc.CreateUser(context.Background(), &structs.User{
+		UserName: "ctolosa",
+		RhatUUID: "rhat-uuid",
+	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "email and username are required")
-	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com"})
+	assert.Contains(t, err.Error(), "email and rhatUUID are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{
+		Email:    "ctolosa@redhat.com",
+		UserName: "ctolosa",
+	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "email and username are required")
-	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "  ", UserName: "ctolosa"})
+	assert.Contains(t, err.Error(), "email and rhatUUID are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{
+		Email:    "  ",
+		UserName: "ctolosa",
+		RhatUUID: "rhat-uuid",
+	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "email and username are required")
-	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com", UserName: "  "})
+	assert.Contains(t, err.Error(), "email and rhatUUID are required")
+	_, err = pc.CreateUser(context.Background(), &structs.User{
+		Email:    "ctolosa@redhat.com",
+		UserName: "ctolosa",
+		RhatUUID: "  ",
+	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "email and username are required")
+	assert.Contains(t, err.Error(), "email and rhatUUID are required")
 }
 
 func TestCreateTeam_conflictResolvesExistingGroup(t *testing.T) {
@@ -585,7 +600,8 @@ func TestFindUserByUserName_escapesFilterLiteral(t *testing.T) {
 	pc := newTestPresetClient(t, srv.URL)
 	user, err := pc.CreateUser(context.Background(), &structs.User{
 		Email:     `user"name@example.com`,
-		UserName:  `user"name`,
+		UserName:  "ctolosa",
+		RhatUUID:  `user"name`,
 		FirstName: "Given",
 		LastName:  "Family",
 	})
