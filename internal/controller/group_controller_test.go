@@ -38,6 +38,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
+	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
 
@@ -74,8 +75,9 @@ var _ = Describe("Group Controller", func() {
 				UserSearchFilter: "(objectClass=filteClass)",
 				Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
 			},
-			Backends:   backends,
-			BackendMap: backendMap,
+			Backends:                       backends,
+			BackendMap:                     backendMap,
+			BackendTypesWithRemovalSupport: []string{"fivetran"},
 			Cache: cache.Config{
 				Driver: "memory",
 				InMemory: &inmemory.Config{
@@ -511,6 +513,158 @@ var _ = Describe("Group Controller", func() {
 				err := k8sClient.Get(ctx, nn, &usernautdevv1alpha1.Group{})
 				return errors.IsNotFound(err)
 			}).Should(BeTrue())
+		})
+	})
+
+	Context("When cleaning up removed backends", func() {
+		It("should skip cleanup when no previous backends exist in CR status", func() {
+			reconciler, _ := setupTestReconciler(nil)
+
+			groupCR := &usernautdevv1alpha1.Group{
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: "test-group-no-status",
+					Backends:  []usernautdevv1alpha1.Backend{},
+				},
+			}
+
+			log := logger.Logger(context.Background()).WithField("test", "no-status")
+			errs := reconciler.cleanupRemovedBackends(context.Background(), groupCR, log)
+			Expect(errs).To(BeEmpty())
+		})
+
+		It("should skip cleanup for backend types not in the allowlist", func() {
+			reconciler, _ := setupTestReconciler(nil)
+
+			// CR no longer has the rover backend, but CR status shows it was previously present
+			groupCR := &usernautdevv1alpha1.Group{
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: "test-group-rover",
+					Backends:  []usernautdevv1alpha1.Backend{},
+				},
+				Status: usernautdevv1alpha1.GroupStatus{
+					BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+						{Name: "rover", Type: "rover", Status: true, Message: "Successful"},
+					},
+				},
+			}
+
+			log := logger.Logger(context.Background()).WithField("test", "unsupported-type")
+			errs := reconciler.cleanupRemovedBackends(context.Background(), groupCR, log)
+			Expect(errs).To(BeEmpty())
+		})
+
+		It("should not clean up backends that are still in the CR spec", func() {
+			reconciler, _ := setupTestReconciler(nil)
+
+			// CR still has the fivetran backend, and status shows it was previously present
+			groupCR := &usernautdevv1alpha1.Group{
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: "test-group-active",
+					Backends: []usernautdevv1alpha1.Backend{
+						{Name: "fivetran", Type: "fivetran"},
+					},
+				},
+				Status: usernautdevv1alpha1.GroupStatus{
+					BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+						{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},
+					},
+				},
+			}
+
+			log := logger.Logger(context.Background()).WithField("test", "still-active")
+			errs := reconciler.cleanupRemovedBackends(context.Background(), groupCR, log)
+			Expect(errs).To(BeEmpty())
+		})
+
+		It("should return error when backend client creation fails for removed fivetran backend", func() {
+			// No backends configured in AppConfig so client creation will fail
+			reconciler, _ := setupTestReconciler(nil)
+
+			// Set up team ID in GroupStore (populated during reconcile)
+			err := reconciler.Store.Group.SetBackend(
+				context.Background(), "test-group-removed", "fivetran", "fivetran", "team_123")
+			Expect(err).NotTo(HaveOccurred())
+
+			// CR no longer has the fivetran backend, but CR status shows it was previously present
+			groupCR := &usernautdevv1alpha1.Group{
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: "test-group-removed",
+					Backends:  []usernautdevv1alpha1.Backend{},
+				},
+				Status: usernautdevv1alpha1.GroupStatus{
+					BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+						{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},
+					},
+				},
+			}
+
+			log := logger.Logger(context.Background()).WithField("test", "client-creation-fail")
+			errs := reconciler.cleanupRemovedBackends(context.Background(), groupCR, log)
+			Expect(errs).To(HaveKey("fivetran"))
+			Expect(errs["fivetran"]).To(HaveKey("fivetran"))
+		})
+
+		It("should fall back to TeamStore when team ID is not in GroupStore", func() {
+			// No backends configured in AppConfig so client creation will fail
+			reconciler, _ := setupTestReconciler(nil)
+
+			// Add pattern config for group name transformation
+			reconciler.AppConfig.Pattern = map[string][]config.PatternEntry{
+				"default": {
+					{Input: "dataverse-aggregate-([a-z0-9]+)", Output: "$1_group"},
+				},
+			}
+
+			// Team ID only in TeamStore (not in GroupStore) - simulates preloaded team
+			err := reconciler.Store.Team.SetBackend(
+				context.Background(), "fallback_group", "fivetran_fivetran", "team_456")
+			Expect(err).NotTo(HaveOccurred())
+
+			groupCR := &usernautdevv1alpha1.Group{
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: "dataverse-aggregate-fallback",
+					Backends:  []usernautdevv1alpha1.Backend{},
+				},
+				Status: usernautdevv1alpha1.GroupStatus{
+					BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+						{Name: "fivetran", Type: "fivetran", Status: true, Message: "Successful"},
+					},
+				},
+			}
+
+			log := logger.Logger(context.Background()).WithField("test", "teamstore-fallback")
+			errs := reconciler.cleanupRemovedBackends(context.Background(), groupCR, log)
+			// Client creation fails (no backend config), but the team ID was found via TeamStore
+			Expect(errs).To(HaveKey("fivetran"))
+			Expect(errs["fivetran"]).To(HaveKey("fivetran"))
+		})
+
+		It("should skip deletion when team ID is not found in either store", func() {
+			reconciler, _ := setupTestReconciler(nil)
+
+			// Add pattern config so TeamStore fallback lookup succeeds
+			reconciler.AppConfig.Pattern = map[string][]config.PatternEntry{
+				"default": {
+					{Input: "dataverse-aggregate-([a-z0-9]+)", Output: "$1_group"},
+				},
+			}
+
+			// CR status shows fivetran was present, but no team ID in GroupStore or TeamStore
+			groupCR := &usernautdevv1alpha1.Group{
+				Spec: usernautdevv1alpha1.GroupSpec{
+					GroupName: "dataverse-aggregate-noteamid",
+					Backends:  []usernautdevv1alpha1.Backend{},
+				},
+				Status: usernautdevv1alpha1.GroupStatus{
+					BackendsStatus: []usernautdevv1alpha1.BackendStatus{
+						{Name: "fivetran", Type: "fivetran", Status: false, Message: "some error"},
+					},
+				},
+			}
+
+			log := logger.Logger(context.Background()).WithField("test", "no-team-id")
+			errs := reconciler.cleanupRemovedBackends(context.Background(), groupCR, log)
+			Expect(errs).To(BeEmpty())
 		})
 	})
 })
