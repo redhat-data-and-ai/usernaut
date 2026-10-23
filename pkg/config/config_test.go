@@ -115,7 +115,8 @@ func TestFileSubstitution(t *testing.T) {
 	fileConfig.Secret = "file|" + tmpfile.Name()
 
 	// Substitute
-	SubstituteConfigValues(reflect.ValueOf(&fileConfig))
+	err = SubstituteConfigValues(reflect.ValueOf(&fileConfig))
+	assert.Nil(t, err)
 
 	assert.Equal(t, secretValue, fileConfig.Secret)
 }
