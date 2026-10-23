@@ -1006,6 +1006,7 @@ func (r *GroupReconciler) createUsersInBackendAndCache(ctx context.Context,
 		newUser, err := backendClient.CreateUser(ctx, &structs.User{
 			Email:     userDetails.GetEmail(),
 			UserName:  user,
+			RhatUUID:  userDetails.GetRhatUUID(),
 			Role:      fivetran.AccountReviewerRole,
 			FirstName: utils.StandardizeNameForBackend(userDetails.GetDisplayName()),
 			LastName:  utils.StandardizeNameForBackend(userDetails.GetSN()),

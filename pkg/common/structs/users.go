@@ -8,6 +8,7 @@ type User struct {
 	LastName    string `json:"last_name,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	Role        string `json:"role,omitempty"`
+	RhatUUID    string `json:"rhat_uuid,omitempty"`
 }
 
 func (u *User) GetID() string {
@@ -38,12 +39,17 @@ func (u *User) GetRole() string {
 	return u.Role
 }
 
+func (u *User) GetRhatUUID() string {
+	return u.RhatUUID
+}
+
 type LDAPUser struct {
 	CN          string `json:"cn,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
 	Email       string `json:"mail,omitempty"`
 	SN          string `json:"sn,omitempty"`
 	UID         string `json:"uid,omitempty"`
+	RhatUUID    string `json:"rhatUUID,omitempty"`
 }
 
 func (u *LDAPUser) GetCN() string {
@@ -64,4 +70,8 @@ func (u *LDAPUser) GetSN() string {
 
 func (u *LDAPUser) GetUID() string {
 	return u.UID
+}
+
+func (u *LDAPUser) GetRhatUUID() string {
+	return u.RhatUUID
 }
