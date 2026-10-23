@@ -237,6 +237,10 @@ spec:
               lastAppliedGeneration:
                 format: int64
                 type: integer
+              missingSubGroups:
+                items:
+                  type: string
+                type: array
               reconciledUsers:
                 items:
                   type: string

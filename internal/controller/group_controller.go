@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -61,6 +62,8 @@ const (
 	// this takes care of updating users in ldap query based groups
 	requeueAfter = 8 * time.Hour
 )
+
+var retryPriority = -200
 
 // GroupReconciler reconciles a Group object
 type GroupReconciler struct {
@@ -160,7 +163,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		queryMembers, err = r.fetchQueryMembers(ctx, groupCR.Spec.Members.LDAPQuery, includeIndirectReports, nil)
 		if err != nil {
 			log.WithError(err).Error("error fetching query members")
-			return ctrl.Result{}, err
+			return ctrl.Result{Priority: &retryPriority}, err
 		}
 		if includeManager {
 			queryMembers = append(queryMembers, extractManagerUIDsFromQuery(groupCR.Spec.Members.LDAPQuery)...)
@@ -169,13 +172,36 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	visitedGroups := make(map[string]struct{})
-	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups, log)
+	var missingGroups []string
+	allDeclaredMembers, err := r.fetchUniqueGroupMembers(ctx, req.Name, groupCR.Namespace, visitedGroups, &missingGroups, log)
 	if err != nil {
 		log.WithError(err).Error("error fetching unique group members")
-		return ctrl.Result{}, err
+		groupCR.UpdateStatusWithErrMessage(err.Error())
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after error fetching unique group members")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
+	groupCR.SetMissingSubGroups(missingGroups)
+
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
+
+	if len(uniqueMembers) == 0 {
+		if len(missingGroups) > 0 {
+			log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
+			groupCR.UpdateStatus(false)
+		} else {
+			log.Info("no members to reconcile, skipping backend reconciliation")
+			groupCR.UpdateStatusWithErrMessage("no members to reconcile, skipping backend reconciliation")
+		}
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after no members to reconcile")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
+	}
 
 	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
@@ -186,7 +212,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, log)
 	if err != nil {
 		log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
-		return ctrl.Result{}, err
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
 	// Step 2: Process all backends (no global lock - individual store ops are atomic)
@@ -213,13 +239,14 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Step 4: Remove force reconcile label if present
 	if removeErr := controllerutils.RemoveForceReconcileLabel(ctx, r.Client, groupCR); removeErr != nil {
 		log.WithError(removeErr).Error("Failed to remove force reconcile label")
-		return ctrl.Result{}, removeErr
+		return ctrl.Result{Priority: &retryPriority}, removeErr
 	}
 
 	// Step 5: Update status and handle errors
 	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, log); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{Priority: &retryPriority}, err
 	}
+
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
@@ -853,7 +880,6 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 		}
 
 		// Get team ID from consolidated group store (using original group name)
-		// NOTE: CacheMutex is already held by caller (handleDeletion)
 		teamID, err := r.Store.Group.GetBackendID(ctx, groupName, backend.Name, backend.Type)
 		if err != nil {
 			backendLoggerInfo.WithError(err).Error("Finalizer: error fetching team details from cache")
@@ -1140,12 +1166,13 @@ func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
+			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](2*time.Second, 1000*time.Second),
 		}).
 		Complete(r)
 }
 
 func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName,
-	namespace string, visitedOnPath map[string]struct{}, log *logrus.Entry) ([]string, error) {
+	namespace string, visitedOnPath map[string]struct{}, missingGroups *[]string, log *logrus.Entry) ([]string, error) {
 
 	log.WithField("group", groupName).Info("fetching group members")
 
@@ -1173,7 +1200,7 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 		foundIn := make([]string, 0, 1)
 		membersToAdd := make([]string, 0)
 		for _, searchNamespace := range r.WatchedNamespaces {
-			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath, log)
+			subMembers, err := r.fetchUniqueGroupMembers(ctx, subGroup, searchNamespace, visitedOnPath, missingGroups, log)
 			if err != nil {
 				if apierrors.IsNotFound(err) {
 					continue
@@ -1188,8 +1215,9 @@ func (r *GroupReconciler) fetchUniqueGroupMembers(ctx context.Context, groupName
 		// with the same name in different namespaces
 		switch {
 		case len(foundIn) == 0:
-			return nil, fmt.Errorf("no group %s found in namespaces %s",
-				subGroup, strings.Join(r.WatchedNamespaces, ", "))
+			log.WithField("group", subGroup).
+				Warn("no group found in namespaces, skipping group members")
+			*missingGroups = append(*missingGroups, subGroup)
 		case len(foundIn) > 1:
 			return nil, fmt.Errorf("multiple groups %s found in namespaces %s", subGroup, strings.Join(foundIn, ", "))
 		default:
