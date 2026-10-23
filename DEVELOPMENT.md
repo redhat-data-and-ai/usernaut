@@ -810,11 +810,11 @@ apiServer:
 controllerConfig:
   maxConcurrentReconciles: 15
   specValidationRules:
-    ddis-asteroid--usernaut-aif-rhprod:
+    <namespace>:
       allowServiceAccounts: true
       group:
         groupName:
-          prefix: "aif" # spec.group_name must start with this
+          prefix: "<prefix>" # spec.group_name must start with this
         backends:
           allowedBackendTypes: ["rover"] # each spec.backends[].type must be in this list
 ```
