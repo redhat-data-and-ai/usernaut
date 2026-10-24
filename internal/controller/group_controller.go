@@ -110,21 +110,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	// Skip expensive reconciliation (LDAP, backends) when nothing changed.
-	// Parent groups (with subgroup references) are never skipped — child membership
-	// changes don't bump the parent's generation, so skipping would delay propagation
-	// until the next periodic requeue. Leaf groups are safe to skip since their
-	// membership only changes via spec edits (which bump generation).
-	// requeueAfter/2 ensures periodic requeues (8h) always exceed the window and
-	// trigger a full reconcile, preserving LDAP membership refresh.
-	allowSA := allowServiceAccounts(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules)
-	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
-	if !hasSubgroups && groupCR.Status.LastAppliedAllowServiceAccounts == allowSA && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
-		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
-		log.Info("skipping reconciliation, generation unchanged")
-		return ctrl.Result{RequeueAfter: requeueAfter}, nil
-	}
-
 	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
 		log.WithError(err).Warn("spec validation failed")
 		groupCR.UpdateStatusWithErrMessage(err.Error())
@@ -133,6 +118,21 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Skip expensive reconciliation (LDAP, backends) when nothing changed.
+	// Parent groups (with subgroup references) are never skipped — child membership
+	// changes don't bump the parent's generation, so skipping would delay propagation
+	// until the next periodic requeue. Leaf groups can be skipped when both their
+	// generation and service-account policy are unchanged.
+	// requeueAfter/2 ensures periodic requeues (8h) always exceed the window and
+	// trigger a full reconcile, preserving LDAP membership refresh.
+	allowSA := r.AppConfig.ControllerConfig.SpecValidationRules[req.Namespace].AllowServiceAccounts
+	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
+	if !hasSubgroups && groupCR.Status.LastAppliedAllowServiceAccounts == allowSA && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
+		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
+		log.Info("skipping reconciliation, generation unchanged")
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 
 	// set owner reference to the group CR
@@ -682,7 +682,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	backendGroupParams structs.TeamParams,
 ) error {
 	includeServiceAccounts := backend.Type == "rover" &&
-		allowServiceAccounts(groupCR.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules)
+		r.AppConfig.ControllerConfig.SpecValidationRules[groupCR.Namespace].AllowServiceAccounts
 	uniqueMembers = r.membersForBackend(uniqueMembers, allLdapUserData, includeServiceAccounts)
 
 	// Create backend client

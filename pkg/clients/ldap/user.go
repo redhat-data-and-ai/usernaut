@@ -39,16 +39,10 @@ var (
 func (l *LDAPConn) parseLDAPEntry(entry *ldap.Entry) map[string]interface{} {
 	userData := make(map[string]interface{})
 	for _, attr := range l.searchAttributes() {
-		values := entry.GetAttributeValues(attr)
-		if len(values) == 0 {
-			userData[attr] = ""
-			continue
-		}
+		userData[attr] = entry.GetAttributeValue(attr)
 		if attr == "objectClass" {
-			userData[attr] = strings.Join(values, " ")
-			continue
+			userData[attr] = strings.Join(entry.GetAttributeValues(attr), " ")
 		}
-		userData[attr] = values[0]
 	}
 	return userData
 }

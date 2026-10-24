@@ -12,16 +12,17 @@ import (
 )
 
 type LDAP struct {
+	Server           string   `yaml:"server"`
+	BaseDN           string   `yaml:"baseDN"`
+	BaseUserDN       string   `yaml:"baseUserDN"`
+	UserDN           string   `yaml:"userDN"`
+	UserSearchFilter string   `yaml:"userSearchFilter"`
+	Attributes       []string `yaml:"attributes"`
+	BindUsername     string   `yaml:"bindUsername"`
+	BindPassword     string   `yaml:"bindPassword"`
+
 	// ServiceAccountObjectClass is required to enforce service-account membership policy.
-	ServiceAccountObjectClass string   `yaml:"serviceAccountObjectClass"`
-	Server                    string   `yaml:"server"`
-	BaseDN                    string   `yaml:"baseDN"`
-	BaseUserDN                string   `yaml:"baseUserDN"`
-	UserDN                    string   `yaml:"userDN"`
-	UserSearchFilter          string   `yaml:"userSearchFilter"`
-	Attributes                []string `yaml:"attributes"`
-	BindUsername              string   `yaml:"bindUsername"`
-	BindPassword              string   `yaml:"bindPassword"`
+	ServiceAccountObjectClass string `yaml:"serviceAccountObjectClass"`
 }
 
 // Validate rejects configuration that cannot distinguish service accounts from people.
@@ -40,16 +41,17 @@ type LDAPConnClient interface {
 }
 
 type LDAPConn struct {
+	conn             LDAPConnClient
+	userDN           string
+	baseDN           string
+	baseUserDN       string
+	server           string
+	userSearchFilter string
+	bindUsername     string
+	bindPassword     string
+	attributes       []string
+
 	serviceAccountObjectClass string
-	conn                      LDAPConnClient
-	userDN                    string
-	baseDN                    string
-	baseUserDN                string
-	server                    string
-	userSearchFilter          string
-	bindUsername              string
-	bindPassword              string
-	attributes                []string
 }
 
 type LDAPClientConfig struct {
@@ -83,16 +85,17 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 	}
 
 	return &LDAPConn{
+		conn:             conn,
+		server:           ldapConfig.Server,
+		userDN:           ldapConfig.UserDN,
+		baseDN:           ldapConfig.BaseDN,
+		baseUserDN:       ldapConfig.BaseUserDN,
+		userSearchFilter: ldapConfig.UserSearchFilter,
+		attributes:       ldapConfig.Attributes,
+		bindUsername:     ldapConfig.BindUsername,
+		bindPassword:     ldapConfig.BindPassword,
+
 		serviceAccountObjectClass: ldapConfig.ServiceAccountObjectClass,
-		conn:                      conn,
-		server:                    ldapConfig.Server,
-		userDN:                    ldapConfig.UserDN,
-		baseDN:                    ldapConfig.BaseDN,
-		baseUserDN:                ldapConfig.BaseUserDN,
-		userSearchFilter:          ldapConfig.UserSearchFilter,
-		attributes:                ldapConfig.Attributes,
-		bindUsername:              ldapConfig.BindUsername,
-		bindPassword:              ldapConfig.BindPassword,
 	}, nil
 }
 

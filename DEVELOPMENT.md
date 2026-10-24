@@ -823,7 +823,7 @@ controllerConfig:
 | ----- | ------ |
 | `group.groupName.prefix` | When set, `spec.group_name` must start with this value. An empty prefix allows any name. |
 | `group.backends.allowedBackendTypes` | When non-empty, every `spec.backends[].type` must be in this list. An empty list allows any backend type. |
-| `allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. When `false`, service accounts listed in `spec.members.users` are ignored and the rest of the group still reconciles. A namespace that should accept any group name leaves `groupName.prefix` empty and leaves this `false`. |
+| `allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. When `false`, service accounts listed in `spec.members.users` are ignored and the rest of the group still reconciles. |
 
 Configure the directory's service-account object class separately from the normal user filter:
 
