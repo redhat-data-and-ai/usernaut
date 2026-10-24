@@ -19,6 +19,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
@@ -156,15 +157,15 @@ func LoadConfig(env string) (*AppConfig, error) {
 	return config, nil
 }
 
-// validateServiceAccounts requires a directory class only when a namespace opts in.
+// validateServiceAccounts requires a service-account filter only when a namespace opts in.
 func (c *AppConfig) validateServiceAccounts() error {
 	if err := c.LDAP.Validate(); err != nil {
 		return err
 	}
 	for namespace, rules := range c.ControllerConfig.SpecValidationRules {
-		if rules.Group.AllowServiceAccounts && c.LDAP.ServiceAccountObjectClass == "" {
+		if rules.Group.AllowServiceAccounts && strings.TrimSpace(c.LDAP.ServiceAccountObjectFilter) == "" {
 			return fmt.Errorf(
-				"ldap.serviceAccountObjectClass is required when namespace %q enables group.allowServiceAccounts",
+				"ldap.serviceAccountObjectFilter is required when namespace %q enables group.allowServiceAccounts",
 				namespace)
 		}
 	}

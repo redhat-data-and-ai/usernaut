@@ -461,31 +461,69 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledStopsAfterFir
 	assertions.Contains(out, "a1")
 }
 
-func (suite *LDAPTestSuite) TestBulkLookupIncludesServiceAccounts() {
+func (suite *LDAPTestSuite) TestBulkLookupClassifiesByServiceAccountFilter() {
+	const serviceFilter = "(&(employeeType=service)(accountStatus=active))"
 	conn := &LDAPConn{
 		conn: suite.ldapClient, userSearchFilter: "(objectClass=person)",
-		serviceAccountObjectClass: "serviceAccount",
+		serviceAccountObjectFilter: serviceFilter, attributes: []string{"mail"},
 	}
-	suite.ldapClient.EXPECT().IsClosing().Return(false)
+	ids := []string{"person", "shared", "svc"}
+	uidFilter := "(|(uid=person)(uid=shared)(uid=svc))"
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(2)
+	calls := 0
 	suite.ldapClient.EXPECT().Search(gomock.Any()).DoAndReturn(func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
-		suite.Equal("(&(|(objectClass=person)(objectClass=serviceAccount))(|(uid=alice)))", req.Filter)
+		suite.Contains(req.Attributes, "uid")
 		_, err := ldap.CompileFilter(req.Filter)
 		suite.NoError(err)
-		return &ldap.SearchResult{}, nil
-	})
-	_, err := conn.GetBulkUserLDAPData(suite.ctx, []string{"alice"})
-	suite.NoError(err)
+		calls++
+		if calls == 1 {
+			suite.Equal("(&(objectClass=person)"+uidFilter+")", req.Filter)
+			return &ldap.SearchResult{Entries: []*ldap.Entry{
+				ldap.NewEntry("uid=person", map[string][]string{"uid": {"person"}, "mail": {"person@example.com"}}),
+				ldap.NewEntry("uid=shared", map[string][]string{"uid": {"shared"}, "mail": {"shared@example.com"}}),
+			}}, nil
+		}
+		suite.Equal("(&"+serviceFilter+uidFilter+")", req.Filter)
+		// No objectClass is returned: classification comes from the matching search.
+		return &ldap.SearchResult{Entries: []*ldap.Entry{
+			ldap.NewEntry("uid=shared", map[string][]string{"uid": {"shared"}, "mail": {"shared@example.com"}}),
+			ldap.NewEntry("uid=svc", map[string][]string{"uid": {"svc"}, "mail": {"svc@example.com"}}),
+		}}, nil
+	}).Times(2)
+	users, err := conn.GetBulkUserLDAPData(suite.ctx, ids)
+	suite.Require().NoError(err)
+	suite.Len(users, 3)
+	suite.Equal(false, users["person"]["isServiceAccount"])
+	suite.Equal(true, users["shared"]["isServiceAccount"])
+	suite.Equal(true, users["svc"]["isServiceAccount"])
+}
+
+func (suite *LDAPTestSuite) TestServiceAccountSearchFailureRejectsPartialResults() {
+	conn := &LDAPConn{
+		conn: suite.ldapClient, userSearchFilter: "(objectClass=person)",
+		serviceAccountObjectFilter: "(employeeType=service)",
+	}
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(2)
+	gomock.InOrder(
+		suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{Entries: []*ldap.Entry{
+			ldap.NewEntry("uid=shared", map[string][]string{"uid": {"shared"}}),
+		}}, nil),
+		suite.ldapClient.EXPECT().Search(gomock.Any()).Return(nil, assert.AnError),
+	)
+	users, err := conn.GetBulkUserLDAPData(suite.ctx, []string{"shared"})
+	suite.ErrorIs(err, assert.AnError)
+	suite.Nil(users)
 }
 
 func (suite *LDAPTestSuite) TestIdentityLookupsIncludeServiceAccounts() {
 	conn := &LDAPConn{
-		conn:                      suite.ldapClient,
-		userDN:                    "uid=%s,ou=users,dc=example,dc=com",
-		userSearchFilter:          "(objectClass=person)",
-		serviceAccountObjectClass: "serviceAccount",
-		attributes:                []string{"uid", "mail"},
+		conn:                       suite.ldapClient,
+		userDN:                     "uid=%s,ou=users,dc=example,dc=com",
+		userSearchFilter:           "(objectClass=person)",
+		serviceAccountObjectFilter: "(&(employeeType=service)(accountStatus=active))",
+		attributes:                 []string{"uid", "mail"},
 	}
-	identityFilter := "(|(objectClass=person)(objectClass=serviceAccount))"
+	identityFilter := "(|(objectClass=person)(&(employeeType=service)(accountStatus=active)))"
 	expectedFilters := []string{identityFilter, "(&" + identityFilter + "(mail=svc@example.com))"}
 	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(2)
 	calls := 0
@@ -509,9 +547,9 @@ func (suite *LDAPTestSuite) TestIdentityLookupsIncludeServiceAccounts() {
 
 func (suite *LDAPTestSuite) TestMissingServiceAccountIsStillAbsent() {
 	conn := &LDAPConn{
-		conn:                      suite.ldapClient,
-		userSearchFilter:          "(objectClass=person)",
-		serviceAccountObjectClass: "serviceAccount",
+		conn:                       suite.ldapClient,
+		userSearchFilter:           "(objectClass=person)",
+		serviceAccountObjectFilter: "(objectClass=serviceAccount)",
 	}
 	suite.ldapClient.EXPECT().IsClosing().Return(false)
 	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{}, nil)
@@ -529,10 +567,10 @@ func TestIdentitySearchFilterParentheses(t *testing.T) {
 		{"(|(objectClass=person)(objectClass=inetOrgPerson))", "(|(objectClass=person)(objectClass=inetOrgPerson))"},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
-			for _, class := range []string{"", "serviceAccount"} {
-				conn := &LDAPConn{userSearchFilter: tc.input, serviceAccountObjectClass: class}
+			for _, serviceFilter := range []string{"", "objectClass=serviceAccount", "(objectClass=serviceAccount)"} {
+				conn := &LDAPConn{userSearchFilter: tc.input, serviceAccountObjectFilter: serviceFilter}
 				want := tc.normalized
-				if class != "" {
+				if serviceFilter != "" {
 					want = "(|" + want + "(objectClass=serviceAccount))"
 				}
 				got := conn.identitySearchFilter()

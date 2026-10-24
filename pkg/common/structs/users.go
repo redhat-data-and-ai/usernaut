@@ -1,7 +1,5 @@
 package structs
 
-import "strings"
-
 type User struct {
 	ID          string `json:"id,omitempty"`
 	UserName    string `json:"username,omitempty"`
@@ -46,21 +44,8 @@ type LDAPUser struct {
 	Email       string `json:"mail,omitempty"`
 	SN          string `json:"sn,omitempty"`
 	UID         string `json:"uid,omitempty"`
-	// ObjectClass is a space-separated list of LDAP object classes.
-	ObjectClass string `json:"objectClass,omitempty"`
-}
-
-// IsServiceAccount matches a configured LDAP object class, ignoring case.
-func (u *LDAPUser) IsServiceAccount(objectClass string) bool {
-	if u == nil || objectClass == "" {
-		return false
-	}
-	for _, class := range strings.Fields(u.ObjectClass) {
-		if strings.EqualFold(class, objectClass) {
-			return true
-		}
-	}
-	return false
+	// ServiceAccount is set by the LDAP service-account filter lookup.
+	ServiceAccount bool `json:"isServiceAccount,omitempty"`
 }
 
 func (u *LDAPUser) GetCN() string {

@@ -502,7 +502,7 @@ func (r *GroupReconciler) fetchLDAPData(
 		}
 
 		result.UserData[user] = ldapUser
-		if ldapUser.IsServiceAccount(r.AppConfig.LDAP.ServiceAccountObjectClass) {
+		if ldapUser.ServiceAccount {
 			if !includeServiceAccounts {
 				result.IgnoredServiceAccounts = append(result.IgnoredServiceAccounts, user)
 				continue

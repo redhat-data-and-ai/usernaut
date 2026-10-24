@@ -196,23 +196,23 @@ func TestServiceAccountConfigValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		rules     SpecValidationRulesConfig
-		class     string
+		filter    string
 		wantError bool
 	}{
-		{name: "no rules or class"},
+		{name: "no rules or filter"},
 		{name: "flag omitted",
 			rules: SpecValidationRulesConfig{"test": {}}},
 		{name: "flag false",
 			rules: SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: false}}}},
-		{name: "opted in without class",
+		{name: "opted in without filter",
 			rules:     SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: true}}},
 			wantError: true},
-		{name: "opted in with class",
-			rules: SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: true}}},
-			class: "serviceAccount"},
-		{name: "opted in with blank class",
+		{name: "opted in with filter",
+			rules:  SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: true}}},
+			filter: "(&(employeeType=service)(accountStatus=active))"},
+		{name: "opted in with blank filter",
 			rules:     SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: true}}},
-			class:     " ",
+			filter:    " ",
 			wantError: true},
 		{name: "one namespace opted in",
 			rules: SpecValidationRulesConfig{
@@ -223,10 +223,10 @@ func TestServiceAccountConfigValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &AppConfig{ControllerConfig: ControllerConfig{SpecValidationRules: tc.rules}}
-			cfg.LDAP.ServiceAccountObjectClass = tc.class
+			cfg.LDAP.ServiceAccountObjectFilter = tc.filter
 			err := cfg.validateServiceAccounts()
 			if tc.wantError {
-				require.ErrorContains(t, err, "ldap.serviceAccountObjectClass")
+				require.ErrorContains(t, err, "ldap.serviceAccountObjectFilter")
 			} else {
 				require.NoError(t, err)
 			}

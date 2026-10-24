@@ -45,10 +45,10 @@ ldap:
   # Multiple person classes can be selected with an LDAP OR filter.
   userSearchFilter: "(|(objectClass=person)(objectClass=inetOrgPerson))"
   # Optional unless a namespace sets allowServiceAccounts: true.
-  # When configured, LDAP searches include this class alongside userSearchFilter.
+  # LDAP evaluates this filter separately to identify service-account members.
   # Only Rover in opted-in namespaces reconciles service-account members.
-  # serviceAccountObjectClass: "serviceAccount"
-  # Returned attributes; objectClass is requested automatically.
+  # serviceAccountObjectFilter: "(objectClass=serviceAccount)"
+  # Returned attributes; uid is requested automatically.
   attributes: ["mail", "uid", "cn", "sn", "displayName"]
   bindUsername: file|/path/to/ldap_key
   bindPassword: file|/path/to/ldap_secret

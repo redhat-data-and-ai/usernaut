@@ -825,20 +825,20 @@ controllerConfig:
 | `group.backends.allowedBackendTypes` | When non-empty, every `spec.backends[].type` must be in this list. An empty list allows any backend type. |
 | `group.allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. When `false`, service accounts listed in `spec.members.users` are ignored and the rest of the group still reconciles. |
 
-Configure the directory's service-account object class separately from the normal user filter:
+Configure a service-account LDAP filter separately from the normal user filter:
 
 ```yaml
 ldap:
   userSearchFilter: "(|(objectClass=person)(objectClass=inetOrgPerson))"
-  serviceAccountObjectClass: "serviceAccount" # replace with your directory's class
+  serviceAccountObjectFilter: "(&(objectClass=serviceAccount)(accountStatus=active))" # adapt to your directory
   attributes: ["mail", "uid", "cn", "sn", "displayName"]
 ```
 
-`serviceAccountObjectClass` is optional when every namespace disables or omits `allowServiceAccounts`. If any namespace sets `allowServiceAccounts: true`, configure a non-empty service-account object class; otherwise configuration loading fails.
+`serviceAccountObjectFilter` is optional when every namespace disables or omits `group.allowServiceAccounts`. If any namespace opts in, configure a non-empty service-account filter; otherwise configuration loading fails. A supplied filter must have valid LDAP syntax. Both filters accept surrounding parentheses or no surrounding parentheses.
 
-When the class is configured, LDAP searches use `userSearchFilter OR objectClass=serviceAccountObjectClass`; otherwise they use only `userSearchFilter`. The controller includes service accounts only for Rover in opted-in namespaces; other backends retain person-only membership. Identity lookups by UID or email always include the configured class so the offboarding job recognizes active service accounts.
+Bulk membership lookups query `userSearchFilter` and `serviceAccountObjectFilter` separately, then merge the results by UID. LDAP evaluates the full filters, including compound conditions. Identities matching both filters are classified as service accounts. This requires two searches per batch when a service-account filter is configured, and one otherwise. The controller includes service accounts only for Rover in opted-in namespaces; other backends retain person-only membership. UID and email existence lookups combine the two filters with OR so the offboarding job recognizes matching service accounts.
 
-`objectClass` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. After changing `allowServiceAccounts`, restart the operator to load the configuration, then force reconcile the Group to apply it immediately (including removing Rover service accounts after opt-out). Otherwise, the existing reconciliation schedule applies.
+`uid` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. After changing `allowServiceAccounts`, restart the operator to load the configuration, then force reconcile the Group to apply it immediately (including removing Rover service accounts after opt-out). Otherwise, the existing reconciliation schedule applies.
 
 ```sh
 kubectl label group <group-name> -n <namespace> operator.dataverse.redhat.com/force-reconcile=true --overwrite

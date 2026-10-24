@@ -20,12 +20,12 @@ func TestFetchLDAPDataClassifiesMembers(t *testing.T) {
 			ldapClient := mocks.NewMockLDAPClient(gomock.NewController(t))
 			r := &GroupReconciler{
 				LdapConn:  ldapClient,
-				AppConfig: &config.AppConfig{LDAP: ldap.LDAP{ServiceAccountObjectClass: "serviceAccount"}},
+				AppConfig: &config.AppConfig{LDAP: ldap.LDAP{ServiceAccountObjectFilter: "(objectClass=serviceAccount)"}},
 			}
 			members := []string{"person", "service", "missing"}
 			ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), members).Return(map[string]map[string]interface{}{
-				"person":  {"uid": "person", "mail": "person@example.com", "objectClass": "person"},
-				"service": {"uid": "service", "mail": "service@example.com", "objectClass": "top serviceAccount"},
+				"person":  {"uid": "person", "mail": "person@example.com", "isServiceAccount": false},
+				"service": {"uid": "service", "mail": "service@example.com", "isServiceAccount": true},
 			}, nil)
 			result, err := r.fetchLDAPData(t.Context(), members, enabled, logrus.NewEntry(logrus.New()))
 			require.NoError(t, err)
