@@ -25,8 +25,6 @@ import (
 	"sync"
 	"time"
 
-	ldapv3 "github.com/go-ldap/ldap/v3"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -119,8 +117,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// membership only changes via spec edits (which bump generation).
 	// requeueAfter/2 ensures periodic requeues (8h) always exceed the window and
 	// trigger a full reconcile, preserving LDAP membership refresh.
+	allowSA := allowServiceAccounts(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules)
 	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
-	if !hasSubgroups && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
+	if !hasSubgroups && groupCR.Status.LastAppliedAllowServiceAccounts == allowSA && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
 		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
 		log.Info("skipping reconciliation, generation unchanged")
 		return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -135,7 +134,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, nil
 	}
-	allowSA := allowServiceAccounts(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules)
 
 	// set owner reference to the group CR
 	if err := r.setOwnerReference(ctx, groupCR, log); err != nil {
@@ -209,13 +207,16 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	log.Info("fetching LDAP data for the users in the group")
 
 	// Step 1: Fetch LDAP data (no lock needed - read-only from LDAP)
-	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, allowSA, log)
+	includeServiceAccounts := slices.ContainsFunc(groupCR.Spec.Backends, func(b usernautdevv1alpha1.Backend) bool {
+		return b.Type == "rover" && allowSA
+	})
+	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, includeServiceAccounts, log)
 	if err != nil {
 		log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
 		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
-	uniqueMembers = reconcilableMembers(uniqueMembers, allLdapUserData, log)
+	uniqueMembers = r.membersForBackend(uniqueMembers, allLdapUserData, includeServiceAccounts)
 	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
 
@@ -232,6 +233,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if !hasErrors {
+		groupCR.Status.LastAppliedAllowServiceAccounts = allowSA
 		log.Info("All backends succeeded, updating cache indexes")
 		if err := r.updateCacheIndexes(ctx, groupCR.Spec.GroupName, ldapResult, log); err != nil {
 			log.WithError(err).Error("error updating cache indexes")
@@ -467,7 +469,7 @@ func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, see
 func (r *GroupReconciler) fetchLDAPData(
 	ctx context.Context,
 	uniqueMembers []string,
-	allowSA bool,
+	includeServiceAccounts bool,
 	log *logrus.Entry,
 ) (*LDAPFetchResult, map[string]*structs.LDAPUser, error) {
 	allLdapUserData := make(map[string]*structs.LDAPUser, len(uniqueMembers))
@@ -477,11 +479,6 @@ func (r *GroupReconciler) fetchLDAPData(
 
 	log.WithField("member_count", len(uniqueMembers)).Info("fetching LDAP data in bulk")
 
-	filter, err := membershipSearchFilter(r.AppConfig.LDAP, allowSA)
-	if err != nil {
-		return nil, nil, err
-	}
-	ctx = ldap.WithUserSearchFilter(ctx, filter)
 	bulkData, err := r.LdapConn.GetBulkUserLDAPData(ctx, uniqueMembers)
 	if err != nil {
 		log.WithError(err).Error("error fetching bulk LDAP data")
@@ -504,11 +501,11 @@ func (r *GroupReconciler) fetchLDAPData(
 			continue
 		}
 
-		if !allowSA && ldapUser.IsServiceAccount(r.AppConfig.LDAP.ServiceAccountObjectClass) {
-			log.WithField("user", user).Info("ignoring service account")
+		allLdapUserData[user] = ldapUser
+		// Cache only identities accepted by at least one configured backend.
+		if !includeServiceAccounts && ldapUser.IsServiceAccount(r.AppConfig.LDAP.ServiceAccountObjectClass) {
 			continue
 		}
-		allLdapUserData[user] = ldapUser
 
 		if !uniqueUIDs[ldapUser.GetUID()] {
 			uniqueUIDs[ldapUser.GetUID()] = true
@@ -530,31 +527,11 @@ func (r *GroupReconciler) fetchLDAPData(
 	}, allLdapUserData, nil
 }
 
-// membershipSearchFilter keeps namespace policy in the controller. Opted-out
-// lookups exclude service accounts even if the configured base filter includes them.
-func membershipSearchFilter(cfg ldap.LDAP, allowSA bool) (string, error) {
-	if err := cfg.Validate(); err != nil {
-		return "", err
-	}
-	filter := strings.TrimSpace(cfg.UserSearchFilter)
-	if !strings.HasPrefix(filter, "(") {
-		filter = "(" + filter + ")"
-	}
-	serviceAccount := "(objectClass=" + ldapv3.EscapeFilter(cfg.ServiceAccountObjectClass) + ")"
-	if allowSA {
-		return "(|" + filter + serviceAccount + ")", nil
-	}
-	return "(&" + filter + "(!" + serviceAccount + "))", nil
-}
-
-// reconcilableMembers omits identities excluded by the LDAP filter or missing from LDAP.
-func reconcilableMembers(members []string, ldapData map[string]*structs.LDAPUser, log *logrus.Entry) []string {
+// membersForBackend excludes missing identities and service accounts unless enabled for Rover.
+func (r *GroupReconciler) membersForBackend(members []string, data map[string]*structs.LDAPUser, includeServiceAccounts bool) []string {
 	return slices.DeleteFunc(slices.Clone(members), func(id string) bool {
-		if ldapData[id] != nil {
-			return false
-		}
-		log.WithField("user", id).Info("ignoring member absent from LDAP search results")
-		return true
+		user := data[id]
+		return user == nil || (!includeServiceAccounts && user.IsServiceAccount(r.AppConfig.LDAP.ServiceAccountObjectClass))
 	})
 }
 
@@ -704,6 +681,10 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	allLdapUserData map[string]*structs.LDAPUser,
 	backendGroupParams structs.TeamParams,
 ) error {
+	includeServiceAccounts := backend.Type == "rover" &&
+		allowServiceAccounts(groupCR.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules)
+	uniqueMembers = r.membersForBackend(uniqueMembers, allLdapUserData, includeServiceAccounts)
+
 	// Create backend client
 	backendClient, err := clients.New(backend.Name, backend.Type, r.AppConfig.BackendMap)
 	if err != nil {

@@ -234,6 +234,9 @@ spec:
                   - type
                   type: object
                 type: array
+              lastAppliedAllowServiceAccounts:
+                description: LastAppliedAllowServiceAccounts records the namespace policy last reconciled successfully.
+                type: boolean
               lastAppliedGeneration:
                 format: int64
                 type: integer

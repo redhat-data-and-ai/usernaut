@@ -461,27 +461,19 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledStopsAfterFir
 	assertions.Contains(out, "a1")
 }
 
-func (suite *LDAPTestSuite) TestBulkFilterOverrideIsScopedToLookup() {
-	conn := &LDAPConn{conn: suite.ldapClient, userSearchFilter: "(objectClass=person)"}
-	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(2)
-	calls := 0
+func (suite *LDAPTestSuite) TestBulkLookupIncludesServiceAccounts() {
+	conn := &LDAPConn{
+		conn: suite.ldapClient, userSearchFilter: "(objectClass=person)",
+		serviceAccountObjectClass: "serviceAccount",
+	}
+	suite.ldapClient.EXPECT().IsClosing().Return(false)
 	suite.ldapClient.EXPECT().Search(gomock.Any()).DoAndReturn(func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
-		expected := "(&(objectClass=person)(|(uid=alice)))"
-		if calls == 0 {
-			expected = "(&(|(objectClass=person)(objectClass=serviceAccount))(|(uid=alice)))"
-		}
-		suite.Equal(expected, req.Filter)
+		suite.Equal("(&(|(objectClass=person)(objectClass=serviceAccount))(|(uid=alice)))", req.Filter)
 		_, err := ldap.CompileFilter(req.Filter)
 		suite.NoError(err)
-		calls++
 		return &ldap.SearchResult{}, nil
-	}).Times(2)
-	_, err := conn.GetBulkUserLDAPData(
-		WithUserSearchFilter(suite.ctx, "(|(objectClass=person)(objectClass=serviceAccount))"),
-		[]string{"alice"},
-	)
-	suite.NoError(err)
-	_, err = conn.GetBulkUserLDAPData(suite.ctx, []string{"alice"})
+	})
+	_, err := conn.GetBulkUserLDAPData(suite.ctx, []string{"alice"})
 	suite.NoError(err)
 }
 
@@ -506,8 +498,7 @@ func (suite *LDAPTestSuite) TestIdentityLookupsIncludeServiceAccounts() {
 			"uid": {"svc"}, "mail": {"svc@example.com"}, "objectClass": {"top", "serviceAccount"},
 		})}}, nil
 	}).Times(2)
-	// A namespace membership filter must not change identity/existence checks.
-	ctx := WithUserSearchFilter(suite.ctx, "(&(objectClass=person)(!(objectClass=serviceAccount)))")
+	ctx := suite.ctx
 	byID, err := conn.GetUserLDAPData(ctx, "svc")
 	suite.NoError(err)
 	suite.Equal("svc", byID["uid"])

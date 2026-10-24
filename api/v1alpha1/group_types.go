@@ -101,6 +101,9 @@ type GroupStatus struct {
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	BackendsStatus        []BackendStatus    `json:"backends,omitempty"`
 	MissingSubGroups      []string           `json:"missingSubGroups,omitempty"`
+
+	// LastAppliedAllowServiceAccounts records the namespace policy last reconciled successfully.
+	LastAppliedAllowServiceAccounts bool `json:"lastAppliedAllowServiceAccounts,omitempty"`
 }
 
 // +kubebuilder:object:root=true

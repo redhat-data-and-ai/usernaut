@@ -10,13 +10,6 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
 
-type userSearchFilterKey struct{}
-
-// WithUserSearchFilter overrides the filter for a bulk lookup without changing the shared client.
-func WithUserSearchFilter(ctx context.Context, filter string) context.Context {
-	return context.WithValue(ctx, userSearchFilterKey{}, filter)
-}
-
 // normalizeSearchFilter accepts configured filters with or without outer parentheses.
 func normalizeSearchFilter(filter string) string {
 	filter = strings.TrimSpace(filter)
@@ -26,8 +19,7 @@ func normalizeSearchFilter(filter string) string {
 	return filter
 }
 
-// identitySearchFilter includes all managed identity types for existence checks,
-// independently of the namespace policy used by bulk membership lookups.
+// identitySearchFilter includes people and service accounts for all identity lookups.
 func (l *LDAPConn) identitySearchFilter() string {
 	filter := normalizeSearchFilter(l.userSearchFilter)
 	if l.serviceAccountObjectClass == "" {
@@ -151,11 +143,7 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 		return result, err
 	}
 
-	userFilter := l.userSearchFilter
-	if override, ok := ctx.Value(userSearchFilterKey{}).(string); ok && override != "" {
-		userFilter = override
-	}
-	userFilter = normalizeSearchFilter(userFilter)
+	userFilter := l.identitySearchFilter()
 
 	totalBatches := (len(userIDs) + bulkLDAPBatchSize - 1) / bulkLDAPBatchSize
 	log.WithField("total_users", len(userIDs)).WithField("batch_size", bulkLDAPBatchSize).
