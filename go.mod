@@ -6,7 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/fivetran/go-fivetran v1.1.0
 	github.com/gin-gonic/gin v1.11.0
-	github.com/go-ldap/ldap/v3 v3.4.13
+	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gojek/heimdall/v7 v7.2.0
 	github.com/golang/mock v1.6.0
@@ -52,7 +52,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
-	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
+	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
