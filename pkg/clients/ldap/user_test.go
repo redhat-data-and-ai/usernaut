@@ -518,3 +518,28 @@ func (suite *LDAPTestSuite) TestMissingServiceAccountIsStillAbsent() {
 	_, err := conn.GetUserLDAPDataByEmail(suite.ctx, "missing@example.com")
 	suite.ErrorIs(err, ErrNoUserFound)
 }
+
+func TestIdentitySearchFilterParentheses(t *testing.T) {
+	for _, tc := range []struct{ input, normalized string }{
+		{"objectClass=person", "(objectClass=person)"},
+		{"(objectClass=person)", "(objectClass=person)"},
+		{"  objectClass=person  ", "(objectClass=person)"},
+		{"  (objectClass=person)  ", "(objectClass=person)"},
+		{"|(objectClass=person)(objectClass=inetOrgPerson)", "(|(objectClass=person)(objectClass=inetOrgPerson))"},
+		{"(|(objectClass=person)(objectClass=inetOrgPerson))", "(|(objectClass=person)(objectClass=inetOrgPerson))"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			for _, class := range []string{"", "serviceAccount"} {
+				conn := &LDAPConn{userSearchFilter: tc.input, serviceAccountObjectClass: class}
+				want := tc.normalized
+				if class != "" {
+					want = "(|" + want + "(objectClass=serviceAccount))"
+				}
+				got := conn.identitySearchFilter()
+				assert.Equal(t, want, got)
+				_, err := ldap.CompileFilter(got)
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
