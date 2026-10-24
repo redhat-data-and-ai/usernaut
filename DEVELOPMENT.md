@@ -838,7 +838,11 @@ ldap:
 
 LDAP searches always use `userSearchFilter OR objectClass=serviceAccountObjectClass`. The controller includes service accounts only for Rover in opted-in namespaces; other backends retain person-only membership. Identity lookups by UID or email always include the configured class so the offboarding job recognizes active service accounts.
 
-`objectClass` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. The last successfully applied `allowServiceAccounts` value is recorded in Group status. Changing it and restarting the operator triggers reconciliation even without a spec change, including removing Rover service accounts after opt-out.
+`objectClass` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. After changing `allowServiceAccounts`, restart the operator to load the configuration, then force reconcile the Group to apply it immediately (including removing Rover service accounts after opt-out). Otherwise, the existing reconciliation schedule applies.
+
+```sh
+kubectl label group <group-name> -n <namespace> operator.dataverse.redhat.com/force-reconcile=true --overwrite
+```
 
 ### Secret Loading
 

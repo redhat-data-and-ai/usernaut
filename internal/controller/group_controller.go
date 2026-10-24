@@ -123,13 +123,12 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Skip expensive reconciliation (LDAP, backends) when nothing changed.
 	// Parent groups (with subgroup references) are never skipped — child membership
 	// changes don't bump the parent's generation, so skipping would delay propagation
-	// until the next periodic requeue. Leaf groups can be skipped when both their
-	// generation and service-account policy are unchanged.
+	// until the next periodic requeue. Leaf groups can be skipped when their
+	// generation is unchanged; config changes require a force reconcile or periodic refresh.
 	// requeueAfter/2 ensures periodic requeues (8h) always exceed the window and
 	// trigger a full reconcile, preserving LDAP membership refresh.
-	allowSA := r.AppConfig.ControllerConfig.SpecValidationRules[req.Namespace].AllowServiceAccounts
 	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
-	if !hasSubgroups && groupCR.Status.LastAppliedAllowServiceAccounts == allowSA && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
+	if !hasSubgroups && controllerutils.ShouldSkipReconciliation(groupCR, groupCR.Status.LastAppliedGeneration,
 		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
 		log.Info("skipping reconciliation, generation unchanged")
 		return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -207,6 +206,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	log.Info("fetching LDAP data for the users in the group")
 
 	// Step 1: Fetch LDAP data (no lock needed - read-only from LDAP)
+	allowSA := r.AppConfig.ControllerConfig.SpecValidationRules[req.Namespace].AllowServiceAccounts
 	includeServiceAccounts := slices.ContainsFunc(groupCR.Spec.Backends, func(b usernautdevv1alpha1.Backend) bool {
 		return b.Type == "rover" && allowSA
 	})
@@ -233,7 +233,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if !hasErrors {
-		groupCR.Status.LastAppliedAllowServiceAccounts = allowSA
 		log.Info("All backends succeeded, updating cache indexes")
 		if err := r.updateCacheIndexes(ctx, groupCR.Spec.GroupName, ldapResult, log); err != nil {
 			log.WithError(err).Error("error updating cache indexes")
