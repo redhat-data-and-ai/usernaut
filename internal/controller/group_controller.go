@@ -224,7 +224,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	uniqueMembers = ldapResult.Members
 	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
-	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	// Step 2: Process all backends (no global lock - individual store ops are atomic)
 	backendErrors := r.processAllBackends(ctx, groupCR, ldapResult, log)
@@ -244,6 +243,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.WithError(removeErr).Error("Failed to remove force reconcile label")
 		return ctrl.Result{Priority: &retryPriority}, removeErr
 	}
+
+	// Removing the force label refreshes the object, so set membership status afterwards.
+	groupCR.Status.ReconciledUsers = uniqueMembers
 
 	// Step 5: Update status and handle errors
 	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, log); err != nil {
