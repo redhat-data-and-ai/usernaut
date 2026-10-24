@@ -811,8 +811,8 @@ controllerConfig:
   maxConcurrentReconciles: 15
   specValidationRules:
     <namespace>:
-      allowServiceAccounts: true
       group:
+        allowServiceAccounts: true
         groupName:
           prefix: "<prefix>" # spec.group_name must start with this
         backends:
@@ -823,7 +823,7 @@ controllerConfig:
 | ----- | ------ |
 | `group.groupName.prefix` | When set, `spec.group_name` must start with this value. An empty prefix allows any name. |
 | `group.backends.allowedBackendTypes` | When non-empty, every `spec.backends[].type` must be in this list. An empty list allows any backend type. |
-| `allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. When `false`, service accounts listed in `spec.members.users` are ignored and the rest of the group still reconciles. |
+| `group.allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. When `false`, service accounts listed in `spec.members.users` are ignored and the rest of the group still reconciles. |
 
 Configure the directory's service-account object class separately from the normal user filter:
 

@@ -3,6 +3,10 @@ package controller
 import (
 	"testing"
 
+	"github.com/golang/mock/gomock"
+	"github.com/redhat-data-and-ai/usernaut/internal/controller/mocks"
+	"github.com/stretchr/testify/require"
+
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
@@ -10,17 +14,35 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMembersForBackend(t *testing.T) {
-	r := &GroupReconciler{AppConfig: &config.AppConfig{LDAP: ldap.LDAP{ServiceAccountObjectClass: "serviceAccount"}}}
-	members := []string{"person", "service", "missing"}
-	data := map[string]*structs.LDAPUser{
-		"person":  {UID: "person"},
-		"service": {UID: "service", ObjectClass: "top serviceAccount"},
+func TestFetchLDAPDataClassifiesMembers(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
+			ldapClient := mocks.NewMockLDAPClient(gomock.NewController(t))
+			r := &GroupReconciler{
+				LdapConn:  ldapClient,
+				AppConfig: &config.AppConfig{LDAP: ldap.LDAP{ServiceAccountObjectClass: "serviceAccount"}},
+			}
+			members := []string{"person", "service", "missing"}
+			ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), members).Return(map[string]map[string]interface{}{
+				"person":  {"uid": "person", "mail": "person@example.com", "objectClass": "person"},
+				"service": {"uid": "service", "mail": "service@example.com", "objectClass": "top serviceAccount"},
+			}, nil)
+			result, err := r.fetchLDAPData(t.Context(), members, enabled, logrus.NewEntry(logrus.New()))
+			require.NoError(t, err)
+			assert.Len(t, result.UserData, 2)
+			assert.Equal(t, []string{"person"}, result.PersonMembers)
+			if enabled {
+				assert.Equal(t, []string{"person", "service"}, result.Members)
+				assert.Empty(t, result.IgnoredServiceAccounts)
+				assert.Equal(t, []string{"person@example.com", "service@example.com"}, result.CurrentMembers)
+			} else {
+				assert.Equal(t, []string{"person"}, result.Members)
+				assert.Equal(t, []string{"service"}, result.IgnoredServiceAccounts)
+				assert.Equal(t, []string{"person@example.com"}, result.CurrentMembers)
+			}
+			assert.ElementsMatch(t, result.Members, result.ActiveUserList)
+		})
 	}
-	assert.Equal(t, []string{"person"}, r.membersForBackend(members, data, false))
-	assert.Equal(t, []string{"person", "service"}, r.membersForBackend(members, data, true))
-	assert.Len(t, members, 3)
-	assert.Len(t, data, 2)
 }
 
 func TestOptOutRemovesExistingServiceAccount(t *testing.T) {
