@@ -12,7 +12,7 @@ import (
 )
 
 type LDAP struct {
-	// ServiceAccountObjectClass optionally identifies service accounts in this directory.
+	// ServiceAccountObjectClass is required to enforce service-account membership policy.
 	ServiceAccountObjectClass string   `yaml:"serviceAccountObjectClass"`
 	Server                    string   `yaml:"server"`
 	BaseDN                    string   `yaml:"baseDN"`
@@ -24,6 +24,14 @@ type LDAP struct {
 	BindPassword              string   `yaml:"bindPassword"`
 }
 
+// Validate rejects configuration that cannot distinguish service accounts from people.
+func (l LDAP) Validate() error {
+	if l.ServiceAccountObjectClass == "" || strings.ContainsAny(l.ServiceAccountObjectClass, " \t\r\n") {
+		return fmt.Errorf("ldap.serviceAccountObjectClass is required and must be a single non-empty object class")
+	}
+	return nil
+}
+
 type LDAPConnClient interface {
 	IsClosing() bool
 	Search(*ldapv3.SearchRequest) (*ldapv3.SearchResult, error)
@@ -32,15 +40,16 @@ type LDAPConnClient interface {
 }
 
 type LDAPConn struct {
-	conn             LDAPConnClient
-	userDN           string
-	baseDN           string
-	baseUserDN       string
-	server           string
-	userSearchFilter string
-	bindUsername     string
-	bindPassword     string
-	attributes       []string
+	serviceAccountObjectClass string
+	conn                      LDAPConnClient
+	userDN                    string
+	baseDN                    string
+	baseUserDN                string
+	server                    string
+	userSearchFilter          string
+	bindUsername              string
+	bindPassword              string
+	attributes                []string
 }
 
 type LDAPClientConfig struct {
@@ -59,6 +68,9 @@ type LDAPClient interface {
 
 // InitLdap initializes a connection to the LDAP server using the provided configuration.
 func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
+	if err := ldapConfig.Validate(); err != nil {
+		return nil, err
+	}
 	ldapClientConfig := LDAPClientConfig{
 		server:       ldapConfig.Server,
 		bindUsername: ldapConfig.BindUsername,
@@ -71,15 +83,16 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 	}
 
 	return &LDAPConn{
-		conn:             conn,
-		server:           ldapConfig.Server,
-		userDN:           ldapConfig.UserDN,
-		baseDN:           ldapConfig.BaseDN,
-		baseUserDN:       ldapConfig.BaseUserDN,
-		userSearchFilter: ldapConfig.UserSearchFilter,
-		attributes:       ldapConfig.Attributes,
-		bindUsername:     ldapConfig.BindUsername,
-		bindPassword:     ldapConfig.BindPassword,
+		serviceAccountObjectClass: ldapConfig.ServiceAccountObjectClass,
+		conn:                      conn,
+		server:                    ldapConfig.Server,
+		userDN:                    ldapConfig.UserDN,
+		baseDN:                    ldapConfig.BaseDN,
+		baseUserDN:                ldapConfig.BaseUserDN,
+		userSearchFilter:          ldapConfig.UserSearchFilter,
+		attributes:                ldapConfig.Attributes,
+		bindUsername:              ldapConfig.BindUsername,
+		bindPassword:              ldapConfig.BindPassword,
 	}, nil
 }
 

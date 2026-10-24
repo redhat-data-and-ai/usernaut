@@ -834,7 +834,11 @@ ldap:
   attributes: ["mail", "uid", "cn", "sn", "displayName"]
 ```
 
-`serviceAccountObjectClass` is optional; when omitted, no service-account-specific classification or filter adjustment is applied. When configured, the controller includes that class in LDAP searches only for opted-in namespaces and explicitly excludes it for other namespaces. `objectClass` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. Configuration changes take effect on the next full reconciliation; unchanged Groups can be skipped until a spec update or the periodic requeue.
+`serviceAccountObjectClass` is required, even when all namespaces disable service accounts. Set it to the actual object class used by your directory; missing or blank values stop LDAP initialization and reconciliation before membership changes.
+
+The controller includes that class in membership searches only for opted-in namespaces and explicitly excludes it for other namespaces. Identity lookups by UID or email always include the configured class so the offboarding job recognizes active service accounts.
+
+`objectClass` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. Configuration changes take effect on the next full reconciliation; unchanged Groups can be skipped until a spec update or the periodic requeue.
 
 ### Secret Loading
 

@@ -11,11 +11,12 @@ import (
 
 func TestInitLdap_Error(t *testing.T) {
 	LDAPConfig := LDAP{
-		Server:           "ldap://ldap.com:389",
-		BaseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
-		UserDN:           "uid=%s,ou=users,dc=example,dc=com",
-		UserSearchFilter: "(objectClass=uid)",
-		Attributes:       []string{"mail"},
+		ServiceAccountObjectClass: "serviceAccount",
+		Server:                    "ldap://ldap.com:389",
+		BaseDN:                    "ou=adhoc,ou=managedGroups,dc=example,dc=com",
+		UserDN:                    "uid=%s,ou=users,dc=example,dc=com",
+		UserSearchFilter:          "(objectClass=uid)",
+		Attributes:                []string{"mail"},
 	}
 
 	_, err := InitLdap(LDAPConfig)
@@ -31,6 +32,7 @@ func TestInitLdap_Success(t *testing.T) {
 	defer stop()
 
 	LDAPConfig := LDAP{
+		ServiceAccountObjectClass: "serviceAccount",
 		// using a valid LDAP server for testing, reference: https://github.com/go-ldap/ldap/blob/master/v3/ldap_test.go#L13
 		Server:           fmt.Sprintf("ldap://%s", addr),
 		BaseDN:           "ou=adhoc,ou=managedGroups,dc=example,dc=com",
@@ -82,5 +84,13 @@ func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 	return ln.Addr().String(), func() {
 		close(done)
 		_ = ln.Close()
+	}
+}
+
+func TestInitLdapRequiresServiceAccountObjectClass(t *testing.T) {
+	for _, class := range []string{"", " ", "\t", "service Account"} {
+		client, err := InitLdap(LDAP{ServiceAccountObjectClass: class})
+		assert.Nil(t, client)
+		assert.ErrorContains(t, err, "ldap.serviceAccountObjectClass is required")
 	}
 }

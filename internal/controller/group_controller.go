@@ -477,7 +477,11 @@ func (r *GroupReconciler) fetchLDAPData(
 
 	log.WithField("member_count", len(uniqueMembers)).Info("fetching LDAP data in bulk")
 
-	ctx = ldap.WithUserSearchFilter(ctx, membershipSearchFilter(r.AppConfig.LDAP, allowSA))
+	filter, err := membershipSearchFilter(r.AppConfig.LDAP, allowSA)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx = ldap.WithUserSearchFilter(ctx, filter)
 	bulkData, err := r.LdapConn.GetBulkUserLDAPData(ctx, uniqueMembers)
 	if err != nil {
 		log.WithError(err).Error("error fetching bulk LDAP data")
@@ -528,19 +532,19 @@ func (r *GroupReconciler) fetchLDAPData(
 
 // membershipSearchFilter keeps namespace policy in the controller. Opted-out
 // lookups exclude service accounts even if the configured base filter includes them.
-func membershipSearchFilter(cfg ldap.LDAP, allowSA bool) string {
-	filter := strings.TrimSpace(cfg.UserSearchFilter)
-	if cfg.ServiceAccountObjectClass == "" {
-		return filter
+func membershipSearchFilter(cfg ldap.LDAP, allowSA bool) (string, error) {
+	if err := cfg.Validate(); err != nil {
+		return "", err
 	}
+	filter := strings.TrimSpace(cfg.UserSearchFilter)
 	if !strings.HasPrefix(filter, "(") {
 		filter = "(" + filter + ")"
 	}
 	serviceAccount := "(objectClass=" + ldapv3.EscapeFilter(cfg.ServiceAccountObjectClass) + ")"
 	if allowSA {
-		return "(|" + filter + serviceAccount + ")"
+		return "(|" + filter + serviceAccount + ")", nil
 	}
-	return "(&" + filter + "(!" + serviceAccount + "))"
+	return "(&" + filter + "(!" + serviceAccount + "))", nil
 }
 
 // reconcilableMembers omits identities excluded by the LDAP filter or missing from LDAP.

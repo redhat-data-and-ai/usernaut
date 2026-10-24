@@ -5,19 +5,40 @@ import (
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
+	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMembershipSearchFilter(t *testing.T) {
 	cfg := ldap.LDAP{UserSearchFilter: "(objectClass=person)", ServiceAccountObjectClass: "serviceAccount"}
-	assert.Equal(t, "(&(objectClass=person)(!(objectClass=serviceAccount)))", membershipSearchFilter(cfg, false))
-	assert.Equal(t, "(|(objectClass=person)(objectClass=serviceAccount))", membershipSearchFilter(cfg, true))
-	cfg.ServiceAccountObjectClass = ""
-	assert.Equal(t, cfg.UserSearchFilter, membershipSearchFilter(cfg, false))
-	assert.Equal(t, cfg.UserSearchFilter, membershipSearchFilter(cfg, true))
+	filter, err := membershipSearchFilter(cfg, false)
+	require.NoError(t, err)
+	assert.Equal(t, "(&(objectClass=person)(!(objectClass=serviceAccount)))", filter)
+	filter, err = membershipSearchFilter(cfg, true)
+	require.NoError(t, err)
+	assert.Equal(t, "(|(objectClass=person)(objectClass=serviceAccount))", filter)
 	cfg.ServiceAccountObjectClass = "service*Account"
-	assert.Contains(t, membershipSearchFilter(cfg, true), `service\2aAccount`)
+	filter, err = membershipSearchFilter(cfg, true)
+	require.NoError(t, err)
+	assert.Contains(t, filter, `service\2aAccount`)
+}
+
+func TestFetchLDAPDataRejectsMissingServiceAccountClass(t *testing.T) {
+	for _, allowSA := range []bool{false, true} {
+		for _, class := range []string{"", " ", "\t"} {
+			r := &GroupReconciler{AppConfig: &config.AppConfig{LDAP: ldap.LDAP{
+				UserSearchFilter:          "(|(objectClass=person)(objectClass=serviceAccount))",
+				ServiceAccountObjectClass: class,
+			}}}
+			// No LDAP client: invalid configuration must fail before any LDAP/backend work.
+			result, users, err := r.fetchLDAPData(t.Context(), []string{"service"}, allowSA, logrus.NewEntry(logrus.New()))
+			require.ErrorContains(t, err, "ldap.serviceAccountObjectClass is required")
+			assert.Nil(t, result)
+			assert.Nil(t, users)
+		}
+	}
 }
 
 func TestReconcilableMembers(t *testing.T) {

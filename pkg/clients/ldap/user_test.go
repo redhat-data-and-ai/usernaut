@@ -484,3 +484,46 @@ func (suite *LDAPTestSuite) TestBulkFilterOverrideIsScopedToLookup() {
 	_, err = conn.GetBulkUserLDAPData(suite.ctx, []string{"alice"})
 	suite.NoError(err)
 }
+
+func (suite *LDAPTestSuite) TestIdentityLookupsIncludeServiceAccounts() {
+	conn := &LDAPConn{
+		conn:                      suite.ldapClient,
+		userDN:                    "uid=%s,ou=users,dc=example,dc=com",
+		userSearchFilter:          "(objectClass=person)",
+		serviceAccountObjectClass: "serviceAccount",
+		attributes:                []string{"uid", "mail"},
+	}
+	identityFilter := "(|(objectClass=person)(objectClass=serviceAccount))"
+	expectedFilters := []string{identityFilter, "(&" + identityFilter + "(mail=svc@example.com))"}
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(2)
+	calls := 0
+	suite.ldapClient.EXPECT().Search(gomock.Any()).DoAndReturn(func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+		suite.Equal(expectedFilters[calls], req.Filter)
+		_, err := ldap.CompileFilter(req.Filter)
+		suite.NoError(err)
+		calls++
+		return &ldap.SearchResult{Entries: []*ldap.Entry{ldap.NewEntry("uid=svc", map[string][]string{
+			"uid": {"svc"}, "mail": {"svc@example.com"}, "objectClass": {"top", "serviceAccount"},
+		})}}, nil
+	}).Times(2)
+	// A namespace membership filter must not change identity/existence checks.
+	ctx := WithUserSearchFilter(suite.ctx, "(&(objectClass=person)(!(objectClass=serviceAccount)))")
+	byID, err := conn.GetUserLDAPData(ctx, "svc")
+	suite.NoError(err)
+	suite.Equal("svc", byID["uid"])
+	byEmail, err := conn.GetUserLDAPDataByEmail(ctx, "svc@example.com")
+	suite.NoError(err)
+	suite.Equal("svc", byEmail["uid"])
+}
+
+func (suite *LDAPTestSuite) TestMissingServiceAccountIsStillAbsent() {
+	conn := &LDAPConn{
+		conn:                      suite.ldapClient,
+		userSearchFilter:          "(objectClass=person)",
+		serviceAccountObjectClass: "serviceAccount",
+	}
+	suite.ldapClient.EXPECT().IsClosing().Return(false)
+	suite.ldapClient.EXPECT().Search(gomock.Any()).Return(&ldap.SearchResult{}, nil)
+	_, err := conn.GetUserLDAPDataByEmail(suite.ctx, "missing@example.com")
+	suite.ErrorIs(err, ErrNoUserFound)
+}

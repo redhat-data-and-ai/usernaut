@@ -26,6 +26,16 @@ func normalizeSearchFilter(filter string) string {
 	return filter
 }
 
+// identitySearchFilter includes all managed identity types for existence checks,
+// independently of the namespace policy used by bulk membership lookups.
+func (l *LDAPConn) identitySearchFilter() string {
+	filter := normalizeSearchFilter(l.userSearchFilter)
+	if l.serviceAccountObjectClass == "" {
+		return filter
+	}
+	return "(|" + filter + "(objectClass=" + ldap.EscapeFilter(l.serviceAccountObjectClass) + "))"
+}
+
 // bulkLDAPBatchSize caps OR-filter batch size
 var bulkLDAPBatchSize = 500
 
@@ -97,7 +107,7 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 	log := logger.Logger(ctx).WithField("userID", userID)
 	log.Debug("fetching user LDAP data")
 
-	filter := normalizeSearchFilter(l.userSearchFilter)
+	filter := l.identitySearchFilter()
 
 	searchRequest := ldap.NewSearchRequest(
 		fmt.Sprintf(l.userDN, ldap.EscapeFilter(userID)),
@@ -226,7 +236,7 @@ func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (ma
 
 	// Construct search filter: (&userSearchFilter (mail=email))
 	mailFilter := fmt.Sprintf("(mail=%s)", ldap.EscapeFilter(email))
-	filter := fmt.Sprintf("(&%s%s)", l.userSearchFilter, mailFilter)
+	filter := fmt.Sprintf("(&%s%s)", l.identitySearchFilter(), mailFilter)
 
 	searchRequest := ldap.NewSearchRequest(
 		l.baseUserDN,
