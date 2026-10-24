@@ -17,6 +17,7 @@ limitations under the License.
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
@@ -139,6 +140,10 @@ func LoadConfig(env string) (*AppConfig, error) {
 		return nil, err
 	}
 
+	if err := config.validateServiceAccounts(); err != nil {
+		return nil, err
+	}
+
 	// convert backends to a map for easier access
 	config.BackendMap = make(map[string]map[string]Backend)
 	for _, backend := range config.Backends {
@@ -149,6 +154,20 @@ func LoadConfig(env string) (*AppConfig, error) {
 	}
 
 	return config, nil
+}
+
+// validateServiceAccounts requires a directory class only when a namespace opts in.
+func (c *AppConfig) validateServiceAccounts() error {
+	if err := c.LDAP.Validate(); err != nil {
+		return err
+	}
+	for namespace, rules := range c.ControllerConfig.SpecValidationRules {
+		if rules.AllowServiceAccounts && c.LDAP.ServiceAccountObjectClass == "" {
+			return fmt.Errorf(
+				"ldap.serviceAccountObjectClass is required when namespace %q enables allowServiceAccounts", namespace)
+		}
+	}
+	return nil
 }
 
 func getOrDefaultEnv() string {

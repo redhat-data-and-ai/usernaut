@@ -189,3 +189,42 @@ func TestLoadConfigFromPathHTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 404")
 	assert.Contains(t, err.Error(), "Not Found")
 }
+
+func TestServiceAccountConfigValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		rules     SpecValidationRulesConfig
+		class     string
+		wantError bool
+	}{
+		{name: "no rules or class"},
+		{name: "flag omitted",
+			rules: SpecValidationRulesConfig{"test": {}}},
+		{name: "flag false",
+			rules: SpecValidationRulesConfig{"test": {AllowServiceAccounts: false}}},
+		{name: "opted in without class",
+			rules:     SpecValidationRulesConfig{"test": {AllowServiceAccounts: true}},
+			wantError: true},
+		{name: "opted in with class",
+			rules: SpecValidationRulesConfig{"test": {AllowServiceAccounts: true}},
+			class: "serviceAccount"},
+		{name: "opted in with blank class",
+			rules:     SpecValidationRulesConfig{"test": {AllowServiceAccounts: true}},
+			class:     " ",
+			wantError: true},
+		{name: "one namespace opted in",
+			rules:     SpecValidationRulesConfig{"disabled": {}, "enabled": {AllowServiceAccounts: true}},
+			wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &AppConfig{ControllerConfig: ControllerConfig{SpecValidationRules: tc.rules}}
+			cfg.LDAP.ServiceAccountObjectClass = tc.class
+			err := cfg.validateServiceAccounts()
+			if tc.wantError {
+				require.ErrorContains(t, err, "ldap.serviceAccountObjectClass")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

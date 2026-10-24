@@ -21,14 +21,14 @@ type LDAP struct {
 	BindUsername     string   `yaml:"bindUsername"`
 	BindPassword     string   `yaml:"bindPassword"`
 
-	// ServiceAccountObjectClass is required to enforce service-account membership policy.
+	// ServiceAccountObjectClass is optional unless a namespace allows service accounts.
 	ServiceAccountObjectClass string `yaml:"serviceAccountObjectClass"`
 }
 
-// Validate rejects configuration that cannot distinguish service accounts from people.
+// Validate checks the service-account class when one is configured.
 func (l LDAP) Validate() error {
-	if l.ServiceAccountObjectClass == "" || strings.ContainsAny(l.ServiceAccountObjectClass, " \t\r\n") {
-		return fmt.Errorf("ldap.serviceAccountObjectClass is required and must be a single non-empty object class")
+	if strings.ContainsAny(l.ServiceAccountObjectClass, " \t\r\n") {
+		return fmt.Errorf("ldap.serviceAccountObjectClass must be a single non-empty object class")
 	}
 	return nil
 }
