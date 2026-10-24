@@ -216,6 +216,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
+	r.warnIgnoredServiceAccounts(groupCR, allLdapUserData, log)
 	uniqueMembers = r.membersForBackend(uniqueMembers, allLdapUserData, includeServiceAccounts)
 	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
@@ -524,6 +525,21 @@ func (r *GroupReconciler) fetchLDAPData(
 		CurrentMembers: currentMembers,
 		ActiveUserList: activeUserList,
 	}, allLdapUserData, nil
+}
+
+// warnIgnoredServiceAccounts reports explicitly listed accounts that namespace policy excludes.
+func (r *GroupReconciler) warnIgnoredServiceAccounts(
+	group *usernautdevv1alpha1.Group, data map[string]*structs.LDAPUser, log *logrus.Entry,
+) {
+	if r.AppConfig.ControllerConfig.SpecValidationRules[group.Namespace].AllowServiceAccounts {
+		return
+	}
+	for _, user := range group.Spec.Members.Users {
+		if data[user].IsServiceAccount(r.AppConfig.LDAP.ServiceAccountObjectClass) {
+			log.WithFields(logrus.Fields{"namespace": group.Namespace, "user": user}).
+				Warn("ignoring service account listed in members.users: allowServiceAccounts is disabled for this namespace")
+		}
+	}
 }
 
 // membersForBackend excludes missing identities and service accounts unless enabled for Rover.
