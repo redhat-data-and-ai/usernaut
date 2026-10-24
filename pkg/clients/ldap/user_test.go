@@ -476,7 +476,10 @@ func (suite *LDAPTestSuite) TestBulkFilterOverrideIsScopedToLookup() {
 		calls++
 		return &ldap.SearchResult{}, nil
 	}).Times(2)
-	_, err := conn.GetBulkUserLDAPData(WithUserSearchFilter(suite.ctx, "(|(objectClass=person)(objectClass=serviceAccount))"), []string{"alice"})
+	_, err := conn.GetBulkUserLDAPData(
+		WithUserSearchFilter(suite.ctx, "(|(objectClass=person)(objectClass=serviceAccount))"),
+		[]string{"alice"},
+	)
 	suite.NoError(err)
 	_, err = conn.GetBulkUserLDAPData(suite.ctx, []string{"alice"})
 	suite.NoError(err)
