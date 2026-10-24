@@ -206,7 +206,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	log.Info("fetching LDAP data for the users in the group")
 
 	// Step 1: Fetch LDAP data (no lock needed - read-only from LDAP)
-	allowSA := r.AppConfig.ControllerConfig.SpecValidationRules[req.Namespace].AllowServiceAccounts
+	allowSA := r.AppConfig.ControllerConfig.SpecValidationRules[req.Namespace].Group.AllowServiceAccounts
 	includeServiceAccounts := slices.ContainsFunc(groupCR.Spec.Backends, func(b usernautdevv1alpha1.Backend) bool {
 		return b.Type == "rover" && allowSA
 	})
@@ -531,7 +531,7 @@ func (r *GroupReconciler) fetchLDAPData(
 func (r *GroupReconciler) warnIgnoredServiceAccounts(
 	group *usernautdevv1alpha1.Group, data map[string]*structs.LDAPUser, log *logrus.Entry,
 ) {
-	if r.AppConfig.ControllerConfig.SpecValidationRules[group.Namespace].AllowServiceAccounts {
+	if r.AppConfig.ControllerConfig.SpecValidationRules[group.Namespace].Group.AllowServiceAccounts {
 		return
 	}
 	for _, user := range group.Spec.Members.Users {
@@ -697,7 +697,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	backendGroupParams structs.TeamParams,
 ) error {
 	includeServiceAccounts := backend.Type == "rover" &&
-		r.AppConfig.ControllerConfig.SpecValidationRules[groupCR.Namespace].AllowServiceAccounts
+		r.AppConfig.ControllerConfig.SpecValidationRules[groupCR.Namespace].Group.AllowServiceAccounts
 	uniqueMembers = r.membersForBackend(uniqueMembers, allLdapUserData, includeServiceAccounts)
 
 	// Create backend client

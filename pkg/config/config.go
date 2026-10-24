@@ -60,15 +60,15 @@ type SpecValidationRulesConfig map[string]ValidationRules
 
 // ValidationRules holds resource validation rules for a single namespace.
 type ValidationRules struct {
-	// AllowServiceAccounts is optional and defaults to false.
-	AllowServiceAccounts bool                     `yaml:"allowServiceAccounts"`
-	Group                GroupSpecValidationRules `yaml:"group"`
+	Group GroupSpecValidationRules `yaml:"group"`
 }
 
 // GroupSpecValidationRules holds Group CR spec field validation rules.
 type GroupSpecValidationRules struct {
-	GroupName GroupNameValidationConfig `yaml:"groupName"`
-	Backends  BackendsValidationConfig  `yaml:"backends"`
+	// AllowServiceAccounts is optional and defaults to false.
+	AllowServiceAccounts bool                      `yaml:"allowServiceAccounts"`
+	GroupName            GroupNameValidationConfig `yaml:"groupName"`
+	Backends             BackendsValidationConfig  `yaml:"backends"`
 }
 
 // GroupNameValidationConfig defines group_name validation rules for Group CRs.
@@ -162,9 +162,10 @@ func (c *AppConfig) validateServiceAccounts() error {
 		return err
 	}
 	for namespace, rules := range c.ControllerConfig.SpecValidationRules {
-		if rules.AllowServiceAccounts && c.LDAP.ServiceAccountObjectClass == "" {
+		if rules.Group.AllowServiceAccounts && c.LDAP.ServiceAccountObjectClass == "" {
 			return fmt.Errorf(
-				"ldap.serviceAccountObjectClass is required when namespace %q enables allowServiceAccounts", namespace)
+				"ldap.serviceAccountObjectClass is required when namespace %q enables group.allowServiceAccounts",
+				namespace)
 		}
 	}
 	return nil

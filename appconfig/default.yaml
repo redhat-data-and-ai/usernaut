@@ -144,8 +144,8 @@ controllerConfig:
   # Optional namespace rules. Omitted allowServiceAccounts defaults to false.
   # specValidationRules:
   #   example-namespace:
-  #     allowServiceAccounts: true
   #     group:
+  #       allowServiceAccounts: true
   #       groupName:
   #         prefix: "example-"
   #       backends:

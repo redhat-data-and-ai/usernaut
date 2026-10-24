@@ -18,12 +18,14 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -201,19 +203,22 @@ func TestServiceAccountConfigValidation(t *testing.T) {
 		{name: "flag omitted",
 			rules: SpecValidationRulesConfig{"test": {}}},
 		{name: "flag false",
-			rules: SpecValidationRulesConfig{"test": {AllowServiceAccounts: false}}},
+			rules: SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: false}}}},
 		{name: "opted in without class",
-			rules:     SpecValidationRulesConfig{"test": {AllowServiceAccounts: true}},
+			rules:     SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: true}}},
 			wantError: true},
 		{name: "opted in with class",
-			rules: SpecValidationRulesConfig{"test": {AllowServiceAccounts: true}},
+			rules: SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: true}}},
 			class: "serviceAccount"},
 		{name: "opted in with blank class",
-			rules:     SpecValidationRulesConfig{"test": {AllowServiceAccounts: true}},
+			rules:     SpecValidationRulesConfig{"test": {Group: GroupSpecValidationRules{AllowServiceAccounts: true}}},
 			class:     " ",
 			wantError: true},
 		{name: "one namespace opted in",
-			rules:     SpecValidationRulesConfig{"disabled": {}, "enabled": {AllowServiceAccounts: true}},
+			rules: SpecValidationRulesConfig{
+				"disabled": {},
+				"enabled":  {Group: GroupSpecValidationRules{AllowServiceAccounts: true}},
+			},
 			wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,6 +230,27 @@ func TestServiceAccountConfigValidation(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestGroupServiceAccountFlagFromYAML(t *testing.T) {
+	for _, value := range []string{"true", "false", "null", ""} {
+		t.Run(value, func(t *testing.T) {
+			var cfg AppConfig
+			err := yaml.Unmarshal([]byte(fmt.Sprintf(`
+controllerConfig:
+  specValidationRules:
+    test:
+      group:
+        allowServiceAccounts: %s
+        groupName:
+          prefix: test-
+`, value)), &cfg)
+			require.NoError(t, err)
+			rules := cfg.ControllerConfig.SpecValidationRules["test"].Group
+			assert.Equal(t, value == "true", rules.AllowServiceAccounts)
+			assert.Equal(t, "test-", rules.GroupName.Prefix)
 		})
 	}
 }

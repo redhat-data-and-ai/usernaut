@@ -156,8 +156,10 @@ var _ = Describe("Group spec validation", func() {
 
 		It("validates the same namespace rules regardless of the service-account flag", func() {
 			for _, enabled := range []bool{false, true} {
+				groupRules := specRules[aifNamespace].Group
+				groupRules.AllowServiceAccounts = enabled
 				rules := config.SpecValidationRulesConfig{
-					aifNamespace: {AllowServiceAccounts: enabled, Group: specRules[aifNamespace].Group},
+					aifNamespace: {Group: groupRules},
 				}
 				Expect(validate(aifNamespace, newGroup("aif-mygroup"), rules)).To(Succeed())
 				Expect(validate(aifNamespace, newGroup("other-group"), rules)).NotTo(Succeed())
