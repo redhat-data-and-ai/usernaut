@@ -44,9 +44,9 @@ ldap:
   userDN: "uid=%s,ou=users,dc=org,dc=com"
   # Multiple person classes can be selected with an LDAP OR filter.
   userSearchFilter: "(|(objectClass=person)(objectClass=inetOrgPerson))"
-  # Optional: replace with your directory's service-account object class.
-  # The controller includes this class only for opted-in namespaces and
-  # excludes it from membership searches in other namespaces.
+  # Optional unless a namespace sets allowServiceAccounts: true.
+  # When configured, LDAP searches include this class alongside userSearchFilter.
+  # Only Rover in opted-in namespaces reconciles service-account members.
   # serviceAccountObjectClass: "serviceAccount"
   # Returned attributes; objectClass is requested automatically.
   attributes: ["mail", "uid", "cn", "sn", "displayName"]
