@@ -50,10 +50,17 @@ type LDAPUser struct {
 	ObjectClass string `json:"objectClass,omitempty"`
 }
 
-// IsServiceAccount reports whether the LDAP entry is a Red Hat service account.
-// ObjectClass can have multiple values, so we need to check if "rhatserviceaccount" is present.
-func (u *LDAPUser) IsServiceAccount() bool {
-	return u != nil && strings.Contains(strings.ToLower(u.ObjectClass), "rhatserviceaccount")
+// IsServiceAccount matches a configured LDAP object class, ignoring case.
+func (u *LDAPUser) IsServiceAccount(objectClass string) bool {
+	if u == nil || objectClass == "" {
+		return false
+	}
+	for _, class := range strings.Fields(u.ObjectClass) {
+		if strings.EqualFold(class, objectClass) {
+			return true
+		}
+	}
+	return false
 }
 
 func (u *LDAPUser) GetCN() string {

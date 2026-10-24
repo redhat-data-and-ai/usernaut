@@ -10,6 +10,22 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
 
+type userSearchFilterKey struct{}
+
+// WithUserSearchFilter overrides the filter for a bulk lookup without changing the shared client.
+func WithUserSearchFilter(ctx context.Context, filter string) context.Context {
+	return context.WithValue(ctx, userSearchFilterKey{}, filter)
+}
+
+// normalizeSearchFilter accepts configured filters with or without outer parentheses.
+func normalizeSearchFilter(filter string) string {
+	filter = strings.TrimSpace(filter)
+	if !strings.HasPrefix(filter, "(") {
+		return "(" + filter + ")"
+	}
+	return filter
+}
+
 // bulkLDAPBatchSize caps OR-filter batch size
 var bulkLDAPBatchSize = 500
 
@@ -81,7 +97,7 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 	log := logger.Logger(ctx).WithField("userID", userID)
 	log.Debug("fetching user LDAP data")
 
-	filter := fmt.Sprintf("(%s)", l.userSearchFilter)
+	filter := normalizeSearchFilter(l.userSearchFilter)
 
 	searchRequest := ldap.NewSearchRequest(
 		fmt.Sprintf(l.userDN, ldap.EscapeFilter(userID)),
@@ -125,6 +141,12 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 		return result, err
 	}
 
+	userFilter := l.userSearchFilter
+	if override, ok := ctx.Value(userSearchFilterKey{}).(string); ok && override != "" {
+		userFilter = override
+	}
+	userFilter = normalizeSearchFilter(userFilter)
+
 	totalBatches := (len(userIDs) + bulkLDAPBatchSize - 1) / bulkLDAPBatchSize
 	log.WithField("total_users", len(userIDs)).WithField("batch_size", bulkLDAPBatchSize).
 		WithField("total_batches", totalBatches).Info("starting bulk LDAP fetch")
@@ -149,7 +171,7 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 		for _, uid := range batch {
 			fmt.Fprintf(&uidFilters, "(uid=%s)", ldap.EscapeFilter(uid))
 		}
-		filter := fmt.Sprintf("(&(%s)(|%s))", l.userSearchFilter, uidFilters.String())
+		filter := fmt.Sprintf("(&%s(|%s))", userFilter, uidFilters.String())
 
 		searchRequest := ldap.NewSearchRequest(
 			l.baseUserDN,

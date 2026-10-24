@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,30 +62,20 @@ func newTestClient(doer *fakeDoer) *RoverClient {
 	return &RoverClient{client: doer, url: "https://rover.test"}
 }
 
-func TestFetchTeamMembersFiltersServiceAccounts(t *testing.T) {
-	doer := &fakeDoer{body: testGroupBody()}
-	client := newTestClient(doer)
-
-	without, err := client.FetchTeamMembersByTeamID(context.Background(), "aif-group")
+func TestFetchTeamMembersIncludesServiceAccounts(t *testing.T) {
+	client := newTestClient(&fakeDoer{body: testGroupBody()})
+	members, err := client.FetchTeamMembersByTeamID(context.Background(), "aif-group")
 	require.NoError(t, err)
-	require.Len(t, without, 1)
-	assert.Equal(t, "alice", without["alice"].ID)
-	assert.Equal(t, MemberTypeServiceAccount, client.memberType("aif-group", "usernaut-prod"))
-	assert.Equal(t, "group", client.memberType("aif-group", "nested"))
-
-	withSA, err := client.FetchTeamMembersByTeamID(config.WithAllowServiceAccounts(context.Background()), "aif-group")
-	require.NoError(t, err)
-	require.Len(t, withSA, 2)
-	assert.Equal(t, "alice", withSA["alice"].ID)
-	assert.Equal(t, "usernaut-prod", withSA["usernaut-prod"].ID)
-	_, hasGroup := withSA["nested"]
-	assert.False(t, hasGroup)
+	require.Len(t, members, 2)
+	assert.Equal(t, "alice", members["alice"].ID)
+	assert.Equal(t, "usernaut-prod", members["usernaut-prod"].ID)
+	assert.NotContains(t, members, "nested")
 }
 
-func TestAddAndRemoveUseRememberedMemberType(t *testing.T) {
+func TestAddAndRemoveServiceAccountsAsUsers(t *testing.T) {
 	doer := &fakeDoer{body: testGroupBody()}
 	client := newTestClient(doer)
-	ctx := config.WithAllowServiceAccounts(context.Background())
+	ctx := context.Background()
 
 	_, err := client.FetchTeamMembersByTeamID(ctx, "aif-group")
 	require.NoError(t, err)
@@ -99,12 +88,12 @@ func TestAddAndRemoveUseRememberedMemberType(t *testing.T) {
 	require.NoError(t, json.Unmarshal(doer.reqs[2].body, &delReq))
 
 	assert.Equal(t, []Member{
-		{ID: "usernaut-prod", Type: MemberTypeServiceAccount},
+		{ID: "usernaut-prod", Type: MemberTypeUser},
 		{ID: "alice", Type: MemberTypeUser},
 	}, addReq.Additions)
 	assert.Empty(t, addReq.Deletions)
 	assert.Equal(t, []Member{
-		{ID: "usernaut-prod", Type: MemberTypeServiceAccount},
+		{ID: "usernaut-prod", Type: MemberTypeUser},
 	}, delReq.Deletions)
 	assert.Empty(t, delReq.Additions)
 	assert.Contains(t, doer.reqs[1].url, "/v1/groups/aif-group/membersMod")
@@ -148,14 +137,4 @@ func TestModifyErrors(t *testing.T) {
 	statusClient := newTestClient(&fakeDoer{status: http.StatusBadRequest, body: "bad"})
 	err := statusClient.RemoveUserFromTeam(ctx, "aif-group", []string{"alice"})
 	require.EqualError(t, err, "failed to remove users in rover group with response code: Bad Request")
-}
-
-func TestRememberMemberTypesReplacesTeamMap(t *testing.T) {
-	client := &RoverClient{}
-	client.rememberMemberTypes("aif-group", []Member{{ID: "svc", Type: MemberTypeServiceAccount}})
-	assert.Equal(t, MemberTypeServiceAccount, client.memberType("aif-group", "svc"))
-
-	client.rememberMemberTypes("aif-group", []Member{{ID: "alice", Type: MemberTypeUser}})
-	assert.Equal(t, MemberTypeUser, client.memberType("aif-group", "alice"))
-	assert.Equal(t, MemberTypeUser, client.memberType("aif-group", "svc"))
 }

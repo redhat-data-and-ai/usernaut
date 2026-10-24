@@ -17,7 +17,6 @@ limitations under the License.
 package config
 
 import (
-	"context"
 	"os"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
@@ -60,22 +59,9 @@ type SpecValidationRulesConfig map[string]ValidationRules
 
 // ValidationRules holds resource validation rules for a single namespace.
 type ValidationRules struct {
-	// AllowServiceAccounts includes rover members of type serviceaccount when these rules pass.
+	// AllowServiceAccounts is optional and defaults to false.
 	AllowServiceAccounts bool                     `yaml:"allowServiceAccounts"`
 	Group                GroupSpecValidationRules `yaml:"group"`
-}
-
-type allowServiceAccountsCtxKey struct{}
-
-// WithAllowServiceAccounts marks ctx so rover membership sync keeps service-account members.
-func WithAllowServiceAccounts(ctx context.Context) context.Context {
-	return context.WithValue(ctx, allowServiceAccountsCtxKey{}, true)
-}
-
-// AllowServiceAccounts reports whether ctx was marked by WithAllowServiceAccounts.
-func AllowServiceAccounts(ctx context.Context) bool {
-	allowed, _ := ctx.Value(allowServiceAccountsCtxKey{}).(bool)
-	return allowed
 }
 
 // GroupSpecValidationRules holds Group CR spec field validation rules.

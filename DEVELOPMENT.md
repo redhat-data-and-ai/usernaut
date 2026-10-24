@@ -825,6 +825,17 @@ controllerConfig:
 | `group.backends.allowedBackendTypes` | When non-empty, every `spec.backends[].type` must be in this list. An empty list allows any backend type. |
 | `allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. When `false`, service accounts listed in `spec.members.users` are ignored and the rest of the group still reconciles. A namespace that should accept any group name leaves `groupName.prefix` empty and leaves this `false`. |
 
+Configure the directory's service-account object class separately from the normal user filter:
+
+```yaml
+ldap:
+  userSearchFilter: "(|(objectClass=person)(objectClass=inetOrgPerson))"
+  serviceAccountObjectClass: "serviceAccount" # replace with your directory's class
+  attributes: ["mail", "uid", "cn", "sn", "displayName"]
+```
+
+`serviceAccountObjectClass` is optional; when omitted, no service-account-specific classification or filter adjustment is applied. When configured, the controller includes that class in LDAP searches only for opted-in namespaces and explicitly excludes it for other namespaces. `objectClass` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. Configuration changes take effect on the next full reconciliation; unchanged Groups can be skipped until a spec update or the periodic requeue.
+
 ### Secret Loading
 
 Secrets can be loaded from:

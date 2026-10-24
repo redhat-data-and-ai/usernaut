@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	ldapv3 "github.com/go-ldap/ldap/v3"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -133,9 +135,7 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, nil
 	}
-	if allowServiceAccounts(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules) {
-		ctx = config.WithAllowServiceAccounts(ctx)
-	}
+	allowSA := allowServiceAccounts(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules)
 
 	// set owner reference to the group CR
 	if err := r.setOwnerReference(ctx, groupCR, log); err != nil {
@@ -209,13 +209,13 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	log.Info("fetching LDAP data for the users in the group")
 
 	// Step 1: Fetch LDAP data (no lock needed - read-only from LDAP)
-	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, log)
+	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, allowSA, log)
 	if err != nil {
 		log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
 		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
-	uniqueMembers = ignoreServiceAccounts(ctx, uniqueMembers, allLdapUserData, log)
+	uniqueMembers = reconcilableMembers(uniqueMembers, allLdapUserData, log)
 	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
 	groupCR.Status.ReconciledUsers = uniqueMembers
 
@@ -467,6 +467,7 @@ func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, see
 func (r *GroupReconciler) fetchLDAPData(
 	ctx context.Context,
 	uniqueMembers []string,
+	allowSA bool,
 	log *logrus.Entry,
 ) (*LDAPFetchResult, map[string]*structs.LDAPUser, error) {
 	allLdapUserData := make(map[string]*structs.LDAPUser, len(uniqueMembers))
@@ -476,6 +477,7 @@ func (r *GroupReconciler) fetchLDAPData(
 
 	log.WithField("member_count", len(uniqueMembers)).Info("fetching LDAP data in bulk")
 
+	ctx = ldap.WithUserSearchFilter(ctx, membershipSearchFilter(r.AppConfig.LDAP, allowSA))
 	bulkData, err := r.LdapConn.GetBulkUserLDAPData(ctx, uniqueMembers)
 	if err != nil {
 		log.WithError(err).Error("error fetching bulk LDAP data")
@@ -498,10 +500,11 @@ func (r *GroupReconciler) fetchLDAPData(
 			continue
 		}
 
-		allLdapUserData[user] = ldapUser
-		if !config.AllowServiceAccounts(ctx) && ldapUser.IsServiceAccount() {
+		if !allowSA && ldapUser.IsServiceAccount(r.AppConfig.LDAP.ServiceAccountObjectClass) {
+			log.WithField("user", user).Info("ignoring service account")
 			continue
 		}
+		allLdapUserData[user] = ldapUser
 
 		if !uniqueUIDs[ldapUser.GetUID()] {
 			uniqueUIDs[ldapUser.GetUID()] = true
@@ -523,17 +526,30 @@ func (r *GroupReconciler) fetchLDAPData(
 	}, allLdapUserData, nil
 }
 
-// ignoreServiceAccounts drops service-account ids when this reconcile did not opt in.
-func ignoreServiceAccounts(ctx context.Context, members []string, ldapData map[string]*structs.LDAPUser, log *logrus.Entry) []string {
-	if config.AllowServiceAccounts(ctx) {
-		return members
+// membershipSearchFilter keeps namespace policy in the controller. Opted-out
+// lookups exclude service accounts even if the configured base filter includes them.
+func membershipSearchFilter(cfg ldap.LDAP, allowSA bool) string {
+	filter := strings.TrimSpace(cfg.UserSearchFilter)
+	if cfg.ServiceAccountObjectClass == "" {
+		return filter
 	}
+	if !strings.HasPrefix(filter, "(") {
+		filter = "(" + filter + ")"
+	}
+	serviceAccount := "(objectClass=" + ldapv3.EscapeFilter(cfg.ServiceAccountObjectClass) + ")"
+	if allowSA {
+		return "(|" + filter + serviceAccount + ")"
+	}
+	return "(&" + filter + "(!" + serviceAccount + "))"
+}
+
+// reconcilableMembers omits identities excluded by the LDAP filter or missing from LDAP.
+func reconcilableMembers(members []string, ldapData map[string]*structs.LDAPUser, log *logrus.Entry) []string {
 	return slices.DeleteFunc(slices.Clone(members), func(id string) bool {
-		user := ldapData[id]
-		if user == nil || !user.IsServiceAccount() {
+		if ldapData[id] != nil {
 			return false
 		}
-		log.WithField("user", id).Info("ignoring service account")
+		log.WithField("user", id).Info("ignoring member absent from LDAP search results")
 		return true
 	})
 }

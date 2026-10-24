@@ -12,14 +12,16 @@ import (
 )
 
 type LDAP struct {
-	Server           string   `yaml:"server"`
-	BaseDN           string   `yaml:"baseDN"`
-	BaseUserDN       string   `yaml:"baseUserDN"`
-	UserDN           string   `yaml:"userDN"`
-	UserSearchFilter string   `yaml:"userSearchFilter"`
-	Attributes       []string `yaml:"attributes"`
-	BindUsername     string   `yaml:"bindUsername"`
-	BindPassword     string   `yaml:"bindPassword"`
+	// ServiceAccountObjectClass optionally identifies service accounts in this directory.
+	ServiceAccountObjectClass string   `yaml:"serviceAccountObjectClass"`
+	Server                    string   `yaml:"server"`
+	BaseDN                    string   `yaml:"baseDN"`
+	BaseUserDN                string   `yaml:"baseUserDN"`
+	UserDN                    string   `yaml:"userDN"`
+	UserSearchFilter          string   `yaml:"userSearchFilter"`
+	Attributes                []string `yaml:"attributes"`
+	BindUsername              string   `yaml:"bindUsername"`
+	BindPassword              string   `yaml:"bindPassword"`
 }
 
 type LDAPConnClient interface {

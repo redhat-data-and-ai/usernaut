@@ -460,3 +460,24 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_ContextCanceledStopsAfterFir
 	assertions.Len(out, 1)
 	assertions.Contains(out, "a1")
 }
+
+func (suite *LDAPTestSuite) TestBulkFilterOverrideIsScopedToLookup() {
+	conn := &LDAPConn{conn: suite.ldapClient, userSearchFilter: "(objectClass=person)"}
+	suite.ldapClient.EXPECT().IsClosing().Return(false).Times(2)
+	calls := 0
+	suite.ldapClient.EXPECT().Search(gomock.Any()).DoAndReturn(func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+		expected := "(&(objectClass=person)(|(uid=alice)))"
+		if calls == 0 {
+			expected = "(&(|(objectClass=person)(objectClass=serviceAccount))(|(uid=alice)))"
+		}
+		suite.Equal(expected, req.Filter)
+		_, err := ldap.CompileFilter(req.Filter)
+		suite.NoError(err)
+		calls++
+		return &ldap.SearchResult{}, nil
+	}).Times(2)
+	_, err := conn.GetBulkUserLDAPData(WithUserSearchFilter(suite.ctx, "(|(objectClass=person)(objectClass=serviceAccount))"), []string{"alice"})
+	suite.NoError(err)
+	_, err = conn.GetBulkUserLDAPData(suite.ctx, []string{"alice"})
+	suite.NoError(err)
+}
