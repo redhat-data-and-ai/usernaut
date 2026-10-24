@@ -42,7 +42,13 @@ ldap:
   baseDN: "ou=adhoc,ou=managedGroups,dc=org,dc=com"
   baseUserDN: "ou=users,dc=org,dc=com"
   userDN: "uid=%s,ou=users,dc=org,dc=com"
-  userSearchFilter: "(objectClass=filterClass)"
+  # Multiple person classes can be selected with an LDAP OR filter.
+  userSearchFilter: "(|(objectClass=person)(objectClass=inetOrgPerson))"
+  # Optional: replace with your directory's service-account object class.
+  # The controller includes this class only for opted-in namespaces and
+  # excludes it from membership searches in other namespaces.
+  # serviceAccountObjectClass: "serviceAccount"
+  # Returned attributes; objectClass is requested automatically.
   attributes: ["mail", "uid", "cn", "sn", "displayName"]
   bindUsername: file|/path/to/ldap_key
   bindPassword: file|/path/to/ldap_secret
@@ -135,4 +141,12 @@ offboardUserExclusionListConfigPath: "default_offboard_user_exclusion_list"
 # Controller configuration
 controllerConfig:
   maxConcurrentReconciles: 1
-  
+  # Optional namespace rules. Omitted allowServiceAccounts defaults to false.
+  # specValidationRules:
+  #   example-namespace:
+  #     allowServiceAccounts: true
+  #     group:
+  #       groupName:
+  #         prefix: "example-"
+  #       backends:
+  #         allowedBackendTypes: ["rover"]
