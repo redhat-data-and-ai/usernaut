@@ -110,16 +110,6 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
-		log.WithError(err).Warn("spec validation failed")
-		groupCR.UpdateStatusWithErrMessage(err.Error())
-		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
-			log.WithError(statusErr).Error("error updating status after spec validation failure")
-			return ctrl.Result{}, statusErr
-		}
-		return ctrl.Result{}, nil
-	}
-
 	// Skip expensive reconciliation (LDAP, backends) when nothing changed.
 	// Parent groups (with subgroup references) are never skipped — child membership
 	// changes don't bump the parent's generation, so skipping would delay propagation
@@ -132,6 +122,16 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		groupCR.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition, requeueAfter/2) {
 		log.Info("skipping reconciliation, generation unchanged")
 		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
+	if err := validate(req.Namespace, groupCR, r.AppConfig.ControllerConfig.SpecValidationRules); err != nil {
+		log.WithError(err).Warn("spec validation failed")
+		groupCR.UpdateStatusWithErrMessage(err.Error())
+		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+			log.WithError(statusErr).Error("error updating status after spec validation failure")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// set owner reference to the group CR
