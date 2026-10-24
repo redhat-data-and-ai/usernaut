@@ -84,3 +84,18 @@ func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 		_ = ln.Close()
 	}
 }
+
+func TestInitLdapRejectsInvalidServiceAccountObjectFilter(t *testing.T) {
+	for _, filter := range []string{"serviceAccount", "(objectClass=serviceAccount", "(&(uid=svc)"} {
+		client, err := InitLdap(LDAP{ServiceAccountObjectFilter: filter})
+		assert.Nil(t, client)
+		assert.ErrorContains(t, err, "invalid ldap.serviceAccountObjectFilter")
+	}
+}
+
+func TestServiceAccountObjectFilterValidation(t *testing.T) {
+	for _, filter := range []string{"", " ", "objectClass=serviceAccount", "(objectClass=serviceAccount)",
+		"(&(objectClass=serviceAccount)(accountStatus=active))", "|(employeeType=service)(uid=svc*)"} {
+		assert.NoError(t, (LDAP{ServiceAccountObjectFilter: filter}).Validate(), filter)
+	}
+}

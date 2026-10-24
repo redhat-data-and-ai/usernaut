@@ -113,8 +113,8 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Skip expensive reconciliation (LDAP, backends) when nothing changed.
 	// Parent groups (with subgroup references) are never skipped — child membership
 	// changes don't bump the parent's generation, so skipping would delay propagation
-	// until the next periodic requeue. Leaf groups are safe to skip since their
-	// membership only changes via spec edits (which bump generation).
+	// until the next periodic requeue. Leaf groups can be skipped when their
+	// generation is unchanged; config changes require a force reconcile or periodic refresh.
 	// requeueAfter/2 ensures periodic requeues (8h) always exceed the window and
 	// trigger a full reconcile, preserving LDAP membership refresh.
 	hasSubgroups := len(groupCR.Spec.Members.Groups) > 0
@@ -203,31 +203,33 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
 	}
 
-	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
-	groupCR.Status.ReconciledUsers = uniqueMembers
-
 	log.Info("fetching LDAP data for the users in the group")
 
 	// Step 1: Fetch LDAP data (no lock needed - read-only from LDAP)
-	ldapResult, allLdapUserData, err := r.fetchLDAPData(ctx, uniqueMembers, log)
+	allowSA := r.AppConfig.ControllerConfig.SpecValidationRules[req.Namespace].Group.AllowServiceAccounts
+	includeServiceAccounts := slices.ContainsFunc(groupCR.Spec.Backends, func(b usernautdevv1alpha1.Backend) bool {
+		return b.Type == "rover" && allowSA
+	})
+	ldapResult, err := r.fetchLDAPData(ctx, uniqueMembers, includeServiceAccounts, log)
 	if err != nil {
 		log.WithError(err).Error("LDAP bulk fetch failed; skipping backends until retry")
 		return ctrl.Result{Priority: &retryPriority}, err
 	}
 
-	// Step 2: Process all backends (no global lock - individual store ops are atomic)
-	backendErrors := r.processAllBackends(ctx, groupCR, uniqueMembers, log, allLdapUserData)
-
-	// Step 3: Only update cache indexes if ALL backends succeeded (all-or-nothing)
-	hasErrors := false
-	for _, m := range backendErrors {
-		if len(m) > 0 {
-			hasErrors = true
-			break
-		}
+	if len(ldapResult.IgnoredServiceAccounts) > 0 {
+		log.WithField("users", strings.Join(ldapResult.IgnoredServiceAccounts, ",")).
+			WithField("include_service_accounts", includeServiceAccounts).
+			Warn("ignoring service accounts")
 	}
 
-	if !hasErrors {
+	uniqueMembers = ldapResult.Members
+	log.WithField("unique_members", len(uniqueMembers)).Info("unique members to be reconciled")
+
+	// Step 2: Process all backends (no global lock - individual store ops are atomic)
+	backendErrors := r.processAllBackends(ctx, groupCR, ldapResult, log)
+
+	// Step 3: Only update cache indexes if ALL backends succeeded (all-or-nothing)
+	if len(backendErrors) == 0 {
 		log.Info("All backends succeeded, updating cache indexes")
 		if err := r.updateCacheIndexes(ctx, groupCR.Spec.GroupName, ldapResult, log); err != nil {
 			log.WithError(err).Error("error updating cache indexes")
@@ -242,6 +244,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{Priority: &retryPriority}, removeErr
 	}
 
+	// Removing the force label refreshes the object, so set membership status afterwards.
+	groupCR.Status.ReconciledUsers = uniqueMembers
+
 	// Step 5: Update status and handle errors
 	if err := r.updateStatusAndHandleErrors(ctx, groupCR, backendErrors, log); err != nil {
 		return ctrl.Result{Priority: &retryPriority}, err
@@ -252,8 +257,12 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 // LDAPFetchResult contains the results of LDAP data fetching
 type LDAPFetchResult struct {
-	CurrentMembers []string // emails of users with valid LDAP data
-	ActiveUserList []string // UIDs of active users
+	UserData               map[string]*structs.LDAPUser
+	Members                []string // requested IDs accepted by at least one backend
+	PersonMembers          []string // requested IDs for backends that do not support service accounts
+	IgnoredServiceAccounts []string // service-account IDs excluded from Members
+	CurrentMembers         []string // emails of users with valid LDAP data
+	ActiveUserList         []string // UIDs of active users
 }
 
 // fetchQueryMembers runs the LDAP query and, when the query has a manager filter and
@@ -455,17 +464,17 @@ func collectManagerUIDsFromFilters(filters []usernautdevv1alpha1.LDAPFilter, see
 	}
 }
 
-// fetchLDAPData fetches LDAP data for all unique members and returns the result
-// along with the per-user LDAP data map.
+// fetchLDAPData fetches and classifies members once for backend reconciliation and logging.
 // This function does NOT update any cache indexes - it only fetches data.
 // If the bulk LDAP client returns an error (e.g. server timeout), the entire reconcile
 // should fail so members are not misclassified as missing from LDAP.
 func (r *GroupReconciler) fetchLDAPData(
 	ctx context.Context,
 	uniqueMembers []string,
+	includeServiceAccounts bool,
 	log *logrus.Entry,
-) (*LDAPFetchResult, map[string]*structs.LDAPUser, error) {
-	allLdapUserData := make(map[string]*structs.LDAPUser, len(uniqueMembers))
+) (*LDAPFetchResult, error) {
+	result := &LDAPFetchResult{UserData: make(map[string]*structs.LDAPUser, len(uniqueMembers))}
 
 	uniqueUIDs := make(map[string]bool)
 	currentMembers := make([]string, 0, len(uniqueMembers))
@@ -475,7 +484,7 @@ func (r *GroupReconciler) fetchLDAPData(
 	bulkData, err := r.LdapConn.GetBulkUserLDAPData(ctx, uniqueMembers)
 	if err != nil {
 		log.WithError(err).Error("error fetching bulk LDAP data")
-		return nil, nil, fmt.Errorf("get bulk LDAP user data: %w", err)
+		return nil, fmt.Errorf("get bulk LDAP user data: %w", err)
 	}
 	if bulkData == nil {
 		bulkData = make(map[string]map[string]interface{})
@@ -494,7 +503,16 @@ func (r *GroupReconciler) fetchLDAPData(
 			continue
 		}
 
-		allLdapUserData[user] = ldapUser
+		result.UserData[user] = ldapUser
+		if ldapUser.ServiceAccount {
+			if !includeServiceAccounts {
+				result.IgnoredServiceAccounts = append(result.IgnoredServiceAccounts, user)
+				continue
+			}
+		} else {
+			result.PersonMembers = append(result.PersonMembers, user)
+		}
+		result.Members = append(result.Members, user)
 
 		if !uniqueUIDs[ldapUser.GetUID()] {
 			uniqueUIDs[ldapUser.GetUID()] = true
@@ -510,10 +528,9 @@ func (r *GroupReconciler) fetchLDAPData(
 		}
 	}
 
-	return &LDAPFetchResult{
-		CurrentMembers: currentMembers,
-		ActiveUserList: activeUserList,
-	}, allLdapUserData, nil
+	result.CurrentMembers = currentMembers
+	result.ActiveUserList = activeUserList
+	return result, nil
 }
 
 // updateCacheIndexes updates all cache indexes after successful backend reconciliation
@@ -593,9 +610,8 @@ func (r *GroupReconciler) updateCacheIndexes(
 func (r *GroupReconciler) processAllBackends(
 	ctx context.Context,
 	groupCR *usernautdevv1alpha1.Group,
-	uniqueMembers []string,
+	ldapResult *LDAPFetchResult,
 	log *logrus.Entry,
-	allLdapUserData map[string]*structs.LDAPUser,
 ) map[string]map[string]string {
 	backendErrors := make(map[string]map[string]string, 0)
 
@@ -641,7 +657,16 @@ func (r *GroupReconciler) processAllBackends(
 		})
 		backendKey := backend.Name + "_" + backend.Type
 		backendGroupParams := groupParamsByBackend[backendKey]
-		if err := r.processSingleBackend(ctx, groupCR, backend, uniqueMembers, backendLogger, allLdapUserData, backendGroupParams); err != nil {
+		// By default, all backends, we only need to include users, not service accounts
+		members := ldapResult.PersonMembers
+
+		// Rover backend supports service accounts, so we need to include them in the members list
+		if backend.Type == "rover" {
+			members = ldapResult.Members
+		}
+
+		if err := r.processSingleBackend(ctx, groupCR, backend, members,
+			backendLogger, ldapResult.UserData, backendGroupParams); err != nil {
 			backendLogger.WithError(err).Error("error processing backend")
 			if _, ok := backendErrors[backend.Type]; !ok {
 				backendErrors[backend.Type] = make(map[string]string)

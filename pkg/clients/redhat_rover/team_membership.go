@@ -29,7 +29,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
 
-// Fetch all the members and owners of a team by teamID ignoring the serviceaccount members
+// FetchTeamMembersByTeamID returns all user and service-account members for reconciliation.
 func (rC *RoverClient) FetchTeamMembersByTeamID(ctx context.Context, teamID string) (map[string]*structs.User, error) {
 	span, ctx := ot.StartSpanFromContext(ctx, "backend.redhatrover.FetchTeamMembersByTeamID")
 	defer span.Finish()
@@ -59,8 +59,8 @@ func (rC *RoverClient) FetchTeamMembersByTeamID(ctx context.Context, teamID stri
 
 	members := make(map[string]*structs.User)
 	for _, member := range roverGroup.Members {
-		if member.Type != MemberTypeUser {
-			continue // Only process user type members
+		if member.Type != MemberTypeUser && member.Type != MemberTypeServiceAccount {
+			continue
 		}
 		user := &structs.User{
 			ID: member.ID,

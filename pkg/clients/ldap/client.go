@@ -20,6 +20,20 @@ type LDAP struct {
 	Attributes       []string `yaml:"attributes"`
 	BindUsername     string   `yaml:"bindUsername"`
 	BindPassword     string   `yaml:"bindPassword"`
+
+	// ServiceAccountObjectFilter is optional unless a namespace allows service accounts.
+	ServiceAccountObjectFilter string `yaml:"serviceAccountObjectFilter"`
+}
+
+// Validate checks LDAP syntax when a service-account filter is configured.
+func (l LDAP) Validate() error {
+	if strings.TrimSpace(l.ServiceAccountObjectFilter) == "" {
+		return nil
+	}
+	if _, err := ldapv3.CompileFilter(normalizeSearchFilter(l.ServiceAccountObjectFilter)); err != nil {
+		return fmt.Errorf("invalid ldap.serviceAccountObjectFilter: %w", err)
+	}
+	return nil
 }
 
 type LDAPConnClient interface {
@@ -39,6 +53,8 @@ type LDAPConn struct {
 	bindUsername     string
 	bindPassword     string
 	attributes       []string
+
+	serviceAccountObjectFilter string
 }
 
 type LDAPClientConfig struct {
@@ -57,6 +73,9 @@ type LDAPClient interface {
 
 // InitLdap initializes a connection to the LDAP server using the provided configuration.
 func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
+	if err := ldapConfig.Validate(); err != nil {
+		return nil, err
+	}
 	ldapClientConfig := LDAPClientConfig{
 		server:       ldapConfig.Server,
 		bindUsername: ldapConfig.BindUsername,
@@ -78,6 +97,8 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 		attributes:       ldapConfig.Attributes,
 		bindUsername:     ldapConfig.BindUsername,
 		bindPassword:     ldapConfig.BindPassword,
+
+		serviceAccountObjectFilter: strings.TrimSpace(ldapConfig.ServiceAccountObjectFilter),
 	}, nil
 }
 
