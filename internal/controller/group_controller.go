@@ -188,14 +188,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
-	if len(uniqueMembers) == 0 {
-		if len(missingGroups) > 0 {
-			log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
-			groupCR.UpdateStatus(false)
-		} else {
-			log.Info("no members to reconcile, skipping backend reconciliation")
-			groupCR.UpdateStatusWithErrMessage("no members to reconcile, skipping backend reconciliation")
-		}
+	if len(uniqueMembers) == 0 && len(missingGroups) > 0 {
+		log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
+		groupCR.UpdateStatus(false)
 		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
 			log.WithError(statusErr).Error("error updating status after no members to reconcile")
 			return ctrl.Result{}, statusErr
@@ -722,15 +717,17 @@ func (r *GroupReconciler) cleanupRemovedBackends(
 			continue
 		}
 
-		transformedGroupName := ""
+		transformedGroupName, transformErr := utils.GetTransformedGroupName(r.AppConfig, prevBackend.Type, groupName)
+		if transformErr != nil {
+			backendLogger.WithError(transformErr).Warn("failed to transform group name for TeamStore lookup")
+		}
+
 		if teamID == "" {
-			transformedGroupName, err = utils.GetTransformedGroupName(r.AppConfig, prevBackend.Type, groupName)
-			if err != nil {
-				backendLogger.WithError(err).Warn("failed to transform group name for TeamStore lookup")
+			if transformErr != nil {
 				if _, ok := errs[prevBackend.Type]; !ok {
 					errs[prevBackend.Type] = make(map[string]string)
 				}
-				errs[prevBackend.Type][prevBackend.Name] = err.Error()
+				errs[prevBackend.Type][prevBackend.Name] = transformErr.Error()
 				continue
 			}
 
@@ -788,7 +785,7 @@ func (r *GroupReconciler) cleanupRemovedBackends(
 			continue
 		}
 
-		// Clean up TeamStore entry if we resolved the transformed name
+		// Clean up TeamStore entry
 		if transformedGroupName != "" {
 			if err := r.Store.Team.DeleteBackend(ctx, transformedGroupName, backendKey); err != nil {
 				backendLogger.WithError(err).Error("failed to remove backend from TeamStore after successful deletion")
@@ -798,6 +795,8 @@ func (r *GroupReconciler) cleanupRemovedBackends(
 				errs[prevBackend.Type][prevBackend.Name] = err.Error()
 				continue
 			}
+		} else {
+			backendLogger.Warn("group name not available in team store in cache, skipping TeamStore cleanup")
 		}
 
 		backendLogger.Info("successfully cleaned up removed backend from cache")
