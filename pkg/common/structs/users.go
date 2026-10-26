@@ -44,6 +44,8 @@ type LDAPUser struct {
 	Email       string `json:"mail,omitempty"`
 	SN          string `json:"sn,omitempty"`
 	UID         string `json:"uid,omitempty"`
+	// ServiceAccount is set by the LDAP service-account filter lookup.
+	ServiceAccount bool `json:"isServiceAccount,omitempty"`
 }
 
 func (u *LDAPUser) GetCN() string {

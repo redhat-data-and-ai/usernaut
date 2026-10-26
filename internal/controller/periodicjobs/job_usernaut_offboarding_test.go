@@ -180,6 +180,19 @@ func TestUserOffboardingJob(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, exists, "User should remain in cache")
 	})
+	t.Run("Active_Service_Account_Should_Not_Be_Offboarded", func(t *testing.T) {
+		const serviceEmail = "service@example.com"
+		require.NoError(t, dataStore.User.SetBackend(ctx, serviceEmail, "fivetran_fivetran", "service-id"))
+		mockLDAPClient.EXPECT().GetUserLDAPDataByEmail(gomock.Any(), serviceEmail).Return(
+			map[string]interface{}{"mail": serviceEmail, "objectClass": "top serviceAccount"}, nil)
+		// Any DeleteUser call is unexpected and fails the test.
+		offboarded, err := job.processUser(ctx, serviceEmail)
+		require.NoError(t, err)
+		assert.False(t, offboarded)
+		backends, err := dataStore.User.GetBackends(ctx, serviceEmail)
+		require.NoError(t, err)
+		assert.Equal(t, "service-id", backends["fivetran_fivetran"])
+	})
 }
 
 // TestUserOffboardingJobBackendErrors tests error handling

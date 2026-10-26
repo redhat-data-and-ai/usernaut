@@ -153,5 +153,17 @@ var _ = Describe("Group spec validation", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring(`spec.backends type "snowflake" is not allowed`))
 		})
+
+		It("validates the same namespace rules regardless of the service-account flag", func() {
+			for _, enabled := range []bool{false, true} {
+				groupRules := specRules[aifNamespace].Group
+				groupRules.AllowServiceAccounts = enabled
+				rules := config.SpecValidationRulesConfig{
+					aifNamespace: {Group: groupRules},
+				}
+				Expect(validate(aifNamespace, newGroup("aif-mygroup"), rules)).To(Succeed())
+				Expect(validate(aifNamespace, newGroup("other-group"), rules)).NotTo(Succeed())
+			}
+		})
 	})
 })

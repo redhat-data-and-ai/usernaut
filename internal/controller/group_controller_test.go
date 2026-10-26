@@ -37,6 +37,7 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/common/constants"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
@@ -68,11 +69,12 @@ var _ = Describe("Group Controller", func() {
 				Environment: "test",
 			},
 			LDAP: ldap.LDAP{
-				Server:           "ldap://ldap.test.com:389",
-				BaseDN:           "ou=adhoc,ou=managedGroups,dc=org,dc=com",
-				UserDN:           "uid=%s,ou=users,dc=org,dc=com",
-				UserSearchFilter: "(objectClass=filteClass)",
-				Attributes:       []string{"mail", "uid", "cn", "sn", "displayName"},
+				ServiceAccountObjectFilter: "(objectClass=serviceAccount)",
+				Server:                     "ldap://ldap.test.com:389",
+				BaseDN:                     "ou=adhoc,ou=managedGroups,dc=org,dc=com",
+				UserDN:                     "uid=%s,ou=users,dc=org,dc=com",
+				UserSearchFilter:           "(objectClass=filteClass)",
+				Attributes:                 []string{"mail", "uid", "cn", "sn", "displayName"},
 			},
 			Backends:   backends,
 			BackendMap: backendMap,
@@ -126,6 +128,37 @@ var _ = Describe("Group Controller", func() {
 			_ = os.RemoveAll(tempDir)
 		}
 	}
+
+	It("updates reconciled users after force-reconciling excluded service accounts", func() {
+		reconciler, ldapClient := setupTestReconciler(nil)
+		resource := &usernautdevv1alpha1.Group{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "force-service-account-status", Namespace: "default",
+				Labels: map[string]string{constants.ForceReconcileLabel: "true"},
+			},
+			Spec: usernautdevv1alpha1.GroupSpec{
+				GroupName: "force-service-account-status",
+				Members:   usernautdevv1alpha1.Members{Users: []string{"person", "service"}},
+				Backends:  []usernautdevv1alpha1.Backend{},
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, resource)).To(Succeed()) })
+		resource.Status.ReconciledUsers = []string{"person", "service"}
+		Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+		ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), []string{"person", "service"}).Return(
+			map[string]map[string]interface{}{
+				"person":  {"uid": "person", "mail": "person@example.com", "isServiceAccount": false},
+				"service": {"uid": "service", "mail": "service@example.com", "isServiceAccount": true},
+			}, nil)
+		key := types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		fresh := &usernautdevv1alpha1.Group{}
+		Expect(k8sClient.Get(ctx, key, fresh)).To(Succeed())
+		Expect(fresh.Labels).NotTo(HaveKey(constants.ForceReconcileLabel))
+		Expect(fresh.Status.ReconciledUsers).To(Equal([]string{"person"}))
+	})
 
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource-group"
@@ -513,4 +546,5 @@ var _ = Describe("Group Controller", func() {
 			}).Should(BeTrue())
 		})
 	})
+
 })
