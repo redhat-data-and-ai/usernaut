@@ -28,6 +28,7 @@ Welcome to Usernaut! This guide provides a comprehensive overview of the project
     - [User Offboarding Flow (Automatic)](#user-offboarding-flow-automatic)
   - [Configuration](#configuration)
     - [Configuration Structure](#configuration-structure)
+    - [Spec validation rules](#spec-validation-rules)
     - [Secret Loading](#secret-loading)
     - [Environment Selection](#environment-selection)
   - [Project Structure](#project-structure)
@@ -799,6 +800,48 @@ apiServer:
         password: env|APP1_PASSWORD
   cors:
     allowed_origins: ["http://localhost:3000"]
+```
+
+### Spec validation rules
+
+`controllerConfig.specValidationRules` is keyed by namespace. A namespace with no entry is not checked. When an entry exists, reconcile rejects the Group CR unless `spec.group_name` and `spec.backends` match that entry.
+
+```yaml
+controllerConfig:
+  maxConcurrentReconciles: 15
+  specValidationRules:
+    <namespace>:
+      group:
+        allowServiceAccounts: true
+        groupName:
+          prefix: "<prefix>" # spec.group_name must start with this
+        backends:
+          allowedBackendTypes: ["rover"] # each spec.backends[].type must be in this list
+```
+
+| Field | Effect |
+| ----- | ------ |
+| `group.groupName.prefix` | When set, `spec.group_name` must start with this value. An empty prefix allows any name. |
+| `group.backends.allowedBackendTypes` | When non-empty, every `spec.backends[].type` must be in this list. An empty list allows any backend type. |
+| `group.allowServiceAccounts` | When `true` and the rules above pass, Rover membership sync includes members of type `serviceaccount` as well as `user`. Defaults to `false`. When `false`, service accounts listed in `spec.members.users` are ignored and the rest of the group still reconciles. |
+
+Configure a service-account LDAP filter separately from the normal user filter:
+
+```yaml
+ldap:
+  userSearchFilter: "(|(objectClass=person)(objectClass=inetOrgPerson))"
+  serviceAccountObjectFilter: "(&(objectClass=serviceAccount)(accountStatus=active))" # adapt to your directory
+  attributes: ["mail", "uid", "cn", "sn", "displayName"]
+```
+
+`serviceAccountObjectFilter` is optional when every namespace disables or omits `group.allowServiceAccounts`. If any namespace opts in, configure a non-empty service-account filter; otherwise configuration loading fails. A supplied filter must have valid LDAP syntax. Both filters accept surrounding parentheses or no surrounding parentheses.
+
+Bulk membership lookups query `userSearchFilter` and `serviceAccountObjectFilter` separately, then merge the results by UID. LDAP evaluates the full filters, including compound conditions. Identities matching both filters are classified as service accounts. This requires two searches per batch when a service-account filter is configured, and one otherwise. The controller includes service accounts only for Rover in opted-in namespaces; other backends retain person-only membership. UID and email existence lookups combine the two filters with OR so the offboarding job recognizes matching service accounts.
+
+`uid` is requested automatically. Identities excluded by the search or missing from LDAP are omitted from `reconciledUsers`. Existing Rover users and service accounts are always fetched so undesired memberships can be removed, including after opt-out. Rover additions and deletions both use type `user`. After changing `allowServiceAccounts`, restart the operator to load the configuration, then force reconcile the Group to apply it immediately (including removing Rover service accounts after opt-out). Otherwise, the existing reconciliation schedule applies.
+
+```sh
+kubectl label group <group-name> -n <namespace> operator.dataverse.redhat.com/force-reconcile=true --overwrite
 ```
 
 ### Secret Loading

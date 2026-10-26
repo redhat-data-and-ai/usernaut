@@ -10,6 +10,24 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 )
 
+// normalizeSearchFilter accepts configured filters with or without outer parentheses.
+func normalizeSearchFilter(filter string) string {
+	filter = strings.TrimSpace(filter)
+	if !strings.HasPrefix(filter, "(") {
+		return "(" + filter + ")"
+	}
+	return filter
+}
+
+// identitySearchFilter includes people and service accounts for all identity lookups.
+func (l *LDAPConn) identitySearchFilter() string {
+	filter := normalizeSearchFilter(l.userSearchFilter)
+	if strings.TrimSpace(l.serviceAccountObjectFilter) == "" {
+		return filter
+	}
+	return "(|" + filter + normalizeSearchFilter(l.serviceAccountObjectFilter) + ")"
+}
+
 // bulkLDAPBatchSize caps OR-filter batch size
 var bulkLDAPBatchSize = 500
 
@@ -20,14 +38,15 @@ var (
 // parseLDAPEntry is a helper method that extracts attribute values from an LDAP entry.
 func (l *LDAPConn) parseLDAPEntry(entry *ldap.Entry) map[string]interface{} {
 	userData := make(map[string]interface{})
-	for _, attr := range l.attributes {
-		if len(entry.GetAttributeValues(attr)) > 0 {
-			userData[attr] = entry.GetAttributeValue(attr)
-		} else {
-			userData[attr] = ""
-		}
+	for _, attr := range l.searchAttributes() {
+		userData[attr] = entry.GetAttributeValue(attr)
 	}
 	return userData
+}
+
+// searchAttributes includes uid so bulk results can always be keyed and merged by identity.
+func (l *LDAPConn) searchAttributes() []string {
+	return append([]string{"uid"}, l.attributes...)
 }
 
 // executeSearch is a helper method that executes the provided search request.
@@ -70,13 +89,13 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 	log := logger.Logger(ctx).WithField("userID", userID)
 	log.Debug("fetching user LDAP data")
 
-	filter := fmt.Sprintf("(%s)", l.userSearchFilter)
+	filter := l.identitySearchFilter()
 
 	searchRequest := ldap.NewSearchRequest(
 		fmt.Sprintf(l.userDN, ldap.EscapeFilter(userID)),
 		ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
 		filter,
-		l.attributes,
+		l.searchAttributes(),
 		nil,
 	)
 
@@ -94,14 +113,37 @@ func (l *LDAPConn) GetUserLDAPData(ctx context.Context, userID string) (map[stri
 	return userData, nil
 }
 
-// GetBulkUserLDAPData retrieves LDAP data for multiple users in batched OR queries,
-// returning a map keyed by uid. Users not found in LDAP are silently omitted from
-// the result. Batches are capped at bulkLDAPBatchSize to stay within server size limits.
-// If ctx is canceled or times out, the function returns any data fetched so far together
-// with ctx.Err(); it does not start further batches. An in-flight Search is not aborted.
+// GetBulkUserLDAPData fetches people and service accounts separately so LDAP evaluates
+// the full filters. A match on the service-account filter takes precedence if both match.
 func (l *LDAPConn) GetBulkUserLDAPData(
 	ctx context.Context,
 	userIDs []string,
+) (map[string]map[string]interface{}, error) {
+	result, err := l.getBulkUserLDAPData(ctx, userIDs, normalizeSearchFilter(l.userSearchFilter))
+	if err != nil {
+		return result, err
+	}
+	for _, user := range result {
+		user["isServiceAccount"] = false
+	}
+	if strings.TrimSpace(l.serviceAccountObjectFilter) == "" {
+		return result, nil
+	}
+	serviceAccounts, err := l.getBulkUserLDAPData(ctx, userIDs, normalizeSearchFilter(l.serviceAccountObjectFilter))
+	if err != nil {
+		return nil, fmt.Errorf("get service-account LDAP data: %w", err)
+	}
+	for uid, user := range serviceAccounts {
+		user["isServiceAccount"] = true
+		result[uid] = user
+	}
+	return result, nil
+}
+
+// getBulkUserLDAPData retrieves matching identities in batches capped at bulkLDAPBatchSize.
+// Cancellation stops subsequent batches; an in-flight Search is not aborted.
+func (l *LDAPConn) getBulkUserLDAPData(
+	ctx context.Context, userIDs []string, userFilter string,
 ) (map[string]map[string]interface{}, error) {
 	log := logger.Logger(ctx)
 	result := make(map[string]map[string]interface{}, len(userIDs))
@@ -138,13 +180,13 @@ func (l *LDAPConn) GetBulkUserLDAPData(
 		for _, uid := range batch {
 			fmt.Fprintf(&uidFilters, "(uid=%s)", ldap.EscapeFilter(uid))
 		}
-		filter := fmt.Sprintf("(&(%s)(|%s))", l.userSearchFilter, uidFilters.String())
+		filter := fmt.Sprintf("(&%s(|%s))", userFilter, uidFilters.String())
 
 		searchRequest := ldap.NewSearchRequest(
 			l.baseUserDN,
 			ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 			filter,
-			l.attributes,
+			l.searchAttributes(),
 			nil,
 		)
 
@@ -193,13 +235,13 @@ func (l *LDAPConn) GetUserLDAPDataByEmail(ctx context.Context, email string) (ma
 
 	// Construct search filter: (&userSearchFilter (mail=email))
 	mailFilter := fmt.Sprintf("(mail=%s)", ldap.EscapeFilter(email))
-	filter := fmt.Sprintf("(&%s%s)", l.userSearchFilter, mailFilter)
+	filter := fmt.Sprintf("(&%s%s)", l.identitySearchFilter(), mailFilter)
 
 	searchRequest := ldap.NewSearchRequest(
 		l.baseUserDN,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		filter,
-		l.attributes,
+		l.searchAttributes(),
 		nil,
 	)
 
