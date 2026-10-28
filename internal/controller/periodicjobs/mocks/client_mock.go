@@ -210,3 +210,41 @@ func (mr *MockClientMockRecorder) RemoveUserFromTeam(ctx, teamID, userIDs interf
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveUserFromTeam", reflect.TypeOf((*MockClient)(nil).RemoveUserFromTeam), ctx, teamID, userIDs)
 }
+
+// MockEmailUserLookup is a mock of EmailUserLookup interface.
+type MockEmailUserLookup struct {
+	ctrl     *gomock.Controller
+	recorder *MockEmailUserLookupMockRecorder
+}
+
+// MockEmailUserLookupMockRecorder is the mock recorder for MockEmailUserLookup.
+type MockEmailUserLookupMockRecorder struct {
+	mock *MockEmailUserLookup
+}
+
+// NewMockEmailUserLookup creates a new mock instance.
+func NewMockEmailUserLookup(ctrl *gomock.Controller) *MockEmailUserLookup {
+	mock := &MockEmailUserLookup{ctrl: ctrl}
+	mock.recorder = &MockEmailUserLookupMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockEmailUserLookup) EXPECT() *MockEmailUserLookupMockRecorder {
+	return m.recorder
+}
+
+// FindUserByEmail mocks base method.
+func (m *MockEmailUserLookup) FindUserByEmail(ctx context.Context, email string) (*structs.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindUserByEmail", ctx, email)
+	ret0, _ := ret[0].(*structs.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindUserByEmail indicates an expected call of FindUserByEmail.
+func (mr *MockEmailUserLookupMockRecorder) FindUserByEmail(ctx, email interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindUserByEmail", reflect.TypeOf((*MockEmailUserLookup)(nil).FindUserByEmail), ctx, email)
+}
