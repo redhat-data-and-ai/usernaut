@@ -140,6 +140,10 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	if !hasMembersSpec(groupCR.Spec.Members) {
+		return r.markReadyWithNoMembers(ctx, groupCR, log)
+	}
+
 	// set the group status as waiting
 	groupCR.SetWaiting()
 	if err := r.Status().Update(ctx, groupCR); err != nil {
@@ -191,11 +195,10 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if len(uniqueMembers) == 0 {
 		if len(missingGroups) > 0 {
 			log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
-			groupCR.UpdateStatus(false)
 		} else {
 			log.Info("no members to reconcile, skipping backend reconciliation")
-			groupCR.UpdateStatusWithErrMessage("no members to reconcile, skipping backend reconciliation")
 		}
+		groupCR.UpdateStatus(false)
 		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
 			log.WithError(statusErr).Error("error updating status after no members to reconcile")
 			return ctrl.Result{}, statusErr
@@ -1264,6 +1267,28 @@ func (r *GroupReconciler) deduplicateMembers(members []string) []string {
 		}
 	}
 	return uniqueMembers
+}
+
+// hasMembersSpec reports whether spec.members has any users, groups, or ldap_query.
+func hasMembersSpec(m usernautdevv1alpha1.Members) bool {
+	return len(m.Users) > 0 || len(m.Groups) > 0 || m.LDAPQuery != nil
+}
+
+// markReadyWithNoMembers sets Ready True when the Group has no users, groups, or ldap_query,
+// without calling LDAP or backends.
+func (r *GroupReconciler) markReadyWithNoMembers(
+	ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group,
+	log *logrus.Entry,
+) (ctrl.Result, error) {
+	log.Info("no users, groups, or ldap query; skipping LDAP and backend reconciliation")
+	groupCR.SetMissingSubGroups(nil)
+	groupCR.UpdateStatus(false)
+	if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+		log.WithError(statusErr).Error("error updating status after no users, groups, or ldap query provided")
+		return ctrl.Result{}, statusErr
+	}
+	return ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
 }
 
 func (r *GroupReconciler) setOwnerReference(ctx context.Context, groupCR *usernautdevv1alpha1.Group, log *logrus.Entry) error {
