@@ -311,10 +311,10 @@ func preloadCache(
 	// off after preload (e.g. Snowflake async, #296) gets canceled on
 	// shutdown. preloadCache itself is synchronous so this only matters for
 	// long-lived children launched below.
-	ctx := logger.WithRequestId(shutdownCtx, types.UID(uuid.New().String()))
+	preloadCtx := logger.WithRequestId(shutdownCtx, types.UID(uuid.New().String()))
 
 	// Use errgroup for concurrent processing with proper error handling
-	g, ctx := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(preloadCtx)
 
 	// States for Snowflake async continuation (protected by mutex for goroutine safety)
 	// Using a slice to support multiple Snowflake backends (dev, pre-prod, prod, etc.)
@@ -433,12 +433,13 @@ func preloadCache(
 	setupLog.Info("cache preload completed for all backends")
 
 	// Start async continuation for all Snowflake backends (after all preloads done).
-	// Pass the shutdownCtx (not the errgroup ctx, which gets canceled when g.Wait
-	// returns) so the goroutine survives preloadCache returning yet still gets
-	// canceled when the manager receives SIGINT/SIGTERM (#296).
+	// Pass preloadCtx (not the errgroup ctx, which gets canceled when g.Wait
+	// returns) so the goroutine survives preloadCache returning, keeps the
+	// request ID for logging, and still gets canceled when the manager receives
+	// SIGINT/SIGTERM (#296).
 	for _, state := range snowflakeStates {
 		if state.lastUser != "" {
-			startSnowflakeAsyncContinuation(shutdownCtx, state, dataStore, cacheMutex)
+			startSnowflakeAsyncContinuation(preloadCtx, state, dataStore, cacheMutex)
 		}
 	}
 
@@ -448,24 +449,16 @@ func preloadCache(
 // startSnowflakeAsyncContinuation starts a background goroutine to fetch remaining Snowflake users
 // and write them to cache. This function returns immediately after starting the goroutine.
 //
-// shutdownCtx must be the long-lived manager shutdown context (typically
+// asyncCtx must derive from the long-lived manager shutdown context (typically
 // `ctrl.SetupSignalHandler()`'s result) so the goroutine gets canceled when
 // the manager receives SIGINT/SIGTERM. Passing `context.Background()` here
 // leaks the goroutine across shutdown — see #296.
 func startSnowflakeAsyncContinuation(
-	shutdownCtx context.Context,
+	asyncCtx context.Context,
 	state *snowflakeAsyncState,
 	dataStore *store.Store,
 	cacheMutex *sync.RWMutex,
 ) {
-	// Derive a child context from the manager's shutdown context so SIGINT/SIGTERM
-	// propagates into FetchRemainingUsersAsync and the cache writes below.
-	// Transfer the request-id logger value from the originating context for
-	// traceability.
-	asyncCtx := shutdownCtx
-	if entry := logger.Logger(shutdownCtx); entry != nil {
-		asyncCtx = context.WithValue(shutdownCtx, logger.RequestIdKey, entry)
-	}
 	userChan, errChan := state.client.FetchRemainingUsersAsync(asyncCtx, state.lastUser)
 
 	// Consumer goroutine - writes to cache
