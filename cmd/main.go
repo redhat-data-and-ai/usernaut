@@ -208,7 +208,14 @@ func main() {
 	// Create store layer that wraps cache with prefixed keys and encapsulated operations
 	dataStore := store.New(cache)
 
-	if err = preloadCache(*appConf, dataStore, sharedCacheMutex); err != nil {
+	// Set up the shared shutdown context up front so the Snowflake async
+	// continuation (#296) can derive a cancelable child from it and stop
+	// cleanly when the manager receives SIGINT/SIGTERM. `SetupSignalHandler`
+	// can only be called once per process; reuse the same context for
+	// `mgr.Start` below.
+	shutdownCtx := ctrl.SetupSignalHandler()
+
+	if err = preloadCache(shutdownCtx, *appConf, dataStore, sharedCacheMutex); err != nil {
 		setupLog.Error(err, "failed to preload cache")
 		os.Exit(1)
 	}
@@ -269,7 +276,7 @@ func main() {
 		}
 	}()
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(shutdownCtx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
@@ -321,14 +328,20 @@ type snowflakeAsyncState struct {
 // This is done only once at the start of the application
 // and the cache is flushed when the application is restarted
 // Optimized to use goroutines for parallel processing of backends
-func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex *sync.RWMutex) error {
-	ctx := context.Background()
-
-	// Add request ID for tracking this cache preload operation in logs
-	ctx = logger.WithRequestId(ctx, types.UID(uuid.New().String()))
+func preloadCache(
+	shutdownCtx context.Context,
+	appConfig config.AppConfig,
+	dataStore *store.Store,
+	cacheMutex *sync.RWMutex,
+) error {
+	// Derive from the shutdown context so any background continuation kicked
+	// off after preload (e.g. Snowflake async, #296) gets canceled on
+	// shutdown. preloadCache itself is synchronous so this only matters for
+	// long-lived children launched below.
+	preloadCtx := logger.WithRequestId(shutdownCtx, types.UID(uuid.New().String()))
 
 	// Use errgroup for concurrent processing with proper error handling
-	g, ctx := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(preloadCtx)
 
 	// States for Snowflake async continuation (protected by mutex for goroutine safety)
 	// Using a slice to support multiple Snowflake backends (dev, pre-prod, prod, etc.)
@@ -446,10 +459,14 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 
 	setupLog.Info("cache preload completed for all backends")
 
-	// Start async continuation for all Snowflake backends (after all preloads done)
+	// Start async continuation for all Snowflake backends (after all preloads done).
+	// Pass preloadCtx (not the errgroup ctx, which gets canceled when g.Wait
+	// returns) so the goroutine survives preloadCache returning, keeps the
+	// request ID for logging, and still gets canceled when the manager receives
+	// SIGINT/SIGTERM (#296).
 	for _, state := range snowflakeStates {
 		if state.lastUser != "" {
-			startSnowflakeAsyncContinuation(ctx, state, dataStore, cacheMutex)
+			startSnowflakeAsyncContinuation(preloadCtx, state, dataStore, cacheMutex)
 		}
 	}
 
@@ -458,18 +475,17 @@ func preloadCache(appConfig config.AppConfig, dataStore *store.Store, cacheMutex
 
 // startSnowflakeAsyncContinuation starts a background goroutine to fetch remaining Snowflake users
 // and write them to cache. This function returns immediately after starting the goroutine.
+//
+// asyncCtx must derive from the long-lived manager shutdown context (typically
+// `ctrl.SetupSignalHandler()`'s result) so the goroutine gets canceled when
+// the manager receives SIGINT/SIGTERM. Passing `context.Background()` here
+// leaks the goroutine across shutdown — see #296.
 func startSnowflakeAsyncContinuation(
-	originalCtx context.Context,
+	asyncCtx context.Context,
 	state *snowflakeAsyncState,
 	dataStore *store.Store,
 	cacheMutex *sync.RWMutex,
 ) {
-	// Create a fresh context since the errgroup context is canceled after g.Wait() returns
-	// Transfer the logger (with request ID) from original context for traceability
-	asyncCtx := context.Background()
-	if entry := logger.Logger(originalCtx); entry != nil {
-		asyncCtx = context.WithValue(asyncCtx, logger.RequestIdKey, entry)
-	}
 	userChan, errChan := state.client.FetchRemainingUsersAsync(asyncCtx, state.lastUser)
 
 	// Consumer goroutine - writes to cache
