@@ -188,9 +188,14 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	uniqueMembers := r.deduplicateMembers(append(allDeclaredMembers, queryMembers...))
 
-	if len(uniqueMembers) == 0 && len(missingGroups) > 0 {
-		log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
-		groupCR.UpdateStatus(false)
+	if len(uniqueMembers) == 0 {
+		if len(missingGroups) > 0 {
+			log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
+			groupCR.UpdateStatus(false)
+		} else {
+			log.Info("no members to reconcile, skipping backend reconciliation")
+			groupCR.UpdateStatusWithErrMessage("no members to reconcile, skipping backend reconciliation")
+		}
 		if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
 			log.WithError(statusErr).Error("error updating status after no members to reconcile")
 			return ctrl.Result{}, statusErr
