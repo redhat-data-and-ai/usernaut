@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,11 +19,28 @@ type LDAP struct {
 	UserDN           string   `yaml:"userDN"`
 	UserSearchFilter string   `yaml:"userSearchFilter"`
 	Attributes       []string `yaml:"attributes"`
+	BindUsername     string   `yaml:"bindUsername"`
+	BindPassword     string   `yaml:"bindPassword"`
+
+	// ServiceAccountObjectFilter is optional unless a namespace allows service accounts.
+	ServiceAccountObjectFilter string `yaml:"serviceAccountObjectFilter"`
+}
+
+// Validate checks LDAP syntax when a service-account filter is configured.
+func (l LDAP) Validate() error {
+	if strings.TrimSpace(l.ServiceAccountObjectFilter) == "" {
+		return nil
+	}
+	if _, err := ldapv3.CompileFilter(normalizeSearchFilter(l.ServiceAccountObjectFilter)); err != nil {
+		return fmt.Errorf("invalid ldap.serviceAccountObjectFilter: %w", err)
+	}
+	return nil
 }
 
 type LDAPConnClient interface {
 	IsClosing() bool
 	Search(*ldapv3.SearchRequest) (*ldapv3.SearchResult, error)
+	Bind(username, password string) error
 	UnauthenticatedBind(username string) error
 }
 
@@ -44,7 +62,17 @@ type LDAPConn struct {
 	baseUserDN       string
 	server           string
 	userSearchFilter string
+	bindUsername     string
+	bindPassword     string
 	attributes       []string
+
+	serviceAccountObjectFilter string
+}
+
+type LDAPClientConfig struct {
+	server       string
+	bindUsername string
+	bindPassword string
 }
 
 type LDAPClient interface {
@@ -57,26 +85,32 @@ type LDAPClient interface {
 
 // InitLdap initializes a connection to the LDAP server using the provided configuration.
 func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
-	ldapConn, err := dialLDAP(ldapConfig.Server)
+	if err := ldapConfig.Validate(); err != nil {
+		return nil, err
+	}
+	ldapClientConfig := LDAPClientConfig{
+		server:       ldapConfig.Server,
+		bindUsername: ldapConfig.BindUsername,
+		bindPassword: ldapConfig.BindPassword,
+	}
+
+	conn, err := ldapClientConfig.createConn()
 	if err != nil {
 		return nil, err
 	}
 
-	// Perform anonymous bind (equivalent to ldapsearch -x)
-	err = ldapConn.UnauthenticatedBind("")
-	if err != nil {
-		_ = ldapConn.Close()
-		return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
-	}
-
 	return &LDAPConn{
-		conn:             ldapConn,
+		conn:             conn,
 		server:           ldapConfig.Server,
 		userDN:           ldapConfig.UserDN,
 		baseDN:           ldapConfig.BaseDN,
 		baseUserDN:       ldapConfig.BaseUserDN,
 		userSearchFilter: ldapConfig.UserSearchFilter,
 		attributes:       ldapConfig.Attributes,
+		bindUsername:     ldapConfig.BindUsername,
+		bindPassword:     ldapConfig.BindPassword,
+
+		serviceAccountObjectFilter: strings.TrimSpace(ldapConfig.ServiceAccountObjectFilter),
 	}, nil
 }
 
@@ -99,17 +133,16 @@ func (l *LDAPConn) getConn() LDAPConnClient {
 	}
 
 	if l.conn != nil {
-		newConn, err := dialLDAP(l.server)
+		ldapClientConfig := LDAPClientConfig{
+			server:       l.server,
+			bindUsername: l.bindUsername,
+			bindPassword: l.bindPassword,
+		}
+
+		newConn, err := ldapClientConfig.createConn()
 		if err != nil {
 			// Log the error and return the existing connection (or nil if no valid connection exists)
-			fmt.Printf("Failed to re-establish LDAP connection: %v\n", err)
-			return nil
-		}
-		// Perform anonymous bind (equivalent to ldapsearch -x)
-		err = newConn.UnauthenticatedBind("")
-		if err != nil {
-			fmt.Printf("Failed to bind re-established LDAP connection: %v\n", err)
-			_ = newConn.Close()
+			fmt.Printf("Failed to create LDAP connection: %v\n", err)
 			return nil
 		}
 		l.conn = newConn
@@ -117,6 +150,30 @@ func (l *LDAPConn) getConn() LDAPConnClient {
 	}
 
 	return l.conn
+}
+
+func (l *LDAPClientConfig) createConn() (LDAPConnClient, error) {
+	newConn, err := dialLDAP(l.server)
+	if err != nil {
+		return nil, fmt.Errorf("failed to establish LDAP connection: %w", err)
+
+	}
+
+	// Perform bind if username and password are set
+	if strings.TrimSpace(l.bindUsername) != "" && strings.TrimSpace(l.bindPassword) != "" {
+		err = newConn.Bind(l.bindUsername, l.bindPassword)
+		if err != nil {
+			_ = newConn.Close()
+			return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
+		}
+	} else {
+		err = newConn.UnauthenticatedBind(l.bindUsername)
+		if err != nil {
+			_ = newConn.Close()
+			return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
+		}
+	}
+	return newConn, nil
 }
 
 // GetUserDN returns the user DN for the LDAP connection.

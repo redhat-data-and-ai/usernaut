@@ -16,7 +16,7 @@ import (
 // and 2nd will have email as key
 func (fc *FivetranClient) FetchAllUsers(ctx context.Context) (
 	map[string]*structs.User, map[string]*structs.User, error) {
-	log := logger.Logger(ctx).WithField("service", "fivetran")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 
 	usersEmailMap := make(map[string]*structs.User, 0)
 	userIDMap := make(map[string]*structs.User, 0)
@@ -58,8 +58,8 @@ func (fc *FivetranClient) FetchAllUsers(ctx context.Context) (
 // Onboards the user on fivetran
 func (fc *FivetranClient) CreateUser(ctx context.Context, u *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"user":    u,
+		logKeyService: serviceName,
+		"user":        u,
 	})
 
 	log.Info("inviting user")
@@ -80,8 +80,8 @@ func (fc *FivetranClient) CreateUser(ctx context.Context, u *structs.User) (*str
 // Fetches user details based on userID (fivetran ID)
 func (fc *FivetranClient) FetchUserDetails(ctx context.Context, userID string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 	log.Info("fetching user details by ID")
 	resp, err := fc.fivetranClient.NewUserDetails().UserID(userID).Do(ctx)
@@ -97,8 +97,8 @@ func (fc *FivetranClient) FetchUserDetails(ctx context.Context, userID string) (
 // Updates user details based on userID (fivetran ID)
 func (fc *FivetranClient) UpdateUser(ctx context.Context, u *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"user":    u,
+		logKeyService: serviceName,
+		"user":        u,
 	})
 
 	log.Info("updating user details")
@@ -120,8 +120,8 @@ func (fc *FivetranClient) UpdateUser(ctx context.Context, u *structs.User) (*str
 // Offboards the user from fivetran based on userID (fivetran ID)
 func (fc *FivetranClient) DeleteUser(ctx context.Context, userID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 
 	log.Info("dropping the user")

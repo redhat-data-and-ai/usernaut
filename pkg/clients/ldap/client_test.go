@@ -177,6 +177,11 @@ func (c *testLDAPConn) Search(*ldapv3.SearchRequest) (*ldapv3.SearchResult, erro
 	return &ldapv3.SearchResult{}, nil
 }
 
+func (c *testLDAPConn) Bind(username, password string) error {
+	c.bindCount.Add(1)
+	return nil
+}
+
 func (c *testLDAPConn) UnauthenticatedBind(username string) error {
 	c.bindCount.Add(1)
 	return nil
@@ -185,4 +190,19 @@ func (c *testLDAPConn) UnauthenticatedBind(username string) error {
 func (c *testLDAPConn) Close() error {
 	c.closeCount.Add(1)
 	return nil
+}
+
+func TestInitLdapRejectsInvalidServiceAccountObjectFilter(t *testing.T) {
+	for _, filter := range []string{"serviceAccount", "(objectClass=serviceAccount", "(&(uid=svc)"} {
+		client, err := InitLdap(LDAP{ServiceAccountObjectFilter: filter})
+		assert.Nil(t, client)
+		assert.ErrorContains(t, err, "invalid ldap.serviceAccountObjectFilter")
+	}
+}
+
+func TestServiceAccountObjectFilterValidation(t *testing.T) {
+	for _, filter := range []string{"", " ", "objectClass=serviceAccount", "(objectClass=serviceAccount)",
+		"(&(objectClass=serviceAccount)(accountStatus=active))", "|(employeeType=service)(uid=svc*)"} {
+		assert.NoError(t, (LDAP{ServiceAccountObjectFilter: filter}).Validate(), filter)
+	}
 }

@@ -17,7 +17,9 @@ limitations under the License.
 package config
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
@@ -50,7 +52,34 @@ type APIServerConfig struct {
 
 // ControllerConfig represents controller-specific configuration
 type ControllerConfig struct {
-	MaxConcurrentReconciles int `yaml:"maxConcurrentReconciles"`
+	MaxConcurrentReconciles int                       `yaml:"maxConcurrentReconciles"`
+	SpecValidationRules     SpecValidationRulesConfig `yaml:"specValidationRules"`
+}
+
+// SpecValidationRulesConfig holds reconcile-time spec validation rules keyed by namespace.
+type SpecValidationRulesConfig map[string]ValidationRules
+
+// ValidationRules holds resource validation rules for a single namespace.
+type ValidationRules struct {
+	Group GroupSpecValidationRules `yaml:"group"`
+}
+
+// GroupSpecValidationRules holds Group CR spec field validation rules.
+type GroupSpecValidationRules struct {
+	// AllowServiceAccounts is optional and defaults to false.
+	AllowServiceAccounts bool                      `yaml:"allowServiceAccounts"`
+	GroupName            GroupNameValidationConfig `yaml:"groupName"`
+	Backends             BackendsValidationConfig  `yaml:"backends"`
+}
+
+// GroupNameValidationConfig defines group_name validation rules for Group CRs.
+type GroupNameValidationConfig struct {
+	Prefix string `yaml:"prefix"`
+}
+
+// BackendsValidationConfig holds backend validation rules for Group CRs.
+type BackendsValidationConfig struct {
+	AllowedBackendTypes []string `yaml:"allowedBackendTypes"`
 }
 
 type CORSConfig struct {
@@ -112,6 +141,10 @@ func LoadConfig(env string) (*AppConfig, error) {
 		return nil, err
 	}
 
+	if err := config.validateServiceAccounts(); err != nil {
+		return nil, err
+	}
+
 	// convert backends to a map for easier access
 	config.BackendMap = make(map[string]map[string]Backend)
 	for _, backend := range config.Backends {
@@ -122,6 +155,21 @@ func LoadConfig(env string) (*AppConfig, error) {
 	}
 
 	return config, nil
+}
+
+// validateServiceAccounts requires a service-account filter only when a namespace opts in.
+func (c *AppConfig) validateServiceAccounts() error {
+	if err := c.LDAP.Validate(); err != nil {
+		return err
+	}
+	for namespace, rules := range c.ControllerConfig.SpecValidationRules {
+		if rules.Group.AllowServiceAccounts && strings.TrimSpace(c.LDAP.ServiceAccountObjectFilter) == "" {
+			return fmt.Errorf(
+				"ldap.serviceAccountObjectFilter is required when namespace %q enables group.allowServiceAccounts",
+				namespace)
+		}
+	}
+	return nil
 }
 
 func getOrDefaultEnv() string {

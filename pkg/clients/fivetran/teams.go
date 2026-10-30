@@ -22,7 +22,7 @@ func populateTeamsMap(teamsMap map[string]structs.Team, items []teams.TeamData) 
 }
 
 func (fc *FivetranClient) FetchAllTeams(ctx context.Context) (map[string]structs.Team, error) {
-	log := logger.Logger(ctx).WithField("service", "fivetran")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 
 	log.Info("fetching all the teams")
 
@@ -58,8 +58,8 @@ func (fc *FivetranClient) FetchAllTeams(ctx context.Context) (map[string]structs
 
 func (fc *FivetranClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"req":     team,
+		logKeyService: serviceName,
+		"req":         team,
 	})
 
 	if team.Role == "" {
@@ -88,8 +88,8 @@ func (fc *FivetranClient) CreateTeam(ctx context.Context, team *structs.Team) (*
 
 func (fc *FivetranClient) UpdateTeam(ctx context.Context, g *UpdateTeam) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"req":     g,
+		logKeyService: serviceName,
+		"req":         g,
 	})
 
 	if g.NewRole == "" {
@@ -119,8 +119,8 @@ func (fc *FivetranClient) UpdateTeam(ctx context.Context, g *UpdateTeam) (*struc
 
 func (fc *FivetranClient) FetchTeamDetails(ctx context.Context, teamID string) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 
 	log.Info("fetching team details")
@@ -145,8 +145,8 @@ func (fc *FivetranClient) FetchTeamDetails(ctx context.Context, teamID string) (
 
 func (fc *FivetranClient) DeleteTeamByID(ctx context.Context, teamID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "fivetran",
-		"teamID":  teamID,
+		logKeyService: serviceName,
+		"teamID":      teamID,
 	})
 
 	log.Info("deleting the team")

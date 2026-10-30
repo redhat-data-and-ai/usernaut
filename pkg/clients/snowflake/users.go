@@ -59,7 +59,7 @@ func (c *SnowflakeClient) FetchAllUsers(ctx context.Context) (map[string]*struct
 // This is used for async continuation after preload.
 func (c *SnowflakeClient) FetchAllUsersWithCursor(ctx context.Context) (
 	map[string]*structs.User, map[string]*structs.User, string, error) {
-	log := logger.Logger(ctx).WithField("service", "snowflake")
+	log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 
 	log.Info("fetching all users")
 	resultByID := make(map[string]*structs.User)
@@ -110,7 +110,7 @@ func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context,
 		defer close(userChan)
 		defer close(errChan)
 
-		log := logger.Logger(ctx).WithField("service", "snowflake")
+		log := logger.Logger(ctx).WithField(logKeyService, serviceName)
 		cursor := fromName
 
 		for {
@@ -167,8 +167,8 @@ func (c *SnowflakeClient) FetchRemainingUsersAsync(ctx context.Context,
 // CreateUser creates a new user in Snowflake using REST API
 func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service":  "snowflake",
-		"username": user.UserName,
+		logKeyService: serviceName,
+		"username":    user.UserName,
 	})
 
 	log.Info("creating user")
@@ -219,8 +219,8 @@ func (c *SnowflakeClient) CreateUser(ctx context.Context, user *structs.User) (*
 // FetchUserDetails fetches details for a specific user using REST API
 func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "snowflake",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 	log.Info("fetching user details by ID")
 
@@ -248,8 +248,8 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 // DeleteUser deletes a user from Snowflake using REST API
 func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		"service": "snowflake",
-		"userID":  userID,
+		logKeyService: serviceName,
+		"userID":      userID,
 	})
 
 	log.Debug("deleting user")

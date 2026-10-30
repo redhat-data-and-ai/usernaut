@@ -1,0 +1,54 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: Group
+metadata:
+  labels:
+    app.kubernetes.io/name: usernaut
+    app.kubernetes.io/managed-by: kustomize
+  name: test-nested-query
+  namespace: usernaut
+spec:
+  group_name: dataverse-consumer-test-nested
+  members:
+    ldap_query:
+      options:
+        include_indirect_reports: true
+        include_manager: true
+      operator: and
+      filters:
+        - key: employeeType
+          criteria: not
+          value: "external employee"
+        - ldap_query:
+            operator: or
+            filters:
+              - key: title
+                criteria: contains
+                value: engineer
+              - key: title
+                criteria: contains
+                value: developer
+        - ldap_query:
+            operator: or
+            filters:
+              - key: manager
+                criteria: equals
+                value: mgrAlpha
+              - key: manager
+                criteria: equals
+                value: mgrBeta
+              - ldap_query:
+                  operator: and
+                  filters:
+                    - key: manager
+                      criteria: equals
+                      value: mgrGamma
+                    - ldap_query:
+                        operator: or
+                        filters:
+                          - key: rhatGeo
+                            criteria: equals
+                            value: na
+                          - key: rhatGeo
+                            criteria: equals
+                            value: apac
+  backends: []

@@ -116,7 +116,7 @@ func SubstituteConfigValues(v reflect.Value) {
 		return
 	}
 	// If it's a pointer, resolve it
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return
 		}
@@ -127,7 +127,7 @@ func SubstituteConfigValues(v reflect.Value) {
 	if v.Kind() == reflect.Struct {
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Field(i)
-			if field.CanSet() || field.Kind() == reflect.Ptr ||
+			if field.CanSet() || field.Kind() == reflect.Pointer ||
 				field.Kind() == reflect.Struct || field.Kind() == reflect.Map ||
 				field.Kind() == reflect.Slice {
 				SubstituteConfigValues(field)
