@@ -955,7 +955,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 
 			// we need to check if the user is already in the existing team members
 			if _, exists := existingTeamMembers[user]; exists {
-				backendLogger.WithField("user", user).Info("user is already in existing team members, skipping user creation")
+				backendLogger.WithField("user", user).Warn("user not found in LDAP but exists in backend team, marking for removal")
 				usersToRemove = append(usersToRemove, user)
 			}
 			continue
