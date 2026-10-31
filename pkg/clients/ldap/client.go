@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	ldapv3 "github.com/go-ldap/ldap/v3"
@@ -43,8 +44,25 @@ type LDAPConnClient interface {
 	UnauthenticatedBind(username string) error
 }
 
+type closeableLDAPConnClient interface {
+	LDAPConnClient
+	Close() error
+	SetTimeout(time.Duration)
+}
+
+// ldapBindTimeout bounds the bind in createConn, which runs under the write
+// lock when getConn reconnects, so an unresponsive server cannot stall every
+// caller. It does not apply to searches on the established connection.
+const ldapBindTimeout = 30 * time.Second
+
+var dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+	return ldapv3.DialURL(server, ldapv3.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
+}
+
 type LDAPConn struct {
+	mu               sync.RWMutex
 	conn             LDAPConnClient
+	connGeneration   uint64
 	userDN           string
 	baseDN           string
 	baseUserDN       string
@@ -104,32 +122,50 @@ func InitLdap(ldapConfig LDAP) (LDAPClient, error) {
 
 // getConn returns the underlying LDAP connection.
 func (l *LDAPConn) getConn() LDAPConnClient {
-	if l.conn != nil && l.conn.IsClosing() {
+	l.mu.RLock()
+	conn := l.conn
+	connGeneration := l.connGeneration
+	if conn != nil && !conn.IsClosing() {
+		l.mu.RUnlock()
+		return conn
+	}
+	l.mu.RUnlock()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.connGeneration != connGeneration && l.conn != nil && !l.conn.IsClosing() {
+		return l.conn
+	}
+
+	if l.conn != nil {
 		ldapClientConfig := LDAPClientConfig{
 			server:       l.server,
 			bindUsername: l.bindUsername,
 			bindPassword: l.bindPassword,
 		}
 
-		conn, err := ldapClientConfig.createConn()
+		newConn, err := ldapClientConfig.createConn()
 		if err != nil {
 			// Log the error and return the existing connection (or nil if no valid connection exists)
 			fmt.Printf("Failed to create LDAP connection: %v\n", err)
 			return nil
 		}
-		l.conn = conn
-		return conn
+		l.conn = newConn
+		l.connGeneration++
 	}
 
 	return l.conn
 }
 
 func (l *LDAPClientConfig) createConn() (LDAPConnClient, error) {
-	newConn, err := ldapv3.DialURL(l.server, ldapv3.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
+	newConn, err := dialLDAP(l.server)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish LDAP connection: %w", err)
 
 	}
+
+	newConn.SetTimeout(ldapBindTimeout)
 
 	// Perform bind if username and password are set
 	if strings.TrimSpace(l.bindUsername) != "" && strings.TrimSpace(l.bindPassword) != "" {
@@ -145,6 +181,7 @@ func (l *LDAPClientConfig) createConn() (LDAPConnClient, error) {
 			return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
 		}
 	}
+	newConn.SetTimeout(0)
 	return newConn, nil
 }
 

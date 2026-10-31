@@ -1,11 +1,15 @@
 package ldap
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	ldapv3 "github.com/go-ldap/ldap/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,6 +55,141 @@ func TestInitLdap_Success(t *testing.T) {
 	}
 }
 
+func TestGetLdapConnection_ConcurrentReconnect(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	const goroutines = 50
+	initialConn := newTestLDAPConn(true)
+	reconnectedConn := newTestLDAPConn(false)
+	var dialCount atomic.Int32
+
+	// Hold every caller at the stale check so all of them observe the stale connection.
+	var staleChecks atomic.Int32
+	allStaleChecks := make(chan struct{})
+	initialConn.onCheck = func() {
+		if staleChecks.Add(1) == goroutines {
+			close(allStaleChecks)
+		}
+		select {
+		case <-allStaleChecks:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out waiting for all callers to reach the stale connection check")
+		}
+	}
+
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		dialCount.Add(1)
+		return reconnectedConn, nil
+	}
+
+	ldapConn := &LDAPConn{
+		conn:   initialConn,
+		server: "ldap://ldap.com:389",
+	}
+
+	start := make(chan struct{})
+	results := make(chan LDAPConnClient, goroutines)
+	var wg sync.WaitGroup
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- ldapConn.getConn()
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	for conn := range results {
+		assert.Same(t, reconnectedConn, conn, "Expected every caller to receive the reconnected LDAP connection")
+	}
+	assert.Equal(t, int32(1), dialCount.Load(), "Expected exactly one reconnect")
+	assert.Equal(t, int32(1), reconnectedConn.bindCount.Load(), "Expected exactly one bind on the reconnected connection")
+	assert.Same(t, reconnectedConn, ldapConn.conn, "Expected LDAPConn to store the reconnected connection")
+}
+
+func TestGetLdapConnection_ReplacementClosedBeforeLockReconnects(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	initialConn := newTestLDAPConn(true)
+	closedReplacement := newTestLDAPConn(true)
+	freshConn := newTestLDAPConn(false)
+	var dialCount atomic.Int32
+
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		dialCount.Add(1)
+		return freshConn, nil
+	}
+
+	ldapConn := &LDAPConn{
+		conn:   initialConn,
+		server: "ldap://ldap.com:389",
+	}
+
+	// Another caller replaces the connection after this caller read the
+	// generation, and the replacement has already closed.
+	initialConn.onCheck = func() {
+		ldapConn.conn = closedReplacement
+		ldapConn.connGeneration++
+	}
+
+	conn := ldapConn.getConn()
+
+	assert.Same(t, freshConn, conn, "Expected a closed replacement to be reconnected, not returned")
+	assert.Equal(t, int32(1), dialCount.Load(), "Expected exactly one reconnect")
+}
+
+func TestCreateConn_BoundsBindOnly(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	newConn := newTestLDAPConn(false)
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		return newConn, nil
+	}
+
+	cfg := LDAPClientConfig{server: "ldap://ldap.com:389"}
+	_, err := cfg.createConn()
+
+	assert.NoError(t, err)
+	assert.Equal(t, []time.Duration{ldapBindTimeout, 0}, newConn.timeouts,
+		"Expected the bind timeout to be set before the bind and cleared after it")
+}
+
+func TestGetLdapConnection_ReconnectFailureKeepsExistingConnection(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	initialConn := newTestLDAPConn(true)
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		return nil, errors.New("dial failed")
+	}
+
+	ldapConn := &LDAPConn{
+		conn:   initialConn,
+		server: "ldap://ldap.com:389",
+	}
+
+	conn := ldapConn.getConn()
+
+	assert.Nil(t, conn, "Expected nil when reconnect dial fails")
+	assert.Same(t, initialConn, ldapConn.conn, "Expected failed reconnect to leave the existing connection unchanged")
+}
+
 // startMockLDAPServer starts a simple mock LDAP server for testing purposes.
 func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -83,6 +222,50 @@ func startMockLDAPServer(t *testing.T) (addr string, stop func()) {
 		close(done)
 		_ = ln.Close()
 	}
+}
+
+type testLDAPConn struct {
+	closing    atomic.Bool
+	bindCount  atomic.Int32
+	closeCount atomic.Int32
+	timeouts   []time.Duration
+	onCheck    func()
+}
+
+func newTestLDAPConn(closing bool) *testLDAPConn {
+	conn := &testLDAPConn{}
+	conn.closing.Store(closing)
+	return conn
+}
+
+func (c *testLDAPConn) IsClosing() bool {
+	if c.onCheck != nil {
+		c.onCheck()
+	}
+	return c.closing.Load()
+}
+
+func (c *testLDAPConn) Search(*ldapv3.SearchRequest) (*ldapv3.SearchResult, error) {
+	return &ldapv3.SearchResult{}, nil
+}
+
+func (c *testLDAPConn) Bind(username, password string) error {
+	c.bindCount.Add(1)
+	return nil
+}
+
+func (c *testLDAPConn) UnauthenticatedBind(username string) error {
+	c.bindCount.Add(1)
+	return nil
+}
+
+func (c *testLDAPConn) Close() error {
+	c.closeCount.Add(1)
+	return nil
+}
+
+func (c *testLDAPConn) SetTimeout(timeout time.Duration) {
+	c.timeouts = append(c.timeouts, timeout)
 }
 
 func TestInitLdapRejectsInvalidServiceAccountObjectFilter(t *testing.T) {
