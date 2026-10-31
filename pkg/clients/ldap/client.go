@@ -47,7 +47,13 @@ type LDAPConnClient interface {
 type closeableLDAPConnClient interface {
 	LDAPConnClient
 	Close() error
+	SetTimeout(time.Duration)
 }
+
+// ldapBindTimeout bounds the bind in createConn, which runs under the write
+// lock when getConn reconnects, so an unresponsive server cannot stall every
+// caller. It does not apply to searches on the established connection.
+const ldapBindTimeout = 30 * time.Second
 
 var dialLDAP = func(server string) (closeableLDAPConnClient, error) {
 	return ldapv3.DialURL(server, ldapv3.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}))
@@ -128,7 +134,7 @@ func (l *LDAPConn) getConn() LDAPConnClient {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.connGeneration != connGeneration {
+	if l.connGeneration != connGeneration && l.conn != nil && !l.conn.IsClosing() {
 		return l.conn
 	}
 
@@ -159,6 +165,8 @@ func (l *LDAPClientConfig) createConn() (LDAPConnClient, error) {
 
 	}
 
+	newConn.SetTimeout(ldapBindTimeout)
+
 	// Perform bind if username and password are set
 	if strings.TrimSpace(l.bindUsername) != "" && strings.TrimSpace(l.bindPassword) != "" {
 		err = newConn.Bind(l.bindUsername, l.bindPassword)
@@ -173,6 +181,7 @@ func (l *LDAPClientConfig) createConn() (LDAPConnClient, error) {
 			return nil, fmt.Errorf("failed to bind LDAP connection: %w", err)
 		}
 	}
+	newConn.SetTimeout(0)
 	return newConn, nil
 }
 

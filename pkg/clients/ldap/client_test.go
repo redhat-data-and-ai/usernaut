@@ -61,9 +61,24 @@ func TestGetLdapConnection_ConcurrentReconnect(t *testing.T) {
 		dialLDAP = originalDialLDAP
 	})
 
+	const goroutines = 50
 	initialConn := newTestLDAPConn(true)
 	reconnectedConn := newTestLDAPConn(false)
 	var dialCount atomic.Int32
+
+	// Hold every caller at the stale check so all of them observe the stale connection.
+	var staleChecks atomic.Int32
+	allStaleChecks := make(chan struct{})
+	initialConn.onCheck = func() {
+		if staleChecks.Add(1) == goroutines {
+			close(allStaleChecks)
+		}
+		select {
+		case <-allStaleChecks:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out waiting for all callers to reach the stale connection check")
+		}
+	}
 
 	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
 		dialCount.Add(1)
@@ -75,7 +90,6 @@ func TestGetLdapConnection_ConcurrentReconnect(t *testing.T) {
 		server: "ldap://ldap.com:389",
 	}
 
-	const goroutines = 50
 	start := make(chan struct{})
 	results := make(chan LDAPConnClient, goroutines)
 	var wg sync.WaitGroup
@@ -99,6 +113,59 @@ func TestGetLdapConnection_ConcurrentReconnect(t *testing.T) {
 	assert.Equal(t, int32(1), dialCount.Load(), "Expected exactly one reconnect")
 	assert.Equal(t, int32(1), reconnectedConn.bindCount.Load(), "Expected exactly one bind on the reconnected connection")
 	assert.Same(t, reconnectedConn, ldapConn.conn, "Expected LDAPConn to store the reconnected connection")
+}
+
+func TestGetLdapConnection_ReplacementClosedBeforeLockReconnects(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	initialConn := newTestLDAPConn(true)
+	closedReplacement := newTestLDAPConn(true)
+	freshConn := newTestLDAPConn(false)
+	var dialCount atomic.Int32
+
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		dialCount.Add(1)
+		return freshConn, nil
+	}
+
+	ldapConn := &LDAPConn{
+		conn:   initialConn,
+		server: "ldap://ldap.com:389",
+	}
+
+	// Another caller replaces the connection after this caller read the
+	// generation, and the replacement has already closed.
+	initialConn.onCheck = func() {
+		ldapConn.conn = closedReplacement
+		ldapConn.connGeneration++
+	}
+
+	conn := ldapConn.getConn()
+
+	assert.Same(t, freshConn, conn, "Expected a closed replacement to be reconnected, not returned")
+	assert.Equal(t, int32(1), dialCount.Load(), "Expected exactly one reconnect")
+}
+
+func TestCreateConn_BoundsBindOnly(t *testing.T) {
+	originalDialLDAP := dialLDAP
+	t.Cleanup(func() {
+		dialLDAP = originalDialLDAP
+	})
+
+	newConn := newTestLDAPConn(false)
+	dialLDAP = func(server string) (closeableLDAPConnClient, error) {
+		return newConn, nil
+	}
+
+	cfg := LDAPClientConfig{server: "ldap://ldap.com:389"}
+	_, err := cfg.createConn()
+
+	assert.NoError(t, err)
+	assert.Equal(t, []time.Duration{ldapBindTimeout, 0}, newConn.timeouts,
+		"Expected the bind timeout to be set before the bind and cleared after it")
 }
 
 func TestGetLdapConnection_ReconnectFailureKeepsExistingConnection(t *testing.T) {
@@ -161,6 +228,8 @@ type testLDAPConn struct {
 	closing    atomic.Bool
 	bindCount  atomic.Int32
 	closeCount atomic.Int32
+	timeouts   []time.Duration
+	onCheck    func()
 }
 
 func newTestLDAPConn(closing bool) *testLDAPConn {
@@ -170,6 +239,9 @@ func newTestLDAPConn(closing bool) *testLDAPConn {
 }
 
 func (c *testLDAPConn) IsClosing() bool {
+	if c.onCheck != nil {
+		c.onCheck()
+	}
 	return c.closing.Load()
 }
 
@@ -190,6 +262,10 @@ func (c *testLDAPConn) UnauthenticatedBind(username string) error {
 func (c *testLDAPConn) Close() error {
 	c.closeCount.Add(1)
 	return nil
+}
+
+func (c *testLDAPConn) SetTimeout(timeout time.Duration) {
+	c.timeouts = append(c.timeouts, timeout)
 }
 
 func TestInitLdapRejectsInvalidServiceAccountObjectFilter(t *testing.T) {
