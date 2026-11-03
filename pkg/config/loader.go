@@ -194,6 +194,11 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 	if err := c.viper.ReadInConfig(); err != nil {
 		return err
 	}
+	// A backend list replaces the defaults; entries must not merge by position.
+	// Keep the default list when this file does not specify backends.
+	if appConfig, ok := config.(*AppConfig); ok && c.viper.InConfig("backends") {
+		appConfig.Backends = nil
+	}
 	if err := c.viper.Unmarshal(config); err != nil {
 		return err
 	}
