@@ -71,15 +71,12 @@ type LDAPOptions struct {
 // GroupSpec defines the desired state of Group
 type GroupSpec struct {
 	GroupName   string       `json:"group_name"`
-	Members     Members      `json:"members"`
+	Members     Members      `json:"members,omitempty"`
 	GroupParams []GroupParam `json:"group_params,omitempty"`
 	Backends    []Backend    `json:"backends"`
 }
 
-// Members defines how group membership is resolved. At least one of ldap_query,
-// a non-empty users list, or a non-empty groups list must be provided.
-//
-// +kubebuilder:validation:XValidation:rule="has(self.ldap_query) || (has(self.users) && size(self.users) > 0) || (has(self.groups) && size(self.groups) > 0)",message="users or groups must be a non-empty list when ldap_query is omitted"
+// Members defines how group membership is resolved.
 type Members struct {
 	Groups    []string   `json:"groups,omitempty"`
 	Users     []string   `json:"users,omitempty"`
