@@ -21,11 +21,13 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -158,6 +160,71 @@ var _ = Describe("Group Controller", func() {
 		Expect(k8sClient.Get(ctx, key, fresh)).To(Succeed())
 		Expect(fresh.Labels).NotTo(HaveKey(constants.ForceReconcileLabel))
 		Expect(fresh.Status.ReconciledUsers).To(Equal([]string{"person"}))
+	})
+
+	It("reconciles an empty member list and clears a stale missing-group status", func() {
+		reconciler, ldapClient := setupTestReconciler(nil)
+		resource := &usernautdevv1alpha1.Group{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "empty-members-group", Namespace: "default",
+				Labels: map[string]string{constants.ForceReconcileLabel: "true"},
+			},
+			Spec: usernautdevv1alpha1.GroupSpec{
+				GroupName: "empty-members-group",
+				Members:   usernautdevv1alpha1.Members{},
+				Backends:  []usernautdevv1alpha1.Backend{},
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, resource)).To(Succeed()) })
+		resource.Status.MissingSubGroups = []string{"old-child"}
+		Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+		ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Times(0)
+
+		key := types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
+		result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(requeueAfter))
+
+		fresh := &usernautdevv1alpha1.Group{}
+		Expect(k8sClient.Get(ctx, key, fresh)).To(Succeed())
+		Expect(fresh.Labels).NotTo(HaveKey(constants.ForceReconcileLabel))
+		Expect(fresh.Status.MissingSubGroups).To(BeEmpty())
+		Expect(fresh.Status.ReconciledUsers).To(BeEmpty())
+		cond := meta.FindStatusCondition(fresh.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(usernautdevv1alpha1.SuccessfullyReconciled))
+	})
+
+	It("does not sync backends when the only child group is missing", func() {
+		reconciler, ldapClient := setupTestReconciler(nil)
+		resource := &usernautdevv1alpha1.Group{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "missing-child-group", Namespace: "default",
+			},
+			Spec: usernautdevv1alpha1.GroupSpec{
+				GroupName: "missing-child-group",
+				Members:   usernautdevv1alpha1.Members{Groups: []string{"does-not-exist"}},
+				Backends:  []usernautdevv1alpha1.Backend{},
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, resource)).To(Succeed()) })
+		ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Times(0)
+
+		key := types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
+		result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(1 * time.Hour))
+
+		fresh := &usernautdevv1alpha1.Group{}
+		Expect(k8sClient.Get(ctx, key, fresh)).To(Succeed())
+		cond := meta.FindStatusCondition(fresh.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(usernautdevv1alpha1.MissingSubGroupsReason))
+		Expect(fresh.Status.MissingSubGroups).To(ContainElement("does-not-exist"))
 	})
 
 	Context("When reconciling a resource", func() {
