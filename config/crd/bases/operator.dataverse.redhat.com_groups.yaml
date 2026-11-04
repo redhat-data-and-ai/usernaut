@@ -82,9 +82,7 @@ spec:
                   type: object
                 type: array
               members:
-                description: |-
-                  Members defines how group membership is resolved. At least one of ldap_query,
-                  a non-empty users list, or a non-empty groups list must be provided.
+                description: Members defines how group membership is resolved.
                 properties:
                   groups:
                     items:
@@ -147,15 +145,9 @@ spec:
                       type: string
                     type: array
                 type: object
-                x-kubernetes-validations:
-                - message: users or groups must be a non-empty list when ldap_query
-                    is omitted
-                  rule: has(self.ldap_query) || (has(self.users) && size(self.users)
-                    > 0) || (has(self.groups) && size(self.groups) > 0)
             required:
             - backends
             - group_name
-            - members
             type: object
           status:
             description: GroupStatus defines the observed state of Group
