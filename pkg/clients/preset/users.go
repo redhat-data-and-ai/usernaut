@@ -170,21 +170,12 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 	if err != nil {
 		if isResponseStatus(err, http.StatusConflict) {
 			log.WithField("status", http.StatusConflict).Info("user already exists, fetching user details")
-			// Preset often stores SCIM userName as the email (SSO), while we create with RH uid.
-			existing, lookupErr := pc.findUserByUserName(ctx, userName)
-			if lookupErr != nil && email != "" {
-				log.WithField("email", email).Info("userName lookup missed; searching by email")
-				existing, lookupErr = pc.FindUserByEmail(ctx, email)
-				if lookupErr == nil && existing == nil {
-					lookupErr = fmt.Errorf("%w: %s", errUserNotFound, email)
-				}
-			}
+			existing, lookupErr := pc.FindUserByEmail(ctx, email)
 			if lookupErr != nil {
 				return nil, lookupErr
 			}
-			// Email is only a search key; cache/callers must use the SCIM ID from the response.
-			if err := ensureSCIMUserID(existing, email); err != nil {
-				return nil, err
+			if existing == nil {
+				return nil, fmt.Errorf("%w: %s", errUserNotFound, email)
 			}
 			return existing, nil
 		}
@@ -244,32 +235,6 @@ func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 
 	log.Info("successfully deleted SCIM user from Preset")
 	return nil
-}
-
-func (pc *PresetClient) findUserByUserName(ctx context.Context, userName string) (*structs.User, error) {
-	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		logKeyService: serviceName,
-		"username":    userName,
-	})
-
-	filter := fmt.Sprintf(`userName eq "%s"`, escapeSCIMLiteral(userName))
-	response, err := pc.querySCIMByFilter(ctx, "Users", filter, "username", userName)
-	if err != nil {
-		return nil, err
-	}
-
-	var scimResp scimUsersResponse
-	if err := json.Unmarshal(response, &scimResp); err != nil {
-		log.WithError(err).Error("failed to parse SCIM user lookup response")
-		return nil, err
-	}
-
-	if len(scimResp.Resources) == 0 {
-		log.Warn("SCIM user not found by userName")
-		return nil, fmt.Errorf("%w: %s", errUserNotFound, userName)
-	}
-
-	return scimUserToStruct(&scimResp.Resources[0]), nil
 }
 
 // FindUserByEmail searches SCIM users by email. A missing user returns (nil, nil).

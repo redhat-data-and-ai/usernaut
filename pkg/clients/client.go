@@ -68,11 +68,9 @@ type Client interface {
 	RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error
 }
 
-// EmailUserLookup is implemented by backends that can find a user by email when a
-// cached user ID is not a current team member. Backends that do not implement it
-// keep comparing membership by the cached ID.
+// EmailUserLookup resolves a backend user by email.
+// processUsers calls it when that backend's search_user_by_email connection flag is true.
 type EmailUserLookup interface {
-	// FindUserByEmail returns the user for email. A missing user is (nil, nil).
 	FindUserByEmail(ctx context.Context, email string) (*structs.User, error)
 }
 

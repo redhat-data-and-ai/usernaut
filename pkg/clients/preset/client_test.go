@@ -181,10 +181,10 @@ func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
 	assert.Equal(t, "samlp|redhat|existing@example.com", user.ID)
 	assert.Equal(t, "existing", user.UserName)
 	assert.Equal(t, "existing@example.com", user.Email)
-	assert.Equal(t, `userName eq "existing"`, filter)
+	assert.Equal(t, `emails.value eq "existing@example.com"`, filter)
 }
 
-func TestCreateUser_conflictFallsBackToEmailFilter(t *testing.T) {
+func TestCreateUser_conflictLooksUpByEmail(t *testing.T) {
 	var filters []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -194,21 +194,7 @@ func TestCreateUser_conflictFallsBackToEmailFilter(t *testing.T) {
 			filter := r.URL.Query().Get("filter")
 			filters = append(filters, filter)
 			w.WriteHeader(http.StatusOK)
-			if strings.HasPrefix(filter, "userName eq") {
-				_ = json.NewEncoder(w).Encode(scimUsersResponse{TotalResults: 0, Resources: nil})
-				return
-			}
-			_ = json.NewEncoder(w).Encode(scimUsersResponse{
-				TotalResults: 1,
-				Resources: []scimUser{{
-					ID:       "samlp|redhat|ruagrawa@redhat.com",
-					UserName: "ruagrawa@redhat.com",
-					Emails: []scimEmailValue{{
-						Value:   "ruagrawa@redhat.com",
-						Primary: true,
-					}},
-				}},
-			})
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{TotalResults: 0})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -216,18 +202,16 @@ func TestCreateUser_conflictFallsBackToEmailFilter(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	user, err := pc.CreateUser(context.Background(), &structs.User{
+	_, err := pc.CreateUser(context.Background(), &structs.User{
 		Email:     "ruagrawa@redhat.com",
 		UserName:  "ruagrawa",
 		FirstName: "Ruchi",
 		LastName:  "Agrawal",
 	})
-	require.NoError(t, err)
-	assert.Equal(t, "samlp|redhat|ruagrawa@redhat.com", user.ID)
-	assert.Equal(t, "ruagrawa@redhat.com", user.Email)
-	require.Len(t, filters, 2)
-	assert.Equal(t, `userName eq "ruagrawa"`, filters[0])
-	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filters[1])
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errUserNotFound)
+	require.Len(t, filters, 1)
+	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filters[0])
 }
 
 func TestCreateUser_conflictRejectsEmailAsSCIMID(t *testing.T) {
@@ -236,12 +220,7 @@ func TestCreateUser_conflictRejectsEmailAsSCIMID(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Users"):
 			w.WriteHeader(http.StatusConflict)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")):
-			filter := r.URL.Query().Get("filter")
 			w.WriteHeader(http.StatusOK)
-			if strings.HasPrefix(filter, "userName eq") {
-				_ = json.NewEncoder(w).Encode(scimUsersResponse{TotalResults: 0, Resources: nil})
-				return
-			}
 			// Bad payload: SCIM id is literally the email.
 			_ = json.NewEncoder(w).Encode(scimUsersResponse{
 				TotalResults: 1,
@@ -269,49 +248,6 @@ func TestCreateUser_conflictRejectsEmailAsSCIMID(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email as SCIM ID")
-}
-
-func TestFindUserByEmail(t *testing.T) {
-	var filter string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")) {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
-		}
-		filter = r.URL.Query().Get("filter")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(scimUsersResponse{
-			TotalResults: 1,
-			Resources: []scimUser{{
-				ID:       "samlp|redhat|ruagrawa@redhat.com",
-				UserName: "ruagrawa@redhat.com",
-				Emails: []scimEmailValue{{
-					Value:   "ruagrawa@redhat.com",
-					Primary: true,
-				}},
-			}},
-		})
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	user, err := pc.FindUserByEmail(context.Background(), "ruagrawa@redhat.com")
-	require.NoError(t, err)
-	require.NotNil(t, user)
-	assert.Equal(t, "samlp|redhat|ruagrawa@redhat.com", user.ID)
-	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filter)
-}
-
-func TestFindUserByEmail_notFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(scimUsersResponse{TotalResults: 0})
-	}))
-	t.Cleanup(srv.Close)
-
-	pc := newTestPresetClient(t, srv.URL)
-	user, err := pc.FindUserByEmail(context.Background(), "missing@redhat.com")
-	require.NoError(t, err)
-	assert.Nil(t, user)
 }
 
 func TestDeleteNotFoundIsIdempotent(t *testing.T) {
@@ -399,6 +335,36 @@ func TestNewClient_success(t *testing.T) {
 	assert.Equal(t, "https://example.com", pc.baseURL)
 	assert.Equal(t, "team-1", pc.teamSlug)
 	assert.Equal(t, "token", pc.scimToken)
+}
+
+func TestFindUserByEmail(t *testing.T) {
+	var filter string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")) {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		filter = r.URL.Query().Get("filter")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(scimUsersResponse{
+			TotalResults: 1,
+			Resources: []scimUser{{
+				ID:       "samlp|redhat|ruagrawa@redhat.com",
+				UserName: "ruagrawa@redhat.com",
+				Emails: []scimEmailValue{{
+					Value:   "ruagrawa@redhat.com",
+					Primary: true,
+				}},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	user, err := pc.FindUserByEmail(context.Background(), "ruagrawa@redhat.com")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	assert.Equal(t, "samlp|redhat|ruagrawa@redhat.com", user.ID)
+	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filter)
 }
 
 func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
@@ -686,7 +652,7 @@ func TestFetchAllUsers_paginates(t *testing.T) {
 	assert.Equal(t, userIDMap["user-1"], userEmailMap["user-1@example.com"])
 }
 
-func TestFindUserByUserName_escapesFilterLiteral(t *testing.T) {
+func TestCreateUser_conflictEscapesEmailFilter(t *testing.T) {
 	var filter string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -722,5 +688,5 @@ func TestFindUserByUserName_escapesFilterLiteral(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|user@example.com", user.ID)
 	assert.Equal(t, `user"name@example.com`, user.Email)
-	assert.Equal(t, `userName eq "user\"name"`, filter)
+	assert.Equal(t, `emails.value eq "user\"name@example.com"`, filter)
 }
