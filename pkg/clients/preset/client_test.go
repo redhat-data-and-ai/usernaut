@@ -258,6 +258,40 @@ func TestNewClient_success(t *testing.T) {
 	assert.Equal(t, "token", pc.scimToken)
 }
 
+func TestFindUserByEmail(t *testing.T) {
+	var filter string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, testSCIMPath("/Users"), r.URL.Path)
+		filter = r.URL.Query().Get("filter")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(scimUsersResponse{
+			TotalResults: 1,
+			Resources: []scimUser{{
+				ID:       "oidc|redhat-prod|new",
+				UserName: "ruagrawa",
+				Emails: []scimEmailValue{{
+					Value:   "ruagrawa@redhat.com",
+					Primary: true,
+				}},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	user, err := pc.FindUserByEmail(context.Background(), " ruagrawa@redhat.com ")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	assert.Equal(t, "oidc|redhat-prod|new", user.ID)
+	assert.Equal(t, "ruagrawa@redhat.com", user.Email)
+	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filter)
+
+	missing, err := pc.FindUserByEmail(context.Background(), "  ")
+	require.NoError(t, err)
+	assert.Nil(t, missing)
+}
+
 func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
 	pc := newTestPresetClient(t, "https://example.com")
 	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "ctolosa"})

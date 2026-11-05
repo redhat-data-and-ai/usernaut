@@ -226,3 +226,40 @@ func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 	log.Info("successfully deleted SCIM user from Preset")
 	return nil
 }
+
+// FindUserByEmail searches SCIM users by email. A missing user returns (nil, nil).
+func (pc *PresetClient) FindUserByEmail(ctx context.Context, email string) (*structs.User, error) {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		logKeyService: serviceName,
+		"email":       email,
+	})
+
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return nil, nil
+	}
+
+	filter := fmt.Sprintf(`emails.value eq "%s"`, escapeSCIMLiteral(email))
+	response, err := pc.querySCIMByFilter(ctx, "Users", filter, "email", email)
+	if err != nil {
+		return nil, err
+	}
+
+	var scimResp scimUsersResponse
+	if err := json.Unmarshal(response, &scimResp); err != nil {
+		log.WithError(err).Error("failed to parse SCIM user email lookup response")
+		return nil, err
+	}
+
+	if len(scimResp.Resources) == 0 {
+		log.Warn("SCIM user not found by email")
+		return nil, nil
+	}
+
+	user := scimUserToStruct(&scimResp.Resources[0])
+	if err := ensureSCIMUserID(user, email); err != nil {
+		return nil, err
+	}
+	log.WithField("userID", user.ID).Info("found SCIM user by email")
+	return user, nil
+}
