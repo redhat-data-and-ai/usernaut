@@ -743,8 +743,8 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	}
 	backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
-	// Process users (determine who to add/remove)
-	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type, backendLogger, allLdapUserData)
+	// Process users (determine who to add/remove).
+	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type, backendClient, backendLogger, allLdapUserData)
 	if err != nil {
 		backendLogger.WithError(err).Error("error processing users")
 		return err
@@ -937,10 +937,61 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	return nil
 }
 
+// memberIDsByEmail returns every member id whose email matches, in sorted order.
+func memberIDsByEmail(members map[string]*structs.User, email string) []string {
+	want := strings.TrimSpace(email)
+	if want == "" {
+		return nil
+	}
+	ids := make([]string, 0)
+	for _, member := range members {
+		if member == nil || strings.TrimSpace(member.ID) == "" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(member.Email), want) {
+			ids = append(ids, member.ID)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+func (r *GroupReconciler) setCachedBackendID(ctx context.Context, email, backendKey, userID string) error {
+	r.CacheMutex.Lock()
+	err := r.Store.User.SetBackend(ctx, email, backendKey, userID)
+	r.CacheMutex.Unlock()
+	return err
+}
+
+// presetEmailLookup is implemented by the Preset client.
+type presetEmailLookup interface {
+	FindUserByEmail(ctx context.Context, email string) (*structs.User, error)
+}
+
+// lookupPresetUserID asks Preset for the current SCIM id. No user returns an empty id.
+func lookupPresetUserID(ctx context.Context, backendClient clients.Client, email string) (string, error) {
+	if backendClient == nil || strings.TrimSpace(email) == "" {
+		return "", nil
+	}
+	lookup, ok := backendClient.(presetEmailLookup)
+	if !ok {
+		return "", nil
+	}
+	found, err := lookup.FindUserByEmail(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	if found == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(found.GetID()), nil
+}
+
 func (r *GroupReconciler) processUsers(ctx context.Context,
 	groupUsers []string,
 	existingTeamMembers map[string]*structs.User,
 	backendName, backendType string,
+	backendClient clients.Client,
 	backendLogger *logrus.Entry,
 	allLdapUserData map[string]*structs.LDAPUser) ([]string, []string, error) {
 
@@ -973,6 +1024,43 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 		if userID == "" {
 			backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
+		}
+		var matched []string
+		if backendType == "preset" {
+			matched = memberIDsByEmail(existingTeamMembers, userDetails.GetEmail())
+		}
+		if len(matched) > 0 && !slices.Contains(matched, userID) {
+			liveID := matched[0]
+			if cacheErr := r.setCachedBackendID(ctx, userDetails.GetEmail(), backendKey, liveID); cacheErr != nil {
+				backendLogger.WithField("user", user).WithError(cacheErr).Error(
+					"error updating user details in cache from group member email")
+				return nil, nil, cacheErr
+			}
+			backendLogger.WithFields(logrus.Fields{
+				"user":  user,
+				"oldID": userID,
+				"newID": liveID,
+			}).Debug("updated stale user ID from group member email")
+			userID = liveID
+		} else if len(matched) == 0 && backendType == "preset" {
+			liveID, lookupErr := lookupPresetUserID(ctx, backendClient, userDetails.GetEmail())
+			if lookupErr != nil {
+				backendLogger.WithField("user", user).WithError(lookupErr).Error("error searching user by email")
+				return nil, nil, lookupErr
+			}
+			if liveID != "" && liveID != userID {
+				if cacheErr := r.setCachedBackendID(ctx, userDetails.GetEmail(), backendKey, liveID); cacheErr != nil {
+					backendLogger.WithField("user", user).WithError(cacheErr).Error(
+						"error updating user details in cache after email lookup")
+					return nil, nil, cacheErr
+				}
+				backendLogger.WithFields(logrus.Fields{
+					"user":  user,
+					"oldID": userID,
+					"newID": liveID,
+				}).Debug("updated stale user ID from email lookup")
+				userID = liveID
+			}
 		}
 		userIDsToSync = append(userIDsToSync, userID)
 	}
