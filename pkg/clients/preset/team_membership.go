@@ -54,6 +54,7 @@ func (pc *PresetClient) FetchTeamMembersByTeamID(ctx context.Context, teamID str
 		members[m.Value] = &structs.User{
 			ID:          m.Value,
 			DisplayName: m.Display,
+			Email:       primaryEmail(m.Emails),
 		}
 	}
 

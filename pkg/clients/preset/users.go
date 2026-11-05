@@ -19,7 +19,6 @@ package preset
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -28,8 +27,6 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
 )
-
-var errUserNotFound = errors.New("user not found")
 
 // FetchAllUsers retrieves all users via SCIM and returns maps keyed by email and SCIM ID
 func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
@@ -115,25 +112,30 @@ func (pc *PresetClient) fetchUserByID(ctx context.Context, userID string) (*stru
 }
 
 func scimUserToStruct(su *scimUser) *structs.User {
-	email := ""
-	if len(su.Emails) > 0 {
-		for _, e := range su.Emails {
-			if e.Primary {
-				email = e.Value
-				break
-			}
-		}
-		if email == "" {
-			email = su.Emails[0].Value
-		}
-	}
-
 	return &structs.User{
 		ID:          su.ID,
-		Email:       email,
+		Email:       primaryEmail(su.Emails),
 		UserName:    su.UserName,
 		DisplayName: su.DisplayName,
 	}
+}
+
+// primaryEmail returns the trimmed primary address, or the first non-empty address.
+func primaryEmail(emails []scimEmailValue) string {
+	var first string
+	for _, email := range emails {
+		value := strings.TrimSpace(email.Value)
+		if value == "" {
+			continue
+		}
+		if first == "" {
+			first = value
+		}
+		if email.Primary {
+			return value
+		}
+	}
+	return first
 }
 
 // CreateUser creates a new user in Preset using SCIM.
@@ -168,17 +170,6 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 
 	response, err := pc.sendRequest(ctx, reqURL, http.MethodPost, reqBody)
 	if err != nil {
-		if isResponseStatus(err, http.StatusConflict) {
-			log.WithField("status", http.StatusConflict).Info("user already exists, fetching user details")
-			existing, lookupErr := pc.FindUserByEmail(ctx, email)
-			if lookupErr != nil {
-				return nil, lookupErr
-			}
-			if existing == nil {
-				return nil, fmt.Errorf("%w: %s", errUserNotFound, email)
-			}
-			return existing, nil
-		}
 		log.WithError(err).Error("error creating user")
 		return nil, err
 	}
@@ -199,7 +190,6 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 }
 
 // ensureSCIMUserID requires a non-empty SCIM id that is not the email address itself.
-// Email may be used to find the user, but must not be treated as the SCIM ID.
 func ensureSCIMUserID(user *structs.User, email string) error {
 	if user == nil {
 		return fmt.Errorf("preset user is nil")
@@ -235,36 +225,4 @@ func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 
 	log.Info("successfully deleted SCIM user from Preset")
 	return nil
-}
-
-// FindUserByEmail searches SCIM users by email. A missing user returns (nil, nil).
-func (pc *PresetClient) FindUserByEmail(ctx context.Context, email string) (*structs.User, error) {
-	log := logger.Logger(ctx).WithFields(logrus.Fields{
-		logKeyService: serviceName,
-		"email":       email,
-	})
-
-	filter := fmt.Sprintf(`emails.value eq "%s"`, escapeSCIMLiteral(email))
-	response, err := pc.querySCIMByFilter(ctx, "Users", filter, "email", email)
-	if err != nil {
-		return nil, err
-	}
-
-	var scimResp scimUsersResponse
-	if err := json.Unmarshal(response, &scimResp); err != nil {
-		log.WithError(err).Error("failed to parse SCIM user email lookup response")
-		return nil, err
-	}
-
-	if len(scimResp.Resources) == 0 {
-		log.Warn("SCIM user not found by email")
-		return nil, nil
-	}
-
-	user := scimUserToStruct(&scimResp.Resources[0])
-	if err := ensureSCIMUserID(user, email); err != nil {
-		return nil, err
-	}
-	log.WithField("userID", user.ID).Info("found SCIM user by email")
-	return user, nil
 }

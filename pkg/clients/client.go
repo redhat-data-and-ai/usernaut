@@ -68,12 +68,6 @@ type Client interface {
 	RemoveUserFromTeam(ctx context.Context, teamID string, userIDs []string) error
 }
 
-// EmailUserLookup resolves a backend user by email.
-// processUsers calls it when that backend's search_user_by_email connection flag is true.
-type EmailUserLookup interface {
-	FindUserByEmail(ctx context.Context, email string) (*structs.User, error)
-}
-
 func New(backendName, backendType string, backends map[string]map[string]config.Backend) (Client, error) {
 	backend, ok := backends[backendType][backendName]
 	if !ok {

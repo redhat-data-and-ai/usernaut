@@ -116,7 +116,6 @@ backends:
       base_url: "https://manage.app.preset.io"
       team_slug: "your-team-slug"
       scim_token: file|path/to/preset_scim_token
-      search_user_by_email: true
   - name: astro
     type: "astro"
     enabled: true

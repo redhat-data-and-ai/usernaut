@@ -12,7 +12,6 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
-	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
 
@@ -20,27 +19,11 @@ const presetBackendKey = "preset_preset"
 
 func newPresetReconciler(t *testing.T) *GroupReconciler {
 	t.Helper()
-	return newBackendReconciler(t, "preset", "preset", false)
-}
-
-func newBackendReconciler(t *testing.T, backendName, backendType string, searchUserByEmail bool) *GroupReconciler {
-	t.Helper()
 	cacheClient, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: -1, CleanupInterval: -1})
 	require.NoError(t, err)
-	connection := map[string]interface{}{}
-	if searchUserByEmail {
-		connection["search_user_by_email"] = true
-	}
 	return &GroupReconciler{
 		Store:      store.New(cacheClient),
 		CacheMutex: &sync.RWMutex{},
-		AppConfig: &config.AppConfig{
-			BackendMap: map[string]map[string]config.Backend{
-				backendType: {
-					backendName: {Name: backendName, Type: backendType, Connection: connection},
-				},
-			},
-		},
 	}
 }
 
@@ -50,7 +33,6 @@ func presetLDAPUser() map[string]*structs.LDAPUser {
 	}
 }
 
-// plainPresetBackend does not implement email lookup.
 type plainPresetBackend struct {
 	clients.Client
 	created []*structs.User
@@ -61,46 +43,32 @@ func (b *plainPresetBackend) CreateUser(_ context.Context, user *structs.User) (
 	return &structs.User{ID: "created-id", Email: user.Email, UserName: user.UserName}, nil
 }
 
-// emailPresetBackend implements clients.EmailUserLookup.
-type emailPresetBackend struct {
-	plainPresetBackend
-	found *structs.User
-	calls int
-}
-
-func (b *emailPresetBackend) FindUserByEmail(_ context.Context, _ string) (*structs.User, error) {
-	b.calls++
-	return b.found, nil
-}
-
-func TestProcessUsers_staleIDNotOnGroupIsReplacedAndAdded(t *testing.T) {
-	r := newBackendReconciler(t, "preset", "preset", true)
+func TestProcessUsers_staleIDNotOnGroupKeepsCachedID(t *testing.T) {
+	r := newPresetReconciler(t)
 	ctx := t.Context()
 	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
 
-	backend := &emailPresetBackend{found: &structs.User{ID: "oidc|new", Email: "ruagrawa@redhat.com"}}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{},
-		"preset", "preset", backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		"preset", "preset", logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"oidc|new"}, add)
+	assert.Equal(t, []string{"samlp|old"}, add)
 	assert.Empty(t, remove)
-	assert.Empty(t, backend.created)
-	assert.Equal(t, 1, backend.calls)
 
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
 	require.NoError(t, err)
-	assert.Equal(t, "oidc|new", cached[presetBackendKey])
+	assert.Equal(t, "samlp|old", cached[presetBackendKey])
 }
 
-func TestProcessUsers_staleIDAlreadyOnGroupUpdatesCacheOnly(t *testing.T) {
-	r := newBackendReconciler(t, "preset", "preset", true)
+func TestProcessUsers_memberEmailReplacesStaleID(t *testing.T) {
+	r := newPresetReconciler(t)
 	ctx := t.Context()
 	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
 
-	onGroup := map[string]*structs.User{"oidc|new": {ID: "oidc|new"}}
-	backend := &emailPresetBackend{found: &structs.User{ID: "oidc|new", Email: "ruagrawa@redhat.com"}}
+	onGroup := map[string]*structs.User{
+		"oidc|new": {ID: "oidc|new", Email: "ruagrawa@redhat.com"},
+	}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, onGroup,
-		"preset", "preset", backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		"preset", "preset", logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
@@ -108,6 +76,65 @@ func TestProcessUsers_staleIDAlreadyOnGroupUpdatesCacheOnly(t *testing.T) {
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
 	require.NoError(t, err)
 	assert.Equal(t, "oidc|new", cached[presetBackendKey])
+}
+
+func TestProcessUsers_emailMatchReplacesCachedMember(t *testing.T) {
+	r := newPresetReconciler(t)
+	ctx := t.Context()
+	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
+
+	onGroup := map[string]*structs.User{
+		"samlp|old": {ID: "samlp|old"},
+		"oidc|new":  {ID: "oidc|new", Email: "ruagrawa@redhat.com"},
+	}
+	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, onGroup,
+		"preset", "preset", logrus.NewEntry(logrus.New()), presetLDAPUser())
+	require.NoError(t, err)
+	assert.Empty(t, add)
+	assert.Equal(t, []string{"samlp|old"}, remove)
+
+	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	require.NoError(t, err)
+	assert.Equal(t, "oidc|new", cached[presetBackendKey])
+}
+
+func TestProcessUsers_duplicateEmailDropsTheOtherID(t *testing.T) {
+	r := newPresetReconciler(t)
+	ctx := t.Context()
+	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
+
+	onGroup := map[string]*structs.User{
+		"samlp|old": {ID: "samlp|old", Email: "ruagrawa@redhat.com"},
+		"oidc|new":  {ID: "oidc|new", Email: "Ruagrawa@redhat.com"},
+	}
+	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, onGroup,
+		"preset", "preset", logrus.NewEntry(logrus.New()), presetLDAPUser())
+	require.NoError(t, err)
+	assert.Empty(t, add)
+	assert.Equal(t, []string{"oidc|new"}, remove)
+
+	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	require.NoError(t, err)
+	assert.Equal(t, "samlp|old", cached[presetBackendKey])
+}
+
+func TestProcessUsers_nonPresetIgnoresMemberEmail(t *testing.T) {
+	r := newPresetReconciler(t)
+	ctx := t.Context()
+	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", "gitlab_gitlab", "100"))
+
+	onGroup := map[string]*structs.User{
+		"200": {ID: "200", Email: "ruagrawa@redhat.com"},
+	}
+	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, onGroup,
+		"gitlab", "gitlab", logrus.NewEntry(logrus.New()), presetLDAPUser())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"100"}, add)
+	assert.Equal(t, []string{"200"}, remove)
+
+	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	require.NoError(t, err)
+	assert.Equal(t, "100", cached["gitlab_gitlab"])
 }
 
 func TestProcessUsers_removedMemberWithNewSCIMIDIsRemoved(t *testing.T) {
@@ -115,81 +142,27 @@ func TestProcessUsers_removedMemberWithNewSCIMIDIsRemoved(t *testing.T) {
 	ctx := t.Context()
 	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
 
-	onGroup := map[string]*structs.User{"oidc|new": {ID: "oidc|new"}}
-	backend := &emailPresetBackend{found: &structs.User{ID: "oidc|new"}}
+	onGroup := map[string]*structs.User{
+		"oidc|new": {ID: "oidc|new", Email: "ruagrawa@redhat.com"},
+	}
 	add, remove, err := r.processUsers(ctx, nil, onGroup,
-		"preset", "preset", backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		"preset", "preset", logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Equal(t, []string{"oidc|new"}, remove)
-	assert.Equal(t, 0, backend.calls)
 }
 
-func TestProcessUsers_emailMissDoesNotCreate(t *testing.T) {
-	r := newBackendReconciler(t, "preset", "preset", true)
-	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
-
-	onGroup := map[string]*structs.User{"oidc|new": {ID: "oidc|new"}}
-	backend := &emailPresetBackend{}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, onGroup,
-		"preset", "preset", backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
-	require.NoError(t, err)
-	assert.Empty(t, add)
-	assert.Empty(t, backend.created)
-	assert.Equal(t, []string{"oidc|new"}, remove)
-}
-
-func TestProcessUsers_flagOffSkipsEmailLookup(t *testing.T) {
+func TestProcessUsers_memberWithoutEmailUsesCachedID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
 	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
 
 	onGroup := map[string]*structs.User{"oidc|new": {ID: "oidc|new"}}
-	backend := &emailPresetBackend{found: &structs.User{ID: "oidc|new"}}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, onGroup,
-		"preset", "preset", backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		"preset", "preset", logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Equal(t, []string{"samlp|old"}, add)
 	assert.Equal(t, []string{"oidc|new"}, remove)
-	assert.Equal(t, 0, backend.calls)
-}
-
-func TestProcessUsers_flagOnWithoutLookupErrors(t *testing.T) {
-	r := newBackendReconciler(t, "preset", "preset", true)
-	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
-
-	_, _, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{},
-		"preset", "preset", &plainPresetBackend{}, logrus.NewEntry(logrus.New()), presetLDAPUser())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "does not support email lookup")
-}
-
-func TestProcessUsers_backendWithoutLookupKeepsCachedID(t *testing.T) {
-	r := newPresetReconciler(t)
-	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
-
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{},
-		"preset", "preset", &plainPresetBackend{}, logrus.NewEntry(logrus.New()), presetLDAPUser())
-	require.NoError(t, err)
-	assert.Equal(t, []string{"samlp|old"}, add)
-	assert.Empty(t, remove)
-}
-
-func TestProcessUsers_flagOnCallsEmailLookup(t *testing.T) {
-	r := newBackendReconciler(t, "gitlab", "gitlab", true)
-	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", "gitlab_gitlab", "old-id"))
-
-	backend := &emailPresetBackend{found: &structs.User{ID: "new-id", Email: "ruagrawa@redhat.com"}}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{},
-		"gitlab", "gitlab", backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
-	require.NoError(t, err)
-	assert.Equal(t, []string{"new-id"}, add)
-	assert.Empty(t, remove)
-	assert.Equal(t, 1, backend.calls)
 }
 
 func TestCreateUsers_missingCacheCreatesUser(t *testing.T) {
