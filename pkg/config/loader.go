@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -102,8 +103,18 @@ func (c *Config) Load(env string, config interface{}) error {
 	if err := c.loadByConfigName(c.opts.defaultConfigFileName, config); err != nil {
 		return err
 	}
+	appConfig, isAppConfig := config.(*AppConfig)
+	var defaultBackends []Backend
+	if isAppConfig {
+		defaultBackends = appConfig.Backends
+		// Decode environment entries independently, never over defaults by position.
+		appConfig.Backends = nil
+	}
 	if err := c.loadByConfigName(env, config); err != nil {
 		return err
+	}
+	if isAppConfig {
+		appConfig.Backends = mergeBackends(defaultBackends, appConfig.Backends)
 	}
 	SubstituteConfigValues(reflect.ValueOf(config))
 	return nil
@@ -194,10 +205,26 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 	if err := c.viper.ReadInConfig(); err != nil {
 		return err
 	}
-	if err := c.viper.Unmarshal(config); err != nil {
-		return err
+	return c.viper.Unmarshal(config)
+}
+
+// mergeBackends replaces matching (name, type) entries entirely, retaining
+// unmatched defaults and appending new backends in environment order.
+// For example, an Astro override containing only api_token drops the default
+// organization_id and uses false for an omitted enabled field.
+func mergeBackends(defaults, environment []Backend) []Backend {
+	merged := slices.Clone(defaults)
+	for _, backend := range environment {
+		index := slices.IndexFunc(merged, func(existing Backend) bool {
+			return existing.Name == backend.Name && existing.Type == backend.Type
+		})
+		if index < 0 {
+			merged = append(merged, backend)
+		} else {
+			merged[index] = backend
+		}
 	}
-	return nil
+	return merged
 }
 
 // getConfigHTTPClient returns a shared HTTP client for config loading.
