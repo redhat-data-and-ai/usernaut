@@ -19,7 +19,7 @@ func TestLoadEnvironmentBackends(t *testing.T) {
 		want         []Backend
 	}{
 		{
-			name: "replace default backends",
+			name: "merge reordered backends and append new backend",
 			production: `backends:
   - name: snowflake
     type: snowflake
@@ -35,21 +35,27 @@ func TestLoadEnvironmentBackends(t *testing.T) {
 `,
 			want: []Backend{
 				{
-					Name: "snowflake", Type: "snowflake", Enabled: true,
-					Connection: map[string]interface{}{"pat": "snowflake-token"},
-				},
-				{
 					Name: "astro", Type: "astro", Enabled: true,
 					Connection: map[string]interface{}{
 						"api_token": "production-token", "organization_id": "production-org",
 					},
 				},
+				{
+					Name: "snowflake", Type: "snowflake", Enabled: true,
+					Connection: map[string]interface{}{"pat": "snowflake-token"},
+				},
 			},
 		},
 		{
-			name:       "empty list removes default backends",
-			production: "backends: []\n",
-			want:       []Backend{},
+			name:         "empty list keeps default backends",
+			production:   "backends: []\n",
+			keepDefaults: true,
+			want: []Backend{{
+				Name: "astro", Type: "astro",
+				Connection: map[string]interface{}{
+					"api_token": "default-token", "organization_id": "default-org",
+				},
+			}},
 		},
 		{
 			name:         "omitted list keeps default backends",
@@ -68,7 +74,7 @@ func TestLoadEnvironmentBackends(t *testing.T) {
 			productionToken := filepath.Join(dir, "production-token")
 			require.NoError(t, os.WriteFile(productionToken, []byte("production-token\n"), 0600))
 
-			// Replacing or removing defaults must not read their missing token file.
+			// Overriding the token must not read the missing default token file.
 			defaultToken := "file|" + filepath.Join(dir, "missing-default-token")
 			if tc.keepDefaults {
 				defaultToken = "default-token"
@@ -97,4 +103,148 @@ backends:
 			assert.Equal(t, "default-app", cfg.App.Name)
 		})
 	}
+}
+
+func TestBackendMergePreservesFieldsAndIdentity(t *testing.T) {
+	dir := t.TempDir()
+	defaults := `backends:
+  - name: primary
+    type: astro
+    enabled: true
+    depends_on:
+      name: original
+      type: rover
+    connection:
+      api_token: default-token
+      organization_id: default-org
+  - name: untouched
+    type: rover
+    enabled: true
+    connection:
+      base_url: https://rover.example
+`
+	production := `backends:
+  - name: secondary
+    type: astro
+    connection:
+      api_token: secondary-token
+  - name: primary
+    type: snowflake
+    connection:
+      pat: snowflake-token
+  - name: primary
+    type: astro
+    enabled: false
+    depends_on:
+      name: updated
+    connection:
+      api_token: ""
+      base_url: https://astro.example
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "default.yaml"), []byte(defaults), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "production.yaml"), []byte(production), 0600))
+	var cfg AppConfig
+	require.NoError(t, NewConfig(NewOptions("yaml", dir, "default")).Load("production", &cfg))
+	assert.Equal(t, []Backend{
+		{
+			Name: "primary", Type: "astro", Enabled: false,
+			DependsOn: Dependant{Name: "updated", Type: "rover"},
+			Connection: map[string]interface{}{
+				"api_token": "", "organization_id": "default-org", "base_url": "https://astro.example",
+			},
+		},
+		{
+			Name: "untouched", Type: "rover", Enabled: true,
+			Connection: map[string]interface{}{"base_url": "https://rover.example"},
+		},
+		{
+			Name: "secondary", Type: "astro",
+			Connection: map[string]interface{}{"api_token": "secondary-token"},
+		},
+		{
+			Name: "primary", Type: "snowflake",
+			Connection: map[string]interface{}{"pat": "snowflake-token"},
+		},
+	}, cfg.Backends)
+}
+
+func TestMergeBackendsPreservesNestedFieldsAndInputs(t *testing.T) {
+	defaults := []map[string]interface{}{{
+		"name": "astro", "type": "astro", "enabled": true,
+		"connection": map[string]interface{}{
+			"custom.key": "literal-value",
+			"options":    map[string]interface{}{"region": "default-region", "timeout": 30},
+			"scopes":     []interface{}{"default-scope"},
+		},
+	}}
+	environment := []map[string]interface{}{{
+		"name": "astro", "type": "astro",
+		"connection": map[string]interface{}{
+			"options": map[string]interface{}{"timeout": 0},
+			"scopes":  []interface{}{},
+		},
+	}}
+	backends, err := mergeBackends(defaults, environment)
+	require.NoError(t, err)
+	require.Len(t, backends, 1)
+	assert.True(t, backends[0]["enabled"].(bool), "omitted enabled must inherit the default")
+	assert.Equal(t, map[string]interface{}{
+		"custom.key": "literal-value",
+		"options":    map[string]interface{}{"region": "default-region", "timeout": 0},
+		"scopes":     []interface{}{},
+	}, backends[0]["connection"].(map[string]interface{}))
+
+	// Neither merging nor changing the result may alter either source config.
+	backends[0]["connection"].(map[string]interface{})["custom.key"] = "changed"
+	backends[0]["connection"].(map[string]interface{})["options"].(map[string]interface{})["timeout"] = 99
+	assert.Equal(t, map[string]interface{}{
+		"custom.key": "literal-value",
+		"options":    map[string]interface{}{"region": "default-region", "timeout": 30},
+		"scopes":     []interface{}{"default-scope"},
+	}, defaults[0]["connection"])
+	assert.Equal(t, map[string]interface{}{
+		"options": map[string]interface{}{"timeout": 0},
+		"scopes":  []interface{}{},
+	}, environment[0]["connection"])
+}
+
+func TestLoadBackendsKeepsLiteralKeys(t *testing.T) {
+	dir := t.TempDir()
+	defaults := `backends:
+  - name: astro
+    type: astro
+    enabled: true
+    connection:
+      custom.key: original
+      options:
+        region: default-region
+        timeout: 30
+`
+	environment := `backends:
+  - name: astro
+    type: astro
+    connection:
+      custom.key: updated
+      options:
+        timeout: 0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "default.yaml"), []byte(defaults), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "production.yaml"), []byte(environment), 0600))
+	loader := NewConfig(NewOptions("yaml", dir, "default"))
+	var cfg AppConfig
+	require.NoError(t, loader.Load("production", &cfg))
+	require.Len(t, cfg.Backends, 1)
+	assert.True(t, cfg.Backends[0].Enabled)
+	assert.Equal(t, map[string]interface{}{
+		"custom.key": "updated",
+		"options":    map[string]interface{}{"region": "default-region", "timeout": 0},
+	}, cfg.Backends[0].Connection)
+
+	// Reusing the loader must not retain environment overrides in its defaults.
+	var defaultConfig AppConfig
+	require.NoError(t, loader.Load("default", &defaultConfig))
+	require.Len(t, defaultConfig.Backends, 1)
+	assert.Equal(t, "original", defaultConfig.Backends[0].Connection["custom.key"])
+	assert.Equal(t, map[string]interface{}{"region": "default-region", "timeout": 30},
+		defaultConfig.Backends[0].Connection["options"])
 }

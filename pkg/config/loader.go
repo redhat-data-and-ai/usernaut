@@ -99,10 +99,39 @@ func NewConfig(opts Options) *Config {
 // Load reads environment specific configurations and along with the defaults
 // unmarshalls into config.
 func (c *Config) Load(env string, config interface{}) error {
-	if err := c.loadByConfigName(c.opts.defaultConfigFileName, config); err != nil {
+	if err := c.loadByConfigName(c.opts.defaultConfigFileName); err != nil {
 		return err
 	}
-	if err := c.loadByConfigName(env, config); err != nil {
+	if err := c.viper.Unmarshal(config); err != nil {
+		return err
+	}
+	appConfig, isAppConfig := config.(*AppConfig)
+	var defaultBackends, envBackends []map[string]interface{}
+	if isAppConfig {
+		// Capture defaultBackends before ReadInConfig replaces Viper's current file.
+		if err := c.viper.UnmarshalKey("backends", &defaultBackends); err != nil {
+			return err
+		}
+	}
+	if err := c.loadByConfigName(env); err != nil {
+		return err
+	}
+	if isAppConfig {
+		if err := c.viper.UnmarshalKey("backends", &envBackends); err != nil {
+			return err
+		}
+		backends, err := mergeBackends(defaultBackends, envBackends)
+		if err != nil {
+			return err
+		}
+		// Update only the current file's data; Set would persist across loads.
+		if err := c.viper.MergeConfigMap(map[string]interface{}{"backends": backends}); err != nil {
+			return err
+		}
+		// Decode the merged list from scratch, never over defaults by position.
+		appConfig.Backends = nil
+	}
+	if err := c.viper.Unmarshal(config); err != nil {
 		return err
 	}
 	SubstituteConfigValues(reflect.ValueOf(config))
@@ -184,25 +213,75 @@ func substituteString(s string) string {
 	return s
 }
 
-// loadByConfigName reads configuration from file and unmarshalls into config.
-func (c *Config) loadByConfigName(configName string, config interface{}) error {
+// loadByConfigName reads a file into the shared Viper instance.
+func (c *Config) loadByConfigName(configName string) error {
 	c.viper.SetConfigName(configName)
 	c.viper.SetConfigType(c.opts.configType)
 	c.viper.AddConfigPath(c.opts.configPath)
 	c.viper.AutomaticEnv()
 	c.viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	if err := c.viper.ReadInConfig(); err != nil {
-		return err
+	return c.viper.ReadInConfig()
+}
+
+// mergeBackends overlays fields by name and type, never by list position.
+// Defaults retain their order; new backends are appended in environment order.
+func mergeBackends(defaults, environment []map[string]interface{}) ([]map[string]interface{}, error) {
+	decoder := viper.New()
+	var merged []map[string]interface{}
+	type identity struct{ Name, Type string }
+	positions := make(map[identity]int)
+	for _, entries := range [][]map[string]interface{}{defaults, environment} {
+		for _, entry := range entries {
+			decoder.Set("entry", entry)
+			var key identity
+			if err := decoder.UnmarshalKey("entry", &key); err != nil {
+				return nil, err
+			}
+			index, ok := positions[key]
+			if !ok {
+				index = len(merged)
+				positions[key] = index
+				merged = append(merged, nil)
+			}
+			merged[index] = mergeBackendValue(merged[index], entry).(map[string]interface{})
+		}
 	}
-	// A backend list replaces the defaults; entries must not merge by position.
-	// Keep the default list when this file does not specify backends.
-	if appConfig, ok := config.(*AppConfig); ok && c.viper.InConfig("backends") {
-		appConfig.Backends = nil
+	return merged, nil
+}
+
+// mergeBackendValue recursively merges maps and copies lists without changing
+// either input. Supplied scalars and lists replace defaults, including zero values.
+// Examples (defaults + override => result, using JSON notation):
+//
+//	{"options": {"region": "us", "timeout": 30}} + {"options": {"timeout": 0}}
+//	  => {"options": {"region": "us", "timeout": 0}}
+//	["read", "write"] + ["read"] => ["read"]
+//	["read"] + [] => []
+//	true + false => false
+//	"default-token" + "" => ""
+//
+// A nil default creates a deep copy of the override's maps and lists.
+func mergeBackendValue(defaults, override interface{}) interface{} {
+	switch value := override.(type) {
+	case map[string]interface{}:
+		merged := make(map[string]interface{})
+		inherited, _ := defaults.(map[string]interface{})
+		for key, item := range inherited {
+			merged[key] = mergeBackendValue(nil, item)
+		}
+		for key, item := range value {
+			merged[key] = mergeBackendValue(merged[key], item)
+		}
+		return merged
+	case []interface{}:
+		cloned := make([]interface{}, len(value))
+		for i, item := range value {
+			cloned[i] = mergeBackendValue(nil, item)
+		}
+		return cloned
+	default:
+		return value
 	}
-	if err := c.viper.Unmarshal(config); err != nil {
-		return err
-	}
-	return nil
 }
 
 // getConfigHTTPClient returns a shared HTTP client for config loading.
