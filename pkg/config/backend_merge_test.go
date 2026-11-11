@@ -105,7 +105,7 @@ backends:
 	}
 }
 
-func TestBackendMergePreservesFieldsAndIdentity(t *testing.T) {
+func TestBackendMergeReplacesMatchingIdentity(t *testing.T) {
 	dir := t.TempDir()
 	defaults := `backends:
   - name: primary
@@ -148,9 +148,9 @@ func TestBackendMergePreservesFieldsAndIdentity(t *testing.T) {
 	assert.Equal(t, []Backend{
 		{
 			Name: "primary", Type: "astro", Enabled: false,
-			DependsOn: Dependant{Name: "updated", Type: "rover"},
+			DependsOn: Dependant{Name: "updated"},
 			Connection: map[string]interface{}{
-				"api_token": "", "organization_id": "default-org", "base_url": "https://astro.example",
+				"api_token": "", "base_url": "https://astro.example",
 			},
 		},
 		{
@@ -168,44 +168,12 @@ func TestBackendMergePreservesFieldsAndIdentity(t *testing.T) {
 	}, cfg.Backends)
 }
 
-func TestMergeBackendsPreservesNestedFieldsAndInputs(t *testing.T) {
-	defaults := []map[string]interface{}{{
-		"name": "astro", "type": "astro", "enabled": true,
-		"connection": map[string]interface{}{
-			"custom.key": "literal-value",
-			"options":    map[string]interface{}{"region": "default-region", "timeout": 30},
-			"scopes":     []interface{}{"default-scope"},
-		},
-	}}
-	environment := []map[string]interface{}{{
-		"name": "astro", "type": "astro",
-		"connection": map[string]interface{}{
-			"options": map[string]interface{}{"timeout": 0},
-			"scopes":  []interface{}{},
-		},
-	}}
-	backends, err := mergeBackends(defaults, environment)
-	require.NoError(t, err)
-	require.Len(t, backends, 1)
-	assert.True(t, backends[0]["enabled"].(bool), "omitted enabled must inherit the default")
-	assert.Equal(t, map[string]interface{}{
-		"custom.key": "literal-value",
-		"options":    map[string]interface{}{"region": "default-region", "timeout": 0},
-		"scopes":     []interface{}{},
-	}, backends[0]["connection"].(map[string]interface{}))
-
-	// Neither merging nor changing the result may alter either source config.
-	backends[0]["connection"].(map[string]interface{})["custom.key"] = "changed"
-	backends[0]["connection"].(map[string]interface{})["options"].(map[string]interface{})["timeout"] = 99
-	assert.Equal(t, map[string]interface{}{
-		"custom.key": "literal-value",
-		"options":    map[string]interface{}{"region": "default-region", "timeout": 30},
-		"scopes":     []interface{}{"default-scope"},
-	}, defaults[0]["connection"])
-	assert.Equal(t, map[string]interface{}{
-		"options": map[string]interface{}{"timeout": 0},
-		"scopes":  []interface{}{},
-	}, environment[0]["connection"])
+func TestMergeBackendsDoesNotReplaceInputEntries(t *testing.T) {
+	defaults := []Backend{{Name: "astro", Type: "astro", Enabled: true}}
+	environment := []Backend{{Name: "astro", Type: "astro", Enabled: false}}
+	assert.Equal(t, environment, mergeBackends(defaults, environment))
+	assert.True(t, defaults[0].Enabled, "replacing a result entry must not replace the input entry")
+	assert.False(t, environment[0].Enabled)
 }
 
 func TestLoadBackendsKeepsLiteralKeys(t *testing.T) {
@@ -234,10 +202,10 @@ func TestLoadBackendsKeepsLiteralKeys(t *testing.T) {
 	var cfg AppConfig
 	require.NoError(t, loader.Load("production", &cfg))
 	require.Len(t, cfg.Backends, 1)
-	assert.True(t, cfg.Backends[0].Enabled)
+	assert.False(t, cfg.Backends[0].Enabled, "omitted enabled must not inherit from the replaced default")
 	assert.Equal(t, map[string]interface{}{
 		"custom.key": "updated",
-		"options":    map[string]interface{}{"region": "default-region", "timeout": 0},
+		"options":    map[string]interface{}{"timeout": 0},
 	}, cfg.Backends[0].Connection)
 
 	// Reusing the loader must not retain environment overrides in its defaults.
