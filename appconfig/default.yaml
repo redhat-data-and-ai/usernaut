@@ -112,6 +112,7 @@ backends:
   - name: preset
     type: "preset"
     enabled: true
+    compareUsersByEmail: true
     connection:
       base_url: "https://manage.app.preset.io"
       team_slug: "your-team-slug"

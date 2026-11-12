@@ -112,11 +112,12 @@ type App struct {
 
 // Backend represents a backend service configuration
 type Backend struct {
-	Name       string                 `yaml:"name"`
-	Type       string                 `yaml:"type"`
-	Enabled    bool                   `yaml:"enabled"`
-	DependsOn  Dependant              `yaml:"depends_on,omitempty" mapstructure:"depends_on,omitempty"`
-	Connection map[string]interface{} `yaml:"connection"`
+	Name                string                 `yaml:"name"`
+	Type                string                 `yaml:"type"`
+	Enabled             bool                   `yaml:"enabled"`
+	CompareUsersByEmail bool                   `yaml:"compareUsersByEmail"`
+	DependsOn           Dependant              `yaml:"depends_on,omitempty" mapstructure:"depends_on,omitempty"`
+	Connection          map[string]interface{} `yaml:"connection"`
 }
 
 type Dependant struct {

@@ -181,7 +181,33 @@ func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
 	assert.Equal(t, "samlp|redhat|existing@example.com", user.ID)
 	assert.Equal(t, "existing", user.UserName)
 	assert.Equal(t, "existing@example.com", user.Email)
-	assert.Equal(t, `userName eq "existing"`, filter)
+	assert.Equal(t, `emails.value eq "existing@example.com"`, filter)
+}
+
+func TestCreateUser_conflictEmailMissReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Users"):
+			w.WriteHeader(http.StatusConflict)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	user, err := pc.CreateUser(context.Background(), &structs.User{
+		Email:     "missing@example.com",
+		UserName:  "missing",
+		FirstName: "Missing",
+		LastName:  "User",
+	})
+	require.Error(t, err)
+	assert.Nil(t, user)
+	assert.Contains(t, err.Error(), "not found by email")
 }
 
 func TestDeleteNotFoundIsIdempotent(t *testing.T) {
@@ -452,7 +478,9 @@ func TestFetchTeamMembersByTeamID(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(scimGroup{
 			ID: "group-1",
 			Members: []scimMember{
-				{Value: "user-1", Display: "User One"},
+				{Value: "user-1", Display: "User One", Emails: []scimEmailValue{{
+					Value: " user-1@redhat.com ",
+				}}},
 				{Value: "user-2", Display: "User Two"},
 			},
 		})
@@ -464,7 +492,45 @@ func TestFetchTeamMembersByTeamID(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, members, 2)
 	assert.Equal(t, "User One", members["user-1"].DisplayName)
+	assert.Equal(t, "user-1@redhat.com", members["user-1"].Email)
 	assert.Equal(t, "user-2", members["user-2"].ID)
+	assert.Empty(t, members["user-2"].Email)
+}
+
+func TestFetchUserDetailsByEmail(t *testing.T) {
+	var filter string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, testSCIMPath("/Users"), r.URL.Path)
+		filter = r.URL.Query().Get("filter")
+		if strings.Contains(filter, "missing@") {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(scimUsersResponse{
+			TotalResults: 1,
+			Resources: []scimUser{{
+				ID:       "oidc|redhat-prod|new",
+				UserName: "ruagrawa",
+				Emails:   []scimEmailValue{{Value: "ruagrawa@redhat.com"}},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	user, err := pc.FetchUserDetailsByEmail(context.Background(), " ruagrawa@redhat.com ")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	assert.Equal(t, "oidc|redhat-prod|new", user.ID)
+	assert.Equal(t, "ruagrawa@redhat.com", user.Email)
+	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filter)
+
+	missing, err := pc.FetchUserDetailsByEmail(context.Background(), "missing@redhat.com")
+	require.NoError(t, err)
+	assert.Nil(t, missing)
 }
 
 func TestFetchAllTeams_paginates(t *testing.T) {
@@ -556,7 +622,7 @@ func TestFetchAllUsers_paginates(t *testing.T) {
 	assert.Equal(t, userIDMap["user-1"], userEmailMap["user-1@example.com"])
 }
 
-func TestFindUserByUserName_escapesFilterLiteral(t *testing.T) {
+func TestCreateUser_conflictEscapesEmailFilter(t *testing.T) {
 	var filter string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -592,5 +658,5 @@ func TestFindUserByUserName_escapesFilterLiteral(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|redhat|user@example.com", user.ID)
 	assert.Equal(t, `user"name@example.com`, user.Email)
-	assert.Equal(t, `userName eq "user\"name"`, filter)
+	assert.Equal(t, `emails.value eq "user\"name@example.com"`, filter)
 }

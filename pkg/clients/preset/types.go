@@ -126,6 +126,7 @@ type scimPatchRequest struct {
 
 // scimMember is a SCIM group member (GET) or member reference (PATCH).
 type scimMember struct {
-	Value   string `json:"value"`
-	Display string `json:"display,omitempty"`
+	Value   string           `json:"value"`
+	Display string           `json:"display,omitempty"`
+	Emails  []scimEmailValue `json:"emails,omitempty"`
 }

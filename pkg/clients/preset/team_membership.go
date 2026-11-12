@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -51,9 +52,14 @@ func (pc *PresetClient) FetchTeamMembersByTeamID(ctx context.Context, teamID str
 
 	members := make(map[string]*structs.User, len(group.Members))
 	for _, m := range group.Members {
+		email := ""
+		if len(m.Emails) > 0 {
+			email = strings.TrimSpace(m.Emails[0].Value)
+		}
 		members[m.Value] = &structs.User{
 			ID:          m.Value,
 			DisplayName: m.Display,
+			Email:       email,
 		}
 	}
 

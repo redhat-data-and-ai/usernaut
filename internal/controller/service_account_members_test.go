@@ -51,7 +51,7 @@ func TestOptOutRemovesExistingServiceAccount(t *testing.T) {
 	r := &GroupReconciler{}
 	add, remove, err := r.processUsers(t.Context(), nil,
 		map[string]*structs.User{"service": {ID: "service"}},
-		"rover", "rover", logrus.NewEntry(logrus.New()), nil)
+		"rover", "rover", nil, logrus.NewEntry(logrus.New()), nil)
 	assert.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Equal(t, []string{"service"}, remove)
