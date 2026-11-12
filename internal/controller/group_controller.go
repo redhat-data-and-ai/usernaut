@@ -943,13 +943,13 @@ func (r *GroupReconciler) memberIDByEmail(backendName, backendType string, membe
 	if r.AppConfig == nil || r.AppConfig.BackendMap == nil || !r.AppConfig.BackendMap[backendType][backendName].CompareUsersByEmail {
 		return ""
 	}
-	want := strings.TrimSpace(email)
-	if want == "" {
+	trimmedEmail := strings.TrimSpace(email)
+	if trimmedEmail == "" {
 		return ""
 	}
 	match := ""
 	for _, member := range members {
-		if member == nil || !strings.EqualFold(strings.TrimSpace(member.Email), want) {
+		if member == nil || !strings.EqualFold(strings.TrimSpace(member.Email), trimmedEmail) {
 			continue
 		}
 		memberID := strings.TrimSpace(member.ID)
