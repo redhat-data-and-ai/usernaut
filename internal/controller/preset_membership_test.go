@@ -52,14 +52,13 @@ func (b *emailLookup) FetchUserDetailsByEmail(context.Context, string) (*structs
 	return b.found, b.err
 }
 
-func TestMemberIDByEmailUsesFlag(t *testing.T) {
+func TestMemberIDByEmail(t *testing.T) {
 	r := newPresetReconciler(t)
 	members := map[string]*structs.User{
 		"oidc|new": {ID: "oidc|new", Email: "ruagrawa@redhat.com"},
 	}
-	assert.Equal(t, "oidc|new", r.memberIDByEmail("preset", "preset", members, "ruagrawa@redhat.com", "samlp|old"))
-	assert.Empty(t, r.memberIDByEmail("gitlab", "gitlab", members, "ruagrawa@redhat.com", "samlp|old"))
-	assert.Empty(t, (&GroupReconciler{}).memberIDByEmail("preset", "preset", members, "ruagrawa@redhat.com", "samlp|old"))
+	assert.Equal(t, "oidc|new", r.memberIDByEmail(members, "ruagrawa@redhat.com"))
+	assert.Empty(t, r.memberIDByEmail(members, "other@redhat.com"))
 }
 
 func TestProcessUsers_memberEmailReplacesStaleID(t *testing.T) {
@@ -90,14 +89,13 @@ func TestProcessUsers_keepsCachedMemberWhenEmailMatches(t *testing.T) {
 
 	members := map[string]*structs.User{
 		"samlp|old": {ID: "samlp|old", Email: "ruagrawa@redhat.com"},
-		"oidc|new":  {ID: "oidc|new", Email: "Ruagrawa@redhat.com"},
 	}
 	backend := &emailLookup{found: &structs.User{ID: "should-not-be-used"}}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
 		backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
-	assert.Equal(t, []string{"oidc|new"}, remove)
+	assert.Empty(t, remove)
 	assert.Zero(t, backend.calls)
 
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")

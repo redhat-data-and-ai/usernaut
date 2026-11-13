@@ -937,30 +937,24 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	return nil
 }
 
-// memberIDByEmail returns the group member id for an email when this backend compares users by email.
-// The cached id wins when it is one of the matches. An empty result means no replacement.
-func (r *GroupReconciler) memberIDByEmail(backendName, backendType string, members map[string]*structs.User, email, cachedID string) string {
-	if r.AppConfig == nil || r.AppConfig.BackendMap == nil || !r.AppConfig.BackendMap[backendType][backendName].CompareUsersByEmail {
-		return ""
-	}
+// memberIDByEmail returns the group member id for an email.
+// An empty result means the email is not on the group.
+func (r *GroupReconciler) memberIDByEmail(members map[string]*structs.User, email string) string {
 	trimmedEmail := strings.TrimSpace(email)
 	if trimmedEmail == "" {
 		return ""
 	}
-	match := ""
 	for _, member := range members {
 		if member == nil || !strings.EqualFold(strings.TrimSpace(member.Email), trimmedEmail) {
 			continue
 		}
 		memberID := strings.TrimSpace(member.ID)
-		if memberID == cachedID {
-			return cachedID
+		if memberID == "" {
+			continue
 		}
-		if match == "" || memberID < match {
-			match = memberID
-		}
+		return memberID
 	}
-	return match
+	return ""
 }
 
 func (r *GroupReconciler) processUsers(ctx context.Context,
@@ -1001,18 +995,21 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
 		}
-		liveID := r.memberIDByEmail(backendName, backendType, existingTeamMembers, userDetails.GetEmail(), userID)
-		if liveID == "" && r.AppConfig != nil && r.AppConfig.BackendMap != nil && r.AppConfig.BackendMap[backendType][backendName].CompareUsersByEmail {
-			if lookup, ok := backendClient.(interface {
-				FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
-			}); ok {
-				found, lookupErr := lookup.FetchUserDetailsByEmail(ctx, userDetails.GetEmail())
-				if lookupErr != nil {
-					backendLogger.WithField("user", user).WithError(lookupErr).Error("error fetching user details by email")
-					return nil, nil, lookupErr
-				}
-				if found != nil {
-					liveID = strings.TrimSpace(found.GetID())
+		liveID := ""
+		if r.AppConfig != nil && r.AppConfig.BackendMap != nil && r.AppConfig.BackendMap[backendType][backendName].CompareUsersByEmail {
+			liveID = r.memberIDByEmail(existingTeamMembers, userDetails.GetEmail())
+			if liveID == "" {
+				if lookupclient, ok := backendClient.(interface {
+					FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
+				}); ok {
+					found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userDetails.GetEmail())
+					if lookupErr != nil {
+						backendLogger.WithField("user", user).WithError(lookupErr).Error("error fetching user details by email")
+						return nil, nil, lookupErr
+					}
+					if found != nil {
+						liveID = strings.TrimSpace(found.GetID())
+					}
 				}
 			}
 		}

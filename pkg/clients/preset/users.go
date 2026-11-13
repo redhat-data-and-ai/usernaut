@@ -148,17 +148,6 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 
 	response, err := pc.sendRequest(ctx, reqURL, http.MethodPost, reqBody)
 	if err != nil {
-		if isResponseStatus(err, http.StatusConflict) {
-			log.WithField("status", http.StatusConflict).Info("user already exists, fetching user details by email")
-			existing, lookupErr := pc.FetchUserDetailsByEmail(ctx, email)
-			if lookupErr != nil {
-				return nil, lookupErr
-			}
-			if existing == nil {
-				return nil, fmt.Errorf("preset user already exists but was not found by email %s", email)
-			}
-			return existing, nil
-		}
 		log.WithError(err).Error("error creating user")
 		return nil, err
 	}
