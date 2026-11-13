@@ -19,7 +19,6 @@ package preset
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -28,8 +27,6 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
 )
-
-var errUserNotFound = errors.New("user not found")
 
 // FetchAllUsers retrieves all users via SCIM and returns maps keyed by email and SCIM ID
 func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
@@ -109,17 +106,8 @@ func (pc *PresetClient) FetchUserDetails(ctx context.Context, userID string) (*s
 func scimUserToStruct(su *scimUser) *structs.User {
 	email := ""
 	if len(su.Emails) > 0 {
-		for _, e := range su.Emails {
-			if e.Primary {
-				email = e.Value
-				break
-			}
-		}
-		if email == "" {
-			email = su.Emails[0].Value
-		}
+		email = strings.TrimSpace(su.Emails[0].Value)
 	}
-
 	return &structs.User{
 		ID:          su.ID,
 		Email:       email,
@@ -162,7 +150,14 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 	if err != nil {
 		if isResponseStatus(err, http.StatusConflict) {
 			log.WithField("status", http.StatusConflict).Info("user already exists, fetching user details")
-			return pc.findUserByUserName(ctx, userName)
+			existing, lookupErr := pc.FetchUserDetailsByEmail(ctx, email)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			if existing == nil {
+				return nil, fmt.Errorf("preset user already exists but was not found by email %s", email)
+			}
+			return existing, nil
 		}
 		log.WithError(err).Error("error creating user")
 		return nil, err
@@ -202,28 +197,38 @@ func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-func (pc *PresetClient) findUserByUserName(ctx context.Context, userName string) (*structs.User, error) {
+// FetchUserDetailsByEmail returns the Preset user for an email. A missing user returns (nil, nil).
+func (pc *PresetClient) FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
-		"username":    userName,
+		"email":       email,
 	})
 
-	filter := fmt.Sprintf(`userName eq "%s"`, escapeSCIMLiteral(userName))
-	response, err := pc.querySCIMByFilter(ctx, "Users", filter, "username", userName)
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return nil, nil
+	}
+
+	filter := fmt.Sprintf(`emails.value eq "%s"`, escapeSCIMLiteral(email))
+	response, err := pc.querySCIMByFilter(ctx, "Users", filter, "email", email)
 	if err != nil {
 		return nil, err
 	}
 
 	var scimResp scimUsersResponse
 	if err := json.Unmarshal(response, &scimResp); err != nil {
-		log.WithError(err).Error("failed to parse SCIM user lookup response")
+		log.WithError(err).Error("failed to parse SCIM user email lookup response")
 		return nil, err
 	}
-
 	if len(scimResp.Resources) == 0 {
-		log.Warn("SCIM user not found by userName")
-		return nil, fmt.Errorf("%w: %s", errUserNotFound, userName)
+		log.Warn("SCIM user not found by email")
+		return nil, nil
 	}
 
-	return scimUserToStruct(&scimResp.Resources[0]), nil
+	user := scimUserToStruct(&scimResp.Resources[0])
+	if user.ID == "" || strings.EqualFold(user.ID, email) {
+		return nil, fmt.Errorf("preset user lookup for %s did not return a SCIM id", email)
+	}
+	log.WithField("userID", user.ID).Info("found SCIM user by email")
+	return user, nil
 }
