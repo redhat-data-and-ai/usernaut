@@ -231,6 +231,43 @@ func TestNewClient_success(t *testing.T) {
 	assert.Equal(t, "token", pc.scimToken)
 }
 
+func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
+	var lookups int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Users"):
+			w.WriteHeader(http.StatusConflict)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Users")):
+			lookups++
+			assert.Equal(t, `emails.value eq "existing@example.com"`, r.URL.Query().Get("filter"))
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{
+				TotalResults: 1,
+				Resources: []scimUser{{
+					ID:       "oidc|redhat-prod|existing",
+					UserName: "existing",
+					Emails:   []scimEmailValue{{Value: "existing@example.com"}},
+				}},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	user, err := pc.CreateUser(context.Background(), &structs.User{
+		Email:     "existing@example.com",
+		UserName:  "existing",
+		FirstName: "Existing",
+		LastName:  "User",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "oidc|redhat-prod|existing", user.ID)
+	assert.Equal(t, "existing@example.com", user.Email)
+	assert.Equal(t, 1, lookups)
+}
+
 func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
 	pc := newTestPresetClient(t, "https://example.com")
 	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "ctolosa"})
@@ -251,19 +288,15 @@ func TestCreateTeam_conflictResolvesExistingGroup(t *testing.T) {
 	var lookups int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Groups"):
+			w.WriteHeader(http.StatusConflict)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, testSCIMPath("/Groups")):
 			lookups++
 			w.WriteHeader(http.StatusOK)
-			if lookups == 1 {
-				_ = json.NewEncoder(w).Encode(scimGroupsResponse{TotalResults: 0})
-				return
-			}
 			_ = json.NewEncoder(w).Encode(scimGroupsResponse{
 				TotalResults: 1,
 				Resources:    []scimGroup{{ID: "group-conflict", DisplayName: "conflict-team"}},
 			})
-		case r.Method == http.MethodPost && r.URL.Path == testSCIMPath("/Groups"):
-			w.WriteHeader(http.StatusConflict)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -274,6 +307,7 @@ func TestCreateTeam_conflictResolvesExistingGroup(t *testing.T) {
 	team, err := pc.CreateTeam(context.Background(), &structs.Team{Name: "conflict-team"})
 	require.NoError(t, err)
 	assert.Equal(t, "group-conflict", team.ID)
+	assert.Equal(t, 1, lookups)
 }
 
 func TestDeleteNotFoundIsIdempotent_team(t *testing.T) {

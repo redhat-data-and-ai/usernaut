@@ -110,7 +110,7 @@ func scimGroupToTeam(g *scimGroup) *structs.Team {
 }
 
 // CreateTeam creates a new SCIM group in Preset.
-// If a group with the same displayName already exists, returns the existing group.
+// A conflicting displayName returns the existing group.
 func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*structs.Team, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
@@ -122,18 +122,6 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 		return nil, fmt.Errorf("team name is required for Preset group creation")
 	}
 
-	existing, err := pc.findGroupByDisplayName(ctx, team.Name)
-	if err == nil {
-		log.WithFields(logrus.Fields{
-			"team_id": existing.ID,
-		}).Info("SCIM group already exists in Preset")
-		return existing, nil
-	}
-	if !errors.Is(err, errGroupNotFound) {
-		log.WithError(err).Error("failed to check if SCIM group exists in Preset")
-		return nil, fmt.Errorf("failed to check if group exists: %w", err)
-	}
-
 	reqURL := fmt.Sprintf("%s/Groups", pc.scimURL())
 	reqBody := scimGroupCreateRequest{
 		Schemas:     []string{scimGroupSchema},
@@ -143,7 +131,8 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 	response, err := pc.sendRequest(ctx, reqURL, http.MethodPost, reqBody)
 	if err != nil {
 		if isResponseStatus(err, http.StatusConflict) {
-			return pc.requireGroupByDisplayName(ctx, team.Name, "SCIM group conflict but lookup failed")
+			log.WithField("status", http.StatusConflict).Info("SCIM group already exists, fetching group details")
+			return pc.findGroupByDisplayName(ctx, team.Name)
 		}
 		log.WithError(err).Error("failed to create SCIM group in Preset")
 		return nil, fmt.Errorf("failed to create SCIM group in Preset: %w", err)
@@ -151,8 +140,7 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 
 	var createdGroup scimGroup
 	if err := json.Unmarshal(response, &createdGroup); err != nil {
-		log.WithError(err).Warn("failed to parse created SCIM group response")
-		return pc.requireGroupByDisplayName(ctx, team.Name, "failed to parse SCIM group creation response")
+		return nil, fmt.Errorf("failed to parse SCIM group creation response: %w", err)
 	}
 
 	log.WithFields(logrus.Fields{
@@ -208,12 +196,4 @@ func (pc *PresetClient) findGroupByDisplayName(ctx context.Context, displayName 
 	}
 
 	return scimGroupToTeam(&scimResp.Resources[0]), nil
-}
-
-func (pc *PresetClient) requireGroupByDisplayName(ctx context.Context, displayName, msg string) (*structs.Team, error) {
-	team, err := pc.findGroupByDisplayName(ctx, displayName)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", msg, err)
-	}
-	return team, nil
 }
