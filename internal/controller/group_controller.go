@@ -157,16 +157,18 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	var ldapResult *LDAPFetchResult
 	if !hasMembershipSource(groupCR.Spec.Members) {
-		log.Info("no membership source configured; using an empty member list")
+		log.Info("no membership source configured; skipping backend reconciliation")
 		groupCR.SetMissingSubGroups(nil)
-		ldapResult = emptyLDAPResult()
-	} else {
-		resolved, result, err := r.resolveMembers(ctx, req, groupCR, log)
-		if resolved == nil {
-			return result, err
-		}
-		ldapResult = resolved
+		return r.skipBackendReconciliation(ctx, groupCR, log, requeueAfter)
 	}
+	resolved, result, err := r.resolveMembers(ctx, req, groupCR, log)
+	if err != nil {
+		return result, err
+	}
+	if resolved == nil {
+		return r.skipBackendReconciliation(ctx, groupCR, log, result.RequeueAfter)
+	}
+	ldapResult = resolved
 
 	log.WithField("member_count", len(ldapResult.Members)).Info("syncing backends")
 	backendErrors := r.processAllBackends(ctx, groupCR, ldapResult, log)
@@ -203,13 +205,23 @@ func hasMembershipSource(m usernautdevv1alpha1.Members) bool {
 	return len(m.Users) > 0 || len(m.Groups) > 0 || m.LDAPQuery != nil
 }
 
-func emptyLDAPResult() *LDAPFetchResult {
-	return &LDAPFetchResult{
-		UserData:       map[string]*structs.LDAPUser{},
-		Members:        []string{},
-		PersonMembers:  []string{},
-		CurrentMembers: []string{},
+// skipBackendReconciliation records the resolved membership and leaves backend teams unchanged.
+func (r *GroupReconciler) skipBackendReconciliation(
+	ctx context.Context,
+	groupCR *usernautdevv1alpha1.Group,
+	log *logrus.Entry,
+	requeue time.Duration,
+) (ctrl.Result, error) {
+	groupCR.UpdateStatus(false)
+	if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
+		log.WithError(statusErr).Error("error updating status after skipping backend reconciliation")
+		return ctrl.Result{}, statusErr
 	}
+	if removeErr := controllerutils.RemoveForceReconcileLabel(ctx, r.Client, groupCR); removeErr != nil {
+		log.WithError(removeErr).Error("Failed to remove force reconcile label")
+		return ctrl.Result{Priority: &retryPriority}, removeErr
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
 // resolveMembers resolves users from users, child groups, and ldap_query.
@@ -254,16 +266,10 @@ func (r *GroupReconciler) resolveMembers(
 		if len(missingGroups) > 0 {
 			// A child Group was not found, so this empty list is incomplete.
 			log.Info("no members to reconcile due to missing sub-groups, skipping backend reconciliation")
-			groupCR.UpdateStatus(false)
-			if statusErr := r.Status().Update(ctx, groupCR); statusErr != nil {
-				log.WithError(statusErr).Error("error updating status after no members to reconcile")
-				return nil, ctrl.Result{}, statusErr
-			}
 			return nil, ctrl.Result{RequeueAfter: 1 * time.Hour}, nil
 		}
-		// Every source was read and resolved to nobody.
-		log.Info("membership source resolved to no users; using an empty member list")
-		return emptyLDAPResult(), ctrl.Result{}, nil
+		log.Info("membership source resolved to no users; skipping backend reconciliation")
+		return nil, ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 
 	log.Info("fetching LDAP data for the users in the group")

@@ -53,57 +53,57 @@ const (
 	keyParentGroupId    = "parent_group_id"
 )
 
-var _ = Describe("Group Controller", func() {
-
-	setupTestReconciler := func(backends []config.Backend) (*GroupReconciler, *mocks.MockLDAPClient) {
-		backendMap := make(map[string]map[string]config.Backend)
-		for _, backend := range backends {
-			if _, ok := backendMap[backend.Type]; !ok {
-				backendMap[backend.Type] = make(map[string]config.Backend)
-			}
-			backendMap[backend.Type][backend.Name] = backend
+func setupTestReconciler(backends []config.Backend) (*GroupReconciler, *mocks.MockLDAPClient) {
+	backendMap := make(map[string]map[string]config.Backend)
+	for _, backend := range backends {
+		if _, ok := backendMap[backend.Type]; !ok {
+			backendMap[backend.Type] = make(map[string]config.Backend)
 		}
-
-		appConfig := &config.AppConfig{
-			App: config.App{
-				Name:        "usernaut-test",
-				Version:     "v0.0.1",
-				Environment: "test",
-			},
-			LDAP: ldap.LDAP{
-				ServiceAccountObjectFilter: "(objectClass=serviceAccount)",
-				Server:                     "ldap://ldap.test.com:389",
-				BaseDN:                     "ou=adhoc,ou=managedGroups,dc=org,dc=com",
-				UserDN:                     "uid=%s,ou=users,dc=org,dc=com",
-				UserSearchFilter:           "(objectClass=filteClass)",
-				Attributes:                 []string{"mail", "uid", "cn", "sn", "displayName"},
-			},
-			Backends:   backends,
-			BackendMap: backendMap,
-			Cache: cache.Config{
-				Driver: "memory",
-				InMemory: &inmemory.Config{
-					DefaultExpiration: int32(-1),
-					CleanupInterval:   int32(-1),
-				},
-			},
-		}
-
-		Cache, err := cache.New(&appConfig.Cache)
-		Expect(err).NotTo(HaveOccurred())
-
-		ctrl := gomock.NewController(GinkgoT())
-		ldapClient := mocks.NewMockLDAPClient(ctrl)
-
-		return &GroupReconciler{
-			Client:     k8sClient,
-			Scheme:     k8sClient.Scheme(),
-			AppConfig:  appConfig,
-			Store:      store.New(Cache),
-			LdapConn:   ldapClient,
-			CacheMutex: &sync.RWMutex{},
-		}, ldapClient
+		backendMap[backend.Type][backend.Name] = backend
 	}
+
+	appConfig := &config.AppConfig{
+		App: config.App{
+			Name:        "usernaut-test",
+			Version:     "v0.0.1",
+			Environment: "test",
+		},
+		LDAP: ldap.LDAP{
+			ServiceAccountObjectFilter: "(objectClass=serviceAccount)",
+			Server:                     "ldap://ldap.test.com:389",
+			BaseDN:                     "ou=adhoc,ou=managedGroups,dc=org,dc=com",
+			UserDN:                     "uid=%s,ou=users,dc=org,dc=com",
+			UserSearchFilter:           "(objectClass=filteClass)",
+			Attributes:                 []string{"mail", "uid", "cn", "sn", "displayName"},
+		},
+		Backends:   backends,
+		BackendMap: backendMap,
+		Cache: cache.Config{
+			Driver: "memory",
+			InMemory: &inmemory.Config{
+				DefaultExpiration: int32(-1),
+				CleanupInterval:   int32(-1),
+			},
+		},
+	}
+
+	Cache, err := cache.New(&appConfig.Cache)
+	Expect(err).NotTo(HaveOccurred())
+
+	ctrl := gomock.NewController(GinkgoT())
+	ldapClient := mocks.NewMockLDAPClient(ctrl)
+
+	return &GroupReconciler{
+		Client:     k8sClient,
+		Scheme:     k8sClient.Scheme(),
+		AppConfig:  appConfig,
+		Store:      store.New(Cache),
+		LdapConn:   ldapClient,
+		CacheMutex: &sync.RWMutex{},
+	}, ldapClient
+}
+
+var _ = Describe("Group Controller", func() {
 
 	setupSafeTestConfig := func() func() {
 		tempDir, err := os.MkdirTemp("", "usernaut-test")
@@ -202,15 +202,21 @@ var _ = Describe("Group Controller", func() {
 		resource := &usernautdevv1alpha1.Group{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "missing-child-group", Namespace: "default",
+				Labels: map[string]string{constants.ForceReconcileLabel: "true"},
 			},
 			Spec: usernautdevv1alpha1.GroupSpec{
 				GroupName: "missing-child-group",
 				Members:   usernautdevv1alpha1.Members{Groups: []string{"does-not-exist"}},
-				Backends:  []usernautdevv1alpha1.Backend{},
+				Backends: []usernautdevv1alpha1.Backend{{
+					Name: "fivetran",
+					Type: "fivetran",
+				}},
 			},
 		}
 		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, resource)).To(Succeed()) })
+		resource.Status.ReconciledUsers = []string{"kept-user"}
+		Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
 		ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Times(0)
 
 		key := types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
@@ -220,11 +226,105 @@ var _ = Describe("Group Controller", func() {
 
 		fresh := &usernautdevv1alpha1.Group{}
 		Expect(k8sClient.Get(ctx, key, fresh)).To(Succeed())
+		Expect(fresh.Labels).NotTo(HaveKey(constants.ForceReconcileLabel))
+		Expect(fresh.Status.ReconciledUsers).To(Equal([]string{"kept-user"}))
 		cond := meta.FindStatusCondition(fresh.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(usernautdevv1alpha1.MissingSubGroupsReason))
 		Expect(fresh.Status.MissingSubGroups).To(ContainElement("does-not-exist"))
+	})
+
+	It("reconciles an LDAP query that matches nobody without syncing backends", func() {
+		reconciler, ldapClient := setupTestReconciler(nil)
+		resource := &usernautdevv1alpha1.Group{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "empty-ldap-group", Namespace: "default",
+				Labels: map[string]string{constants.ForceReconcileLabel: "true"},
+			},
+			Spec: usernautdevv1alpha1.GroupSpec{
+				GroupName: "empty-ldap-group",
+				Members: usernautdevv1alpha1.Members{
+					LDAPQuery: &usernautdevv1alpha1.LDAPQuery{
+						Operator: "and",
+						Filters: []usernautdevv1alpha1.LDAPFilter{{
+							Key: "employeeType", Criteria: "equals", Value: "nobody",
+						}},
+					},
+				},
+				Backends: []usernautdevv1alpha1.Backend{{
+					Name: "fivetran",
+					Type: "fivetran",
+				}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, resource)).To(Succeed()) })
+		resource.Status.ReconciledUsers = []string{"kept-user"}
+		Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+		ldapClient.EXPECT().BuildLDAPQueryFromSpec(gomock.Any(), gomock.Any()).Return("(uid=nobody)", nil)
+		ldapClient.EXPECT().GetQueryMembers(gomock.Any(), "(uid=nobody)").Return([]string{}, nil)
+		ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Times(0)
+
+		key := types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
+		result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(requeueAfter))
+
+		fresh := &usernautdevv1alpha1.Group{}
+		Expect(k8sClient.Get(ctx, key, fresh)).To(Succeed())
+		Expect(fresh.Labels).NotTo(HaveKey(constants.ForceReconcileLabel))
+		Expect(fresh.Status.ReconciledUsers).To(Equal([]string{"kept-user"}))
+		cond := meta.FindStatusCondition(fresh.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(usernautdevv1alpha1.SuccessfullyReconciled))
+	})
+
+	It("reconciles a child group that has no users without syncing backends", func() {
+		reconciler, ldapClient := setupTestReconciler(nil)
+		reconciler.WatchedNamespaces = []string{"default"}
+		child := &usernautdevv1alpha1.Group{
+			ObjectMeta: metav1.ObjectMeta{Name: "empty-child", Namespace: "default"},
+			Spec: usernautdevv1alpha1.GroupSpec{
+				GroupName: "empty-child",
+				Members:   usernautdevv1alpha1.Members{},
+				Backends:  []usernautdevv1alpha1.Backend{},
+			},
+		}
+		Expect(k8sClient.Create(ctx, child)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, child)).To(Succeed()) })
+
+		resource := &usernautdevv1alpha1.Group{
+			ObjectMeta: metav1.ObjectMeta{Name: "parent-of-empty-child", Namespace: "default"},
+			Spec: usernautdevv1alpha1.GroupSpec{
+				GroupName: "parent-of-empty-child",
+				Members:   usernautdevv1alpha1.Members{Groups: []string{"empty-child"}},
+				Backends: []usernautdevv1alpha1.Backend{{
+					Name: "fivetran",
+					Type: "fivetran",
+				}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, resource)).To(Succeed()) })
+		resource.Status.ReconciledUsers = []string{"kept-user"}
+		Expect(k8sClient.Status().Update(ctx, resource)).To(Succeed())
+		ldapClient.EXPECT().GetBulkUserLDAPData(gomock.Any(), gomock.Any()).Times(0)
+
+		key := types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
+		result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(requeueAfter))
+
+		fresh := &usernautdevv1alpha1.Group{}
+		Expect(k8sClient.Get(ctx, key, fresh)).To(Succeed())
+		Expect(fresh.Status.ReconciledUsers).To(Equal([]string{"kept-user"}))
+		Expect(fresh.Status.MissingSubGroups).To(BeEmpty())
+		cond := meta.FindStatusCondition(fresh.Status.Conditions, usernautdevv1alpha1.GroupReadyCondition)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(usernautdevv1alpha1.SuccessfullyReconciled))
 	})
 
 	Context("When reconciling a resource", func() {
