@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
+	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
@@ -386,7 +387,7 @@ func (uoj *UserOffboardingJob) offboardUser(ctx context.Context, userKey string)
 	if err != nil {
 		return fmt.Errorf("failed to get user data from cache: %w", err)
 	}
-	err = uoj.offboardUserFromAllBackends(ctx, userKey, userData)
+	err = uoj.offboardUserFromAllBackends(ctx, userKey, userEmail, userData)
 	if err != nil {
 		uoj.logger.WithField("userKey", userKey).Error(err, "Failed to offboard user from backends")
 		return fmt.Errorf("failed to offboard user %s from backends: %v", userKey, err)
@@ -550,14 +551,22 @@ func (uoj *UserOffboardingJob) isUserActiveInLDAP(ctx context.Context, userEmail
 //
 // Parameters:
 //   - ctx: Context for cancellation and logging
-//   - user: The user data containing ID and other details for removal
+//   - userKey: The cache key for this user
+//   - userEmail: The email stored for this user, used to look up a live Preset id
+//   - userData: Backend user ids keyed by "{name}_{type}"
 //
 // Returns:
 //   - error: Combined error message if any backends failed, nil if all succeeded
 func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
-	ctx context.Context, userKey string, userData map[string]string,
+	ctx context.Context, userKey, userEmail string, userData map[string]string,
 ) error {
 	var errors []string
+
+	appConf, confErr := config.GetConfig()
+	if confErr != nil {
+		uoj.logger.WithError(confErr).Warn("failed to load configuration, deleting cached backend user ids")
+		appConf = nil
+	}
 
 	// Define which backend types should be skipped
 	skippedBackendTypes := map[string]bool{
@@ -572,6 +581,7 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 			uoj.logger.WithField("backend", backendKey).Info("Skipping backend with invalid key format")
 			continue
 		}
+		backendName := strings.Join(parts[:len(parts)-1], "_")
 		backendType := strings.ToLower(parts[len(parts)-1])
 
 		// Skip backends that are explicitly excluded
@@ -593,6 +603,25 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 				"type":    backendType,
 			}).Info("User not found in backend, skipping")
 			continue
+		}
+
+		if appConf != nil && appConf.BackendMap != nil &&
+			appConf.BackendMap[backendType][backendName].CompareUsersByEmail {
+			if lookupclient, ok := client.(interface {
+				FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
+			}); ok {
+				found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userEmail)
+				if lookupErr != nil {
+					errors = append(errors, fmt.Sprintf("backend %s: %v", backendKey, lookupErr))
+					uoj.logger.WithError(lookupErr).Error("error fetching user details by email")
+					continue
+				}
+				if found != nil {
+					if liveID := strings.TrimSpace(found.GetID()); liveID != "" {
+						userIDStr = liveID
+					}
+				}
+			}
 		}
 
 		// Proceed with offboarding for all other backends

@@ -710,3 +710,59 @@ offboardUserExclusionListConfigPath: "` + server.URL + `/config/exclusion_list.y
 		assert.False(t, exists, "Normal user should be removed from cache")
 	})
 }
+
+// emailLookupMock adds the Preset email search on top of the generated backend mock.
+type emailLookupMock struct {
+	*clientmocks.MockClient
+	found *structs.User
+	email string
+	calls int
+}
+
+func (m *emailLookupMock) FetchUserDetailsByEmail(_ context.Context, email string) (*structs.User, error) {
+	m.calls++
+	m.email = email
+	return m.found, nil
+}
+
+func TestUserOffboardingJobPresetEmailFallback(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	cfg, err := config.GetConfig()
+	require.NoError(t, err)
+	cfg.BackendMap = map[string]map[string]config.Backend{
+		"preset": {"preset": {Name: "preset", Type: "preset", CompareUsersByEmail: true}},
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+	presetClient := &emailLookupMock{
+		MockClient: mockBackendClient,
+		found:      &structs.User{ID: "oidc|live"},
+	}
+
+	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
+	require.NoError(t, err)
+	dataStore := store.New(inMemCache)
+
+	ctx := context.Background()
+	const email = "testuser@example.com"
+	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
+
+	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
+		"preset_preset": presetClient,
+	})
+
+	mockLDAPClient.EXPECT().
+		GetUserLDAPDataByEmail(gomock.Any(), email).
+		Return(nil, ldap.ErrNoUserFound)
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), "oidc|live").
+		Return(nil)
+
+	require.NoError(t, job.Run(ctx))
+	assert.Equal(t, 1, presetClient.calls)
+	assert.Equal(t, email, presetClient.email)
+}
