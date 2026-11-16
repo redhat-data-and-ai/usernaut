@@ -1023,10 +1023,10 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 				return nil, nil, cacheErr
 			}
 			backendLogger.WithFields(logrus.Fields{
-				"user":  user,
+				"user":  logger.MaskEmail(user),
 				"oldID": userID,
 				"newID": liveID,
-			}).Debug("updated stale user ID from group member email")
+			}).Info("updated stale user ID from group member email")
 			userID = liveID
 		}
 		userIDsToSync = append(userIDsToSync, userID)
