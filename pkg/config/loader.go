@@ -212,9 +212,9 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 // unmatched defaults and appending new backends in environment order.
 // For example, an Astro override containing only api_token drops the default
 // organization_id and uses false for an omitted enabled field.
-func mergeBackends(defaults, environment []Backend) []Backend {
-	merged := slices.Clone(defaults)
-	for _, backend := range environment {
+func mergeBackends(defaultBackends, envBackends []Backend) []Backend {
+	merged := slices.Clone(defaultBackends)
+	for _, backend := range envBackends {
 		index := slices.IndexFunc(merged, func(existing Backend) bool {
 			return existing.Name == backend.Name && existing.Type == backend.Type
 		})
