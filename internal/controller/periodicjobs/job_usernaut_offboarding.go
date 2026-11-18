@@ -562,12 +562,6 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 ) error {
 	var errors []string
 
-	appConf, confErr := config.GetConfig()
-	if confErr != nil {
-		uoj.logger.WithError(confErr).Warn("failed to load configuration, deleting cached backend user ids")
-		appConf = nil
-	}
-
 	// Define which backend types should be skipped
 	skippedBackendTypes := map[string]bool{
 		"gitlab": true,
@@ -581,7 +575,6 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 			uoj.logger.WithField("backend", backendKey).Info("Skipping backend with invalid key format")
 			continue
 		}
-		backendName := strings.Join(parts[:len(parts)-1], "_")
 		backendType := strings.ToLower(parts[len(parts)-1])
 
 		// Skip backends that are explicitly excluded
@@ -605,21 +598,18 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 			continue
 		}
 
-		if appConf != nil && appConf.BackendMap != nil &&
-			appConf.BackendMap[backendType][backendName].CompareUsersByEmail {
-			if lookupclient, ok := client.(interface {
-				FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
-			}); ok {
-				found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userEmail)
-				if lookupErr != nil {
-					errors = append(errors, fmt.Sprintf("backend %s: %v", backendKey, lookupErr))
-					uoj.logger.WithError(lookupErr).Error("error fetching user details by email")
-					continue
-				}
-				if found != nil {
-					if liveID := strings.TrimSpace(found.GetID()); liveID != "" {
-						userIDStr = liveID
-					}
+		if lookupclient, ok := client.(interface {
+			FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
+		}); ok {
+			found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userEmail)
+			if lookupErr != nil {
+				errors = append(errors, fmt.Sprintf("backend %s: %v", backendKey, lookupErr))
+				uoj.logger.WithError(lookupErr).Error("error fetching user details by email")
+				continue
+			}
+			if found != nil {
+				if liveID := strings.TrimSpace(found.GetID()); liveID != "" {
+					userIDStr = liveID
 				}
 			}
 		}
