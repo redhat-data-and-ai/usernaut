@@ -744,7 +744,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
 	// Process users (determine who to add/remove)
-	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type, backendLogger, allLdapUserData)
+	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type, backendClient, backendLogger, allLdapUserData)
 	if err != nil {
 		backendLogger.WithError(err).Error("error processing users")
 		return err
@@ -937,10 +937,31 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	return nil
 }
 
+// memberIDByEmail returns the group member id for an email.
+// An empty result means the email is not on the group.
+func (r *GroupReconciler) memberIDByEmail(members map[string]*structs.User, email string) string {
+	trimmedEmail := strings.TrimSpace(email)
+	if trimmedEmail == "" {
+		return ""
+	}
+	for _, member := range members {
+		if member == nil || !strings.EqualFold(strings.TrimSpace(member.Email), trimmedEmail) {
+			continue
+		}
+		memberID := strings.TrimSpace(member.ID)
+		if memberID == "" {
+			continue
+		}
+		return memberID
+	}
+	return ""
+}
+
 func (r *GroupReconciler) processUsers(ctx context.Context,
 	groupUsers []string,
 	existingTeamMembers map[string]*structs.User,
 	backendName, backendType string,
+	backendClient clients.Client,
 	backendLogger *logrus.Entry,
 	allLdapUserData map[string]*structs.LDAPUser) ([]string, []string, error) {
 
@@ -973,6 +994,43 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 		if userID == "" {
 			backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
+		}
+		// A cached ID missing from the team may be stale. Only clients that can
+		// resolve a user by email may replace it: first from a member email, then
+		// from FetchUserDetailsByEmail. Other backends keep the cached ID.
+		liveID := ""
+		if _, onTeam := existingTeamMembers[userID]; !onTeam {
+			if lookupclient, ok := backendClient.(interface {
+				FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
+			}); ok {
+				liveID = r.memberIDByEmail(existingTeamMembers, userDetails.GetEmail())
+				if liveID == "" {
+					found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userDetails.GetEmail())
+					if lookupErr != nil {
+						backendLogger.WithField("user", user).WithError(lookupErr).Error("error fetching user details by email")
+						return nil, nil, lookupErr
+					}
+					if found != nil {
+						liveID = strings.TrimSpace(found.GetID())
+					}
+				}
+			}
+		}
+		if liveID != "" && liveID != userID {
+			r.CacheMutex.Lock()
+			cacheErr := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, liveID)
+			r.CacheMutex.Unlock()
+			if cacheErr != nil {
+				backendLogger.WithField("user", user).WithError(cacheErr).Error(
+					"error updating user details in cache from group member email")
+				return nil, nil, cacheErr
+			}
+			backendLogger.WithFields(logrus.Fields{
+				"user":  logger.MaskEmail(user),
+				"oldID": userID,
+				"newID": liveID,
+			}).Info("updated stale SCIM ID with updated user details")
+			userID = liveID
 		}
 		userIDsToSync = append(userIDsToSync, userID)
 	}
