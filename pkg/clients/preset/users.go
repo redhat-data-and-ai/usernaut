@@ -226,7 +226,7 @@ func (pc *PresetClient) FetchUserDetailsByEmail(ctx context.Context, email strin
 	}
 
 	user := scimUserToStruct(&scimResp.Resources[0])
-	if user.ID == "" || strings.EqualFold(user.ID, email) {
+	if user.ID == "" {
 		return nil, fmt.Errorf("preset user lookup for %s did not return a SCIM id", email)
 	}
 	log.WithField("userID", user.ID).Info("found SCIM user by email")

@@ -995,13 +995,16 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
 		}
+		// A cached ID missing from the team may be stale. Only clients that can
+		// resolve a user by email may replace it: first from a member email, then
+		// from FetchUserDetailsByEmail. Other backends keep the cached ID.
 		liveID := ""
-		if r.AppConfig != nil && r.AppConfig.BackendMap != nil && r.AppConfig.BackendMap[backendType][backendName].CompareUsersByEmail {
-			liveID = r.memberIDByEmail(existingTeamMembers, userDetails.GetEmail())
-			if liveID == "" {
-				if lookupclient, ok := backendClient.(interface {
-					FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
-				}); ok {
+		if _, onTeam := existingTeamMembers[userID]; !onTeam {
+			if lookupclient, ok := backendClient.(interface {
+				FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
+			}); ok {
+				liveID = r.memberIDByEmail(existingTeamMembers, userDetails.GetEmail())
+				if liveID == "" {
 					found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userDetails.GetEmail())
 					if lookupErr != nil {
 						backendLogger.WithField("user", user).WithError(lookupErr).Error("error fetching user details by email")
@@ -1026,7 +1029,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 				"user":  logger.MaskEmail(user),
 				"oldID": userID,
 				"newID": liveID,
-			}).Info("updated stale user ID from group member email")
+			}).Info("updated stale SCIM ID with updated user details")
 			userID = liveID
 		}
 		userIDsToSync = append(userIDsToSync, userID)
