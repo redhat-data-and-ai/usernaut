@@ -602,6 +602,8 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 			FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
 		}); ok {
 			found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userEmail)
+			// A lookup error means the live ID is unknown. Deletion is deferred:
+			// keep the saved ID, skip DeleteUser, and retain the cache entry for the next run.
 			if lookupErr != nil {
 				errors = append(errors, fmt.Sprintf("backend %s: %v", backendKey, lookupErr))
 				uoj.logger.WithError(lookupErr).Error("error fetching user details by email")
