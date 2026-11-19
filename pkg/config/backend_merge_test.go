@@ -105,7 +105,7 @@ backends:
 	}
 }
 
-func TestBackendMergeReplacesMatchingIdentity(t *testing.T) {
+func TestBackendMergePreservesFieldsAndIdentity(t *testing.T) {
 	dir := t.TempDir()
 	defaults := `backends:
   - name: primary
@@ -148,9 +148,9 @@ func TestBackendMergeReplacesMatchingIdentity(t *testing.T) {
 	assert.Equal(t, []Backend{
 		{
 			Name: "primary", Type: "astro", Enabled: false,
-			DependsOn: Dependant{Name: "updated"},
+			DependsOn: Dependant{Name: "updated", Type: "rover"},
 			Connection: map[string]interface{}{
-				"api_token": "", "base_url": "https://astro.example",
+				"api_token": "", "organization_id": "default-org", "base_url": "https://astro.example",
 			},
 		},
 		{
@@ -168,12 +168,25 @@ func TestBackendMergeReplacesMatchingIdentity(t *testing.T) {
 	}, cfg.Backends)
 }
 
-func TestMergeBackendsDoesNotReplaceInputEntries(t *testing.T) {
-	defaults := []Backend{{Name: "astro", Type: "astro", Enabled: true}}
-	environment := []Backend{{Name: "astro", Type: "astro", Enabled: false}}
-	assert.Equal(t, environment, mergeBackends(defaults, environment))
-	assert.True(t, defaults[0].Enabled, "replacing a result entry must not replace the input entry")
-	assert.False(t, environment[0].Enabled)
+func TestMergeBackendsDoesNotMutateInputs(t *testing.T) {
+	defaults := []map[string]interface{}{{
+		"name": "astro", "type": "astro", "enabled": true,
+		"connection": map[string]interface{}{"path": "/default", "options": map[string]interface{}{"timeout": 30}},
+	}}
+	environment := []map[string]interface{}{{
+		"name": "astro", "type": "astro", "enabled": false,
+		"connection": map[string]interface{}{"options": map[string]interface{}{"timeout": 0}},
+	}}
+	merged, err := mergeBackends(defaults, environment)
+	require.NoError(t, err)
+	require.Len(t, merged, 1)
+	assert.Equal(t, false, merged[0]["enabled"])
+	connection := merged[0]["connection"].(map[string]interface{})
+	assert.Equal(t, "/default", connection["path"])
+	connection["options"] = map[string]interface{}{"timeout": 99}
+	assert.Equal(t, true, defaults[0]["enabled"])
+	assert.Equal(t, map[string]interface{}{"path": "/default", "options": map[string]interface{}{"timeout": 30}}, defaults[0]["connection"])
+	assert.Equal(t, map[string]interface{}{"options": map[string]interface{}{"timeout": 0}}, environment[0]["connection"])
 }
 
 func TestLoadBackendsKeepsLiteralKeys(t *testing.T) {
@@ -202,7 +215,7 @@ func TestLoadBackendsKeepsLiteralKeys(t *testing.T) {
 	var cfg AppConfig
 	require.NoError(t, loader.Load("production", &cfg))
 	require.Len(t, cfg.Backends, 1)
-	assert.False(t, cfg.Backends[0].Enabled, "omitted enabled must not inherit from the replaced default")
+	assert.True(t, cfg.Backends[0].Enabled, "omitted enabled must inherit the default")
 	assert.Equal(t, map[string]interface{}{
 		"custom.key": "updated",
 		"options":    map[string]interface{}{"timeout": 0},
@@ -215,4 +228,41 @@ func TestLoadBackendsKeepsLiteralKeys(t *testing.T) {
 	assert.Equal(t, "original", defaultConfig.Backends[0].Connection["custom.key"])
 	assert.Equal(t, map[string]interface{}{"region": "default-region", "timeout": 30},
 		defaultConfig.Backends[0].Connection["options"])
+}
+
+func TestLoadBackendsInheritsPath(t *testing.T) {
+	for _, tc := range []struct {
+		name, override, path string
+		enabled              bool
+	}{
+		{name: "omitted path inherits default", path: "/default/path", enabled: true},
+		{name: "supplied path overrides default", override: "      path: /environment/path\n", path: "/environment/path", enabled: true},
+		{name: "explicit empty path overrides default", override: "      path: \"\"\n    enabled: false\n", path: "", enabled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			defaults := `backends:
+  - name: astro
+    type: astro
+    enabled: true
+    connection:
+      path: /default/path
+      api_token: default-token
+`
+			environment := `backends:
+  - name: astro
+    type: astro
+    connection:
+      api_token: production-token
+` + tc.override
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "default.yaml"), []byte(defaults), 0600))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "production.yaml"), []byte(environment), 0600))
+			var cfg AppConfig
+			require.NoError(t, NewConfig(NewOptions("yaml", dir, "default")).Load("production", &cfg))
+			assert.Equal(t, []Backend{{
+				Name: "astro", Type: "astro", Enabled: tc.enabled,
+				Connection: map[string]interface{}{"path": tc.path, "api_token": "production-token"},
+			}}, cfg.Backends)
+		})
+	}
 }
