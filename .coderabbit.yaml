@@ -1,0 +1,328 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# Review language
+language: en-US
+
+# Global tone for all review comments
+# Max 250 chars. Style/formatting is handled by golangci-lint - skip those.
+tone_instructions: >
+  Concise, direct. Focus on correctness, security, and K8s operator patterns.
+  Challenge bad patterns. Flag scope creep. Skip style - linter handles it.
+
+# Opt into beta features as they become available
+early_access: true
+
+reviews:
+  # Balanced review - focuses on bugs/security/logic, skips style nitpicks
+  profile: chill
+  # Comment only - do not block PRs with change requests
+  request_changes_workflow: false
+  # Add a summary comment at the top of each PR
+  high_level_summary: true
+  # No poem in the summary
+  poem: false
+  # Collapse the file walkthrough to reduce PR comment noise
+  collapse_walkthrough: true
+  # Do not generate sequence diagrams
+  sequence_diagrams: false
+  # Show a table of changed files with descriptions
+  changed_files_summary: true
+
+  # Skip reviewing generated, vendored, and binary files
+  path_filters:
+    - "!vendor/**"
+    - "!**/*_generated*.go"
+    - "!**/zz_generated.deepcopy.go"
+    - "!**/mocks/*_mock.go"
+    - "!go.sum"
+    - "!config/crd/bases/**"
+
+  # Per-path review instructions - CodeRabbit applies these when reviewing matching files
+  path_instructions:
+    # CRD type definitions - check kubebuilder markers and type conventions
+    - path: "api/v1alpha1/**/*.go"
+      instructions: |
+        Review for Kubernetes API type conventions:
+        - Spec struct, Status struct with Conditions []metav1.Condition and LastAppliedGeneration int64
+        - CR struct with kubebuilder markers: +kubebuilder:object:root=true, +kubebuilder:subresource:status
+        - +kubebuilder:printcolumn for Status and Message using the condition type
+        - JSON tags must use camelCase. Optional fields must be pointer types with +optional marker.
+        - UpdateStatus() and SetWaiting() methods on CR struct
+        - Condition type constant defined (e.g. MyResourceCondition = "MyResourceReady")
+        - init() with SchemeBuilder.Register
+        - Do NOT review zz_generated.deepcopy.go
+
+    # Controller reconcilers - check operator patterns and error handling
+    - path: "internal/controller/**/*.go"
+      instructions: |
+        Review for controller-runtime and operator patterns.
+        Reference: kubernetes-sigs/cluster-api, cert-manager.
+        Challenge patterns that contradict best practices even if
+        they exist in this codebase. Much of this package logs an error and
+        then also returns it - new code should do one or the other.
+        - Reconciler struct embeds client.Client with Scheme *runtime.Scheme
+        - SetupWithManager uses GenerationChangedPredicate{} on the primary resource
+        - Status updates go through r.Status().Update(ctx, obj). Any r.Update that
+          refreshes the object discards status fields set before it - set them after.
+        - Errors must be wrapped with context: fmt.Errorf("creating X for %s: %w", name, err)
+        - Never ignore errors with _ =. Never return both error AND Requeue: true.
+        - Handle errors once: either log OR return, never both (double-logging creates confusing logs)
+        - RBAC markers are namespace-scoped: namespace=usernaut
+        - Import API types with the existing alias usernautdevv1alpha1 - do not add a third spelling
+        - Use logger.Logger(ctx) (logrus) - the project convention. log.FromContext
+          appears only in the periodic-tasks runnable.
+        - Structured key-value pairs in log calls, never fmt.Sprintf in messages
+        - Variable names must be descriptive - no single-letter vars
+          except i/j in loops, method receivers, ctx/err in tiny scopes
+        - Name K8s objects by kind: crawlerDeployment, processorPod - not dep or p
+        - Reconcilers must be idempotent and level-triggered (react to state, not events)
+
+    # Periodic background jobs - check scheduling and partial-failure handling
+    - path: "internal/controller/periodicjobs/**/*.go"
+      instructions: |
+        Review scheduled background jobs:
+        - Implement the PeriodicTask interface: GetName, GetInterval, Run(ctx)
+        - GetInterval must fall back to a documented default when config is
+          missing or unparseable - never panic or return zero accidentally
+        - Run executes on a ticker goroutine: honour ctx cancellation and never block forever
+        - Run must tolerate partial failure - collect per-item errors, keep going,
+          return an aggregate. One bad user must not abort the whole sweep.
+        - Jobs share the cache mutex with GroupReconciler: take the narrowest scope
+          needed and never hold the lock across network calls
+        - Destructive actions (removing users from backends) need an exclusion-list
+          check first and a log line naming the user and the backend
+        - Jobs must be safe to run repeatedly and on every replica restart
+
+    # HTTP API - check input validation, auth, and PII handling
+    - path: "internal/httpapi/**/*.go"
+      instructions: |
+        Review the Gin REST API:
+        - Validate and sanitise every path/query param before it reaches the store.
+          Raw input must never become a cache key or a glob pattern.
+        - New routes must be registered behind the auth middleware unless they are
+          deliberately public - if public, say why in a comment
+        - Never return raw cache, LDAP or backend errors to clients: log the detail,
+          respond with a generic message
+        - Mask emails and other PII with logger.MaskEmail before logging
+        - Handlers use c.Request.Context(), never context.Background()
+        - Responses use explicit structs with json tags; reserve gin.H for errors
+
+    # Application wiring - check startup ordering and dependency injection
+    - path: "cmd/**/*.go"
+      instructions: |
+        Review application wiring and startup:
+        - Fail fast: any setup error exits non-zero with an actionable message.
+          No partial startup, no degraded mode that hides a misconfiguration.
+        - Shared dependencies (cache, store, LDAP conn, cache mutex) are built once
+          and injected into controllers - do not add package-level singletons
+        - Startup fan-out across backends uses errgroup and propagates the first error
+        - Goroutines launched here need an owning context and a documented lifecycle.
+          A detached context must carry a comment explaining why.
+        - New flags need defaults and help text; new env vars must be documented
+          in DEVELOPMENT.md
+
+    # Backend clients - check the Client interface contract and API hygiene
+    - path: "pkg/clients/**/*.go"
+      instructions: |
+        Review backend client implementations (Fivetran, GitLab, Snowflake, Rover, Preset, Astro):
+        - Must implement the full clients.Client interface and be registered in the
+          factory switch in pkg/clients/client.go
+        - Follow the existing layout: client.go, types.go, users.go, teams.go, team_membership.go
+        - Prefer an official or well-maintained SDK over a hand-rolled HTTP client.
+          If hand-rolled, use pkg/request/httpclient so retries, circuit breaking
+          and tracing stay consistent across backends.
+        - Paginate fully - never assume a single page of users or teams
+        - Pass ctx to every call and respect cancellation between pages
+        - Batch bulk membership add/remove instead of one request per user
+        - Unsupported operations must be explicit no-ops with a comment explaining why
+          (e.g. Rover is the LDAP, so CreateUser is a no-op) - never silent failures
+        - Convert backend payloads to pkg/common/structs types in types.go, not inline
+        - Read and write paths must agree on member/resource types - flag asymmetry
+          where a field is recognised when reading but hardcoded when writing
+        - Flag hardcoded URLs, tokens, org IDs or account names - these belong in config
+
+    # LDAP client - injection-sensitive, check escaping and error semantics
+    - path: "pkg/clients/ldap/**/*.go"
+      instructions: |
+        Review LDAP code with extra care - this is injection-sensitive:
+        - Escape values inserted into filters with ldap.EscapeFilter.
+          Escape values inserted into DN components with ldap.EscapeDN.
+        - Filter keys must be validated against the allowed set, never taken raw from a CR
+        - Recursive query building must enforce the MaxLDAPQueryDepth limit
+        - Recursive expansion (manager trees, nested queries) needs a visited set to
+          break cycles
+        - Bulk lookups must batch into chunked OR-filters, not one search per user
+        - Distinguish ErrNoUserFound from transport/timeout errors. Callers treat the
+          former as "user is gone" and offboard them, so conflating the two can
+          wrongly revoke access during an LDAP outage.
+        - Connections are long-lived and reconnected lazily - handle IsClosing and nil conns
+
+    # Cache and store layer - key construction, the caller-locks contract, driver parity
+    - path: "pkg/{cache,store}/**/*.go"
+      instructions: |
+        Review the cache and store layer:
+        - Build keys with the store's prefix helpers - never concatenate keys at call sites
+        - The store does NOT lock. Read-modify-write sequences are the caller's
+          responsibility and that must be stated in the method doc comment.
+        - A missing key returns a zero value and nil error, not an error - callers rely on this
+        - Keep JSON (de)serialisation inside the store so callers never handle raw bytes
+        - New sub-stores need an interface in interfaces.go, wiring in store.go, and a
+          compile-time var _ Interface = (*Impl)(nil) assertion
+        - Pattern lookups are glob matches that may reach user input - make the
+          caller's escaping obligation explicit
+        - redis and inmemory drivers must behave identically for missing keys, TTLs
+          and pattern scans - flag any divergence
+        - Use SCAN semantics for pattern lookups against Redis, never KEYS
+
+    # Configuration - check secret indirection and fail-fast validation
+    - path: "pkg/config/**/*.go"
+      instructions: |
+        Review configuration loading:
+        - Secrets are referenced as 'file|/path' or 'env|VAR' and resolved by
+          SubstituteConfigValues. Never add a field intended to hold a literal secret.
+        - New config fields need a yaml tag, a default or example in
+          appconfig/default.yaml, and documentation in DEVELOPMENT.md
+        - Validate at load time and fail fast with a message naming the offending field
+        - Remote config fetches must enforce scheme allow-listing, timeouts and size limits
+        - Never log resolved config values - they contain credentials
+
+    # Shared HTTP client - check resilience settings and response handling
+    - path: "pkg/request/**/*.go"
+      instructions: |
+        Review the shared HTTP client:
+        - Timeouts, retries, circuit-breaker thresholds and pool sizes come from
+          config - never hardcoded
+        - Response bodies must always be closed and read with a size limit
+        - Never log request/response bodies, tokens or Authorization headers
+        - Non-2xx responses must surface the status code in the returned error
+        - Retry only idempotent operations or genuinely transient failures
+
+    # Tests - unit tests live next to the code; test/ holds e2e and helpers
+    - path: "**/*_test.go"
+      instructions: |
+        Review tests (unit tests are colocated with the package they cover):
+        - Table-driven with descriptive case names
+        - Cover failure paths, not just the happy path - error branches, empty
+          inputs, partial failures and cancellation
+        - Assert specific errors with errors.Is/errors.As or exact messages,
+          never just err != nil
+        - Use the generated gomock mocks (make mockgen) for LDAP and backend
+          clients - do not hand-roll fakes that silently drift from the interface
+        - miniredis for cache-backed tests; envtest for anything touching the API server
+        - No real network calls, no time.Sleep for synchronisation, no shared
+          mutable global state between tests
+        - Every bug fix needs a regression test that fails without the fix
+        - Dot imports of ginkgo/v2 and gomega are allowed in this project
+        - Do NOT review generated mocks under **/mocks/
+
+    # Container images - check for security and layer efficiency
+    - path: "Dockerfile*"
+      instructions: |
+        Review Dockerfiles for:
+        - Multi-stage builds with minimal final image
+        - No secrets or credentials in build args or COPY
+        - Proper COPY ordering for layer caching (go.mod/go.sum before source)
+
+    # CI pipelines - check for security and minimal permissions
+    - path: ".github/workflows/**"
+      instructions: |
+        Review GitHub Actions workflows for:
+        - Pinned action versions (prefer SHA over mutable tags)
+        - Minimal permissions (contents: read where possible)
+        - No secrets exposed in logs or echo statements
+
+    # Documentation - check it stays in sync with the code
+    - path: "**/*.md"
+      instructions: |
+        Review documentation changes:
+        - Docs must match the code in the same PR. Flag drift in file paths,
+          flags, env vars, config keys, CR field names and defaults.
+        - New features, config keys and env vars belong in DEVELOPMENT.md
+        - Keep README.md high level; implementation detail goes in DEVELOPMENT.md
+        - No internal hostnames, tokens, or customer-identifying data in examples
+
+    # Global Go rules - applied to every .go file in the repo
+    - path: "**/*.go"
+      instructions: |
+        General Go review - apply to all Go files.
+        This code is reviewed by humans. Flag missing comments on
+        non-obvious decisions, branches, fallbacks, retries, timeouts,
+        and workarounds. Every choice should have a comment explaining
+        the intent so a future reader understands without asking.
+        - Every error return must be checked. No _ = foo() for error-returning functions.
+        - Always check if err != nil - never use if err == nil as the primary branch. Error path first.
+        - Wrap errors with context using %w: fmt.Errorf("doing X: %w", err)
+        - Handle errors once: either log OR return, never both.
+        - Use errors.Is/errors.As for error matching, never string comparison.
+        - Variable names must be descriptive. No single-letter vars
+          except loop indices and tiny-scope ctx/err.
+        - Acronyms all-caps: ID, HTTP, URL, API.
+        - Exported types and functions need a doc comment starting with the identifier name.
+        - Structured logging with key-value pairs, never fmt.Sprintf in log messages.
+        - No fmt.Println or global loggers.
+        - Flag hardcoded secrets, API keys, tokens, internal URLs, or company-specific
+          information. Emails and other PII must be masked before reaching a log sink.
+        - pkg/ is reusable library code: it must not import internal/ or controller-runtime.
+          api/v1alpha1 types are the only allowed Kubernetes dependency there.
+        - Changes must have accompanying tests. Bug fixes need regression tests.
+        - Do not comment on import ordering, line length, or formatting - golangci-lint handles that.
+
+  # Linting tools CodeRabbit runs on PRs
+  tools:
+    # Go linter - uses project's .golangci.yml config
+    golangci-lint:
+      enabled: true
+      config_file: .golangci.yml
+    # YAML linter
+    yamllint:
+      enabled: true
+    # Dockerfile linter
+    hadolint:
+      enabled: true
+    # GitHub Actions workflow linter
+    actionlint:
+      enabled: true
+    # Secret scanner - detects leaked credentials
+    gitleaks:
+      enabled: true
+    # Makefile linter
+    checkmake:
+      enabled: true
+    # Shell script linter
+    shellcheck:
+      enabled: true
+
+  # Auto-review settings - when CodeRabbit reviews PRs automatically
+  auto_review:
+    # Enable automatic reviews on new PRs
+    enabled: true
+    # Also review incremental pushes to open PRs
+    auto_incremental_review: true
+    # Do not review draft PRs
+    drafts: false
+    # Only review PRs targeting these branches (regex; main is the default branch)
+    base_branches:
+      - main
+      - "release-.*"
+    # Skip reviewing PRs with these keywords in the title
+    ignore_title_keywords:
+      - wip
+      - draft
+      - do-not-merge
+      - "[skip review]"
+
+# Enable chat replies to @coderabbitai mentions in PR comments
+chat:
+  auto_reply: true
+
+knowledge_base:
+  # Learn from dismissed/accepted comments over time
+  learnings:
+    scope: auto
+  # Use project docs as review guidelines
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/.claude/CLAUDE.md"
+      - "**/.claude/rules/*.md"
+      - "**/CONTRIBUTING.md"
