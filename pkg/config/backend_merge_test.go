@@ -185,7 +185,10 @@ func TestMergeBackendsDoesNotMutateInputs(t *testing.T) {
 	assert.Equal(t, "/default", connection["path"])
 	connection["options"] = map[string]interface{}{"timeout": 99}
 	assert.Equal(t, true, defaults[0]["enabled"])
-	assert.Equal(t, map[string]interface{}{"path": "/default", "options": map[string]interface{}{"timeout": 30}}, defaults[0]["connection"])
+	assert.Equal(t, map[string]interface{}{
+		"path":    "/default",
+		"options": map[string]interface{}{"timeout": 30},
+	}, defaults[0]["connection"])
 	assert.Equal(t, map[string]interface{}{"options": map[string]interface{}{"timeout": 0}}, environment[0]["connection"])
 }
 
@@ -235,9 +238,23 @@ func TestLoadBackendsInheritsPath(t *testing.T) {
 		name, override, path string
 		enabled              bool
 	}{
-		{name: "omitted path inherits default", path: "/default/path", enabled: true},
-		{name: "supplied path overrides default", override: "      path: /environment/path\n", path: "/environment/path", enabled: true},
-		{name: "explicit empty path overrides default", override: "      path: \"\"\n    enabled: false\n", path: "", enabled: false},
+		{
+			name:    "omitted path inherits default",
+			path:    "/default/path",
+			enabled: true,
+		},
+		{
+			name:     "supplied path overrides default",
+			override: "      path: /environment/path\n",
+			path:     "/environment/path",
+			enabled:  true,
+		},
+		{
+			name:     "explicit empty path overrides default",
+			override: "      path: \"\"\n    enabled: false\n",
+			path:     "",
+			enabled:  false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
