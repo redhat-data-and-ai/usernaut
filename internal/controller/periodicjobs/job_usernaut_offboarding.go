@@ -22,7 +22,6 @@ package periodicjobs
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -31,7 +30,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
-	"github.com/redhat-data-and-ai/usernaut/pkg/clients/preset"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -596,36 +594,9 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 				"userKey":   userKey,
 				"backend":   backendKey,
 				"type":      backendType,
-				"userEmail": userEmail,
+				"userEmail": logger.MaskEmail(userEmail),
 			}).Info("User not found in backend, skipping")
 			continue
-		}
-
-		if lookupclient, ok := client.(interface {
-			FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
-		}); ok {
-			found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userEmail)
-			// The account is already gone. This backend is complete, so the cache
-			// can be removed once every other backend succeeds.
-			if stderrors.Is(lookupErr, preset.ErrUserNotFound) {
-				uoj.logger.WithField("userKey", userKey).
-					WithField("backend", backendKey).
-					WithField("userEmail", logger.MaskEmail(userEmail)).
-					Info("SCIM user does not exist, treating deletion as complete")
-				continue
-			}
-			// A lookup error means the live ID is unknown. Deletion is deferred:
-			// keep the saved ID, skip DeleteUser, and retain the cache entry for the next run.
-			if lookupErr != nil {
-				errors = append(errors, fmt.Sprintf("backend %s: %v", backendKey, lookupErr))
-				uoj.logger.WithError(lookupErr).Error("error fetching user details by email")
-				continue
-			}
-			if found != nil {
-				if liveID := strings.TrimSpace(found.GetID()); liveID != "" {
-					userIDStr = liveID
-				}
-			}
 		}
 
 		// Proceed with offboarding for all other backends

@@ -122,6 +122,18 @@ func (pc *PresetClient) CreateTeam(ctx context.Context, team *structs.Team) (*st
 		return nil, fmt.Errorf("team name is required for Preset group creation")
 	}
 
+	existing, err := pc.findGroupByDisplayName(ctx, team.Name)
+	if err == nil {
+		log.WithFields(logrus.Fields{
+			"team_id": existing.ID,
+		}).Info("SCIM group already exists in Preset")
+		return existing, nil
+	}
+	if !errors.Is(err, errGroupNotFound) {
+		log.WithError(err).Error("failed to check if SCIM group exists in Preset")
+		return nil, fmt.Errorf("failed to check if group exists: %w", err)
+	}
+
 	reqURL := fmt.Sprintf("%s/Groups", pc.scimURL())
 	reqBody := scimGroupCreateRequest{
 		Schemas:     []string{scimGroupSchema},

@@ -151,13 +151,13 @@ func userDetailsFromResponse(u users.UserDetailsData) *structs.User {
 	}
 }
 
-func (fc *FivetranClient) FetchUserIDListByEmail(_ context.Context, users []*structs.Member) ([]string, error) {
+func (fc *FivetranClient) FetchUserIDListByEmail(_ context.Context, users []*structs.User) ([]string, error) {
 	liveIDList := make([]string, 0, len(users))
 	for _, user := range users {
 		if user == nil {
 			continue
 		}
-		id := strings.TrimSpace(user.GetUserID())
+		id := strings.TrimSpace(user.GetID())
 		if id == "" {
 			continue
 		}

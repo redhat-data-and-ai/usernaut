@@ -184,7 +184,7 @@ func (mr *MockClientMockRecorder) FetchUserDetails(ctx, userID interface{}) *gom
 }
 
 // FetchUserIDListByEmail mocks base method.
-func (m *MockClient) FetchUserIDListByEmail(ctx context.Context, users []*structs.Member) ([]string, error) {
+func (m *MockClient) FetchUserIDListByEmail(ctx context.Context, users []*structs.User) ([]string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchUserIDListByEmail", ctx, users)
 	ret0, _ := ret[0].([]string)

@@ -528,11 +528,11 @@ func testPoolConfig() httpclient.ConnectionPoolConfig {
 }
 
 func TestFetchUserIDListByEmailKeepsPairID(t *testing.T) {
-	ids, err := (&AstroClient{}).FetchUserIDListByEmail(context.Background(), []*structs.Member{
-		{UserID: " user-1 ", Email: "a@redhat.com"},
+	ids, err := (&AstroClient{}).FetchUserIDListByEmail(context.Background(), []*structs.User{
+		{ID: " user-1 ", Email: "a@redhat.com"},
 		nil,
-		{UserID: "   ", Email: "blank@redhat.com"},
-		{UserID: "user-2", Email: "b@redhat.com"},
+		{ID: "   ", Email: "blank@redhat.com"},
+		{ID: "user-2", Email: "b@redhat.com"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user-1", "user-2"}, ids)

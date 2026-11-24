@@ -20,7 +20,6 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/clients/ldap"
-	"github.com/redhat-data-and-ai/usernaut/pkg/clients/preset"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/config"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
@@ -712,32 +711,13 @@ offboardUserExclusionListConfigPath: "` + server.URL + `/config/exclusion_list.y
 	})
 }
 
-// emailLookupMock adds the Preset email search on top of the generated backend mock.
-type emailLookupMock struct {
-	*clientmocks.MockClient
-	found *structs.User
-	err   error
-	email string
-	calls int
-}
-
-func (m *emailLookupMock) FetchUserDetailsByEmail(_ context.Context, email string) (*structs.User, error) {
-	m.calls++
-	m.email = email
-	return m.found, m.err
-}
-
-func TestUserOffboardingJobPresetEmailFallback(t *testing.T) {
+func TestUserOffboardingJobPresetDeletesCachedID(t *testing.T) {
 	defer setupTestConfig(t)()
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
 	mockBackendClient := clientmocks.NewMockClient(ctrl)
-	presetClient := &emailLookupMock{
-		MockClient: mockBackendClient,
-		found:      &structs.User{ID: "oidc|live"},
-	}
 
 	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
 	require.NoError(t, err)
@@ -748,19 +728,17 @@ func TestUserOffboardingJobPresetEmailFallback(t *testing.T) {
 	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
 
 	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
-		"preset_preset": presetClient,
+		"preset_preset": mockBackendClient,
 	})
 
 	mockLDAPClient.EXPECT().
 		GetUserLDAPDataByEmail(gomock.Any(), email).
 		Return(nil, ldap.ErrNoUserFound)
 	mockBackendClient.EXPECT().
-		DeleteUser(gomock.Any(), &structs.User{ID: "oidc|live", Email: email}).
+		DeleteUser(gomock.Any(), &structs.User{ID: "samlp|old", Email: email}).
 		Return(nil)
 
 	require.NoError(t, job.Run(ctx))
-	assert.Equal(t, 1, presetClient.calls)
-	assert.Equal(t, email, presetClient.email)
 }
 
 func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
@@ -770,31 +748,16 @@ func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
 		name       string
 		backendKey string
 		cachedID   string
-		liveID     string
-		deleteID   string
-		withLookup bool
 	}{
 		{
-			name:       "preset scim id changed",
+			name:       "preset deletes cached scim id",
 			backendKey: "preset_preset",
 			cachedID:   "samlp|old",
-			liveID:     "oidc|new",
-			deleteID:   "oidc|new",
-			withLookup: true,
-		},
-		{
-			name:       "preset scim id unchanged",
-			backendKey: "preset_preset",
-			cachedID:   "samlp|old",
-			liveID:     "samlp|old",
-			deleteID:   "samlp|old",
-			withLookup: true,
 		},
 		{
 			name:       "other backend id unchanged",
 			backendKey: "snowflake_snowflake",
 			cachedID:   "ruagrawa",
-			deleteID:   "ruagrawa",
 		},
 	}
 
@@ -803,16 +766,6 @@ func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
 			mockBackendClient := clientmocks.NewMockClient(ctrl)
-
-			var backend clients.Client = mockBackendClient
-			var presetClient *emailLookupMock
-			if tt.withLookup {
-				presetClient = &emailLookupMock{
-					MockClient: mockBackendClient,
-					found:      &structs.User{ID: tt.liveID},
-				}
-				backend = presetClient
-			}
 
 			inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
 			require.NoError(t, err)
@@ -823,21 +776,17 @@ func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
 			require.NoError(t, dataStore.User.SetBackend(ctx, email, tt.backendKey, tt.cachedID))
 
 			job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
-				tt.backendKey: backend,
+				tt.backendKey: mockBackendClient,
 			})
 
 			mockLDAPClient.EXPECT().
 				GetUserLDAPDataByEmail(gomock.Any(), email).
 				Return(nil, ldap.ErrNoUserFound)
 			mockBackendClient.EXPECT().
-				DeleteUser(gomock.Any(), &structs.User{ID: tt.deleteID, Email: email}).
+				DeleteUser(gomock.Any(), &structs.User{ID: tt.cachedID, Email: email}).
 				Return(nil)
 
 			require.NoError(t, job.Run(ctx))
-			if tt.withLookup {
-				assert.Equal(t, 1, presetClient.calls)
-				assert.Equal(t, email, presetClient.email)
-			}
 			exists, err := dataStore.User.Exists(ctx, email)
 			require.NoError(t, err)
 			assert.False(t, exists)
@@ -851,10 +800,6 @@ func TestOffboardingPresetUserAlreadyAbsent(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
 	mockBackendClient := clientmocks.NewMockClient(ctrl)
-	presetClient := &emailLookupMock{
-		MockClient: mockBackendClient,
-		err:        preset.ErrUserNotFound,
-	}
 
 	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
 	require.NoError(t, err)
@@ -865,30 +810,28 @@ func TestOffboardingPresetUserAlreadyAbsent(t *testing.T) {
 	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
 
 	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
-		"preset_preset": presetClient,
+		"preset_preset": mockBackendClient,
 	})
 
 	mockLDAPClient.EXPECT().
 		GetUserLDAPDataByEmail(gomock.Any(), email).
 		Return(nil, ldap.ErrNoUserFound)
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), &structs.User{ID: "samlp|old", Email: email}).
+		Return(nil)
 
 	require.NoError(t, job.Run(ctx))
-	assert.Equal(t, 1, presetClient.calls)
 	exists, err := dataStore.User.Exists(ctx, email)
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
 
-func TestOffboardingPresetLookupFailureRetainsCache(t *testing.T) {
+func TestOffboardingPresetDeleteFailureRetainsCache(t *testing.T) {
 	defer setupTestConfig(t)()
 
 	ctrl := gomock.NewController(t)
 	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
 	mockBackendClient := clientmocks.NewMockClient(ctrl)
-	presetClient := &emailLookupMock{
-		MockClient: mockBackendClient,
-		err:        errors.New("preset unavailable"),
-	}
 
 	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
 	require.NoError(t, err)
@@ -899,12 +842,15 @@ func TestOffboardingPresetLookupFailureRetainsCache(t *testing.T) {
 	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
 
 	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
-		"preset_preset": presetClient,
+		"preset_preset": mockBackendClient,
 	})
 
 	mockLDAPClient.EXPECT().
 		GetUserLDAPDataByEmail(gomock.Any(), email).
 		Return(nil, ldap.ErrNoUserFound)
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), &structs.User{ID: "samlp|old", Email: email}).
+		Return(errors.New("preset unavailable"))
 
 	require.Error(t, job.Run(ctx))
 	exists, err := dataStore.User.Exists(ctx, email)

@@ -948,16 +948,15 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	existingTeamMembers map[string]*structs.User,
 	backendName, backendType string,
 	backendLogger *logrus.Entry,
-	allLdapUserData map[string]*structs.LDAPUser) ([]*structs.Member, []string, error) {
+	allLdapUserData map[string]*structs.LDAPUser) ([]*structs.User, []string, error) {
 
-	usersToSync := make(map[string]*structs.Member, 0)
-	usersToAdd := make([]*structs.Member, 0)
+	usersToSync := make(map[string]*structs.User, 0)
+	usersToAdd := make([]*structs.User, 0)
 	usersToRemove := make([]string, 0)
 
 	backendKey := backendName + "_" + backendType
-	// Replace this backend's cached user ID when the live team member ID differs.
-	// An email with no ID for backendKey is left unchanged so SetBackend cannot
-	// create a cache entry for a user Usernaut does not manage.
+	// Store this backend's live team member ID when it differs from the cached ID.
+	// A missing backend key is created for the team member.
 	for _, member := range existingTeamMembers {
 		email := strings.ToLower(member.GetEmail())
 		updatedID := strings.ToLower(member.GetID())
@@ -970,7 +969,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 		if cacheErr == nil {
 			previousID = backends[backendKey]
 		}
-		if cacheErr == nil && previousID != "" && previousID != updatedID {
+		if cacheErr == nil && previousID != updatedID {
 			cacheErr = r.Store.User.SetBackend(ctx, email, backendKey, updatedID)
 		}
 		r.CacheMutex.Unlock()
@@ -1015,9 +1014,9 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			return nil, nil, errors.New("user ID not found in cache")
 		}
 
-		usersToSync[userID] = &structs.Member{
-			UserID: userID,
-			Email:  userDetails.GetEmail(),
+		usersToSync[userID] = &structs.User{
+			ID:    userID,
+			Email: userDetails.GetEmail(),
 		}
 
 	}
@@ -1035,7 +1034,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 		if member == nil {
 			continue
 		}
-		if _, exists := existingTeamMembers[member.GetUserID()]; !exists {
+		if _, exists := existingTeamMembers[member.GetID()]; !exists {
 			usersToAdd = append(usersToAdd, member)
 		}
 	}

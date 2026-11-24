@@ -49,7 +49,7 @@ type Client interface {
 	// Drop User from the backend
 	DeleteUser(ctx context.Context, u *structs.User) error
 	// Fetches the list of user IDs by email
-	FetchUserIDListByEmail(ctx context.Context, users []*structs.Member) ([]string, error)
+	FetchUserIDListByEmail(ctx context.Context, users []*structs.User) ([]string, error)
 
 	// Fetches all the teams on the backend
 	FetchAllTeams(ctx context.Context) (map[string]structs.Team, error)

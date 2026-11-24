@@ -67,17 +67,3 @@ func (u *LDAPUser) GetSN() string {
 func (u *LDAPUser) GetUID() string {
 	return u.UID
 }
-
-// Member is a pair of user ID and email
-type Member struct {
-	UserID string
-	Email  string
-}
-
-func (u *Member) GetUserID() string {
-	return u.UserID
-}
-
-func (u *Member) GetEmail() string {
-	return u.Email
-}

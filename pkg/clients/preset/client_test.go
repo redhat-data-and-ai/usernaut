@@ -576,16 +576,16 @@ func TestFetchUserIDListByEmail(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	ids, err := pc.FetchUserIDListByEmail(context.Background(), []*structs.Member{
-		{UserID: "samlp|old", Email: "ruagrawa@redhat.com"},
+	ids, err := pc.FetchUserIDListByEmail(context.Background(), []*structs.User{
+		{ID: "samlp|old", Email: "ruagrawa@redhat.com"},
 		nil,
-		{UserID: "same-id", Email: "same@redhat.com"},
+		{ID: "same-id", Email: "same@redhat.com"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"oidc|new", "same-id"}, ids)
 
-	_, err = pc.FetchUserIDListByEmail(context.Background(), []*structs.Member{
-		{UserID: "cached-id", Email: "missing@redhat.com"},
+	_, err = pc.FetchUserIDListByEmail(context.Background(), []*structs.User{
+		{ID: "cached-id", Email: "missing@redhat.com"},
 	})
 	require.ErrorIs(t, err, ErrUserNotFound)
 }

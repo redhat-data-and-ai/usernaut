@@ -123,13 +123,13 @@ func TestProcessUsers_memberEmailReplacesCachedID(t *testing.T) {
 	assert.Equal(t, "200", cached["gitlab_gitlab"])
 }
 
-func addedIDs(pairs []*structs.Member) []string {
+func addedIDs(pairs []*structs.User) []string {
 	ids := make([]string, 0, len(pairs))
 	for _, pair := range pairs {
 		if pair == nil {
 			continue
 		}
-		ids = append(ids, pair.GetUserID())
+		ids = append(ids, pair.GetID())
 	}
 	return ids
 }
@@ -334,7 +334,7 @@ func TestProcessUsers_lowerEmailMatchesCachedKey(t *testing.T) {
 	assert.False(t, exists)
 }
 
-func TestProcessUsers_missingBackendKeyDoesNotCreateCache(t *testing.T) {
+func TestProcessUsers_missingBackendKeyStoresLiveID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
 	const email = "ruagrawa@redhat.com"
@@ -352,5 +352,74 @@ func TestProcessUsers_missingBackendKeyDoesNotCreateCache(t *testing.T) {
 	cached, err := r.Store.User.GetBackends(ctx, email)
 	require.NoError(t, err)
 	assert.Equal(t, "100", cached["gitlab_gitlab"])
-	assert.Empty(t, cached[presetBackendKey])
+	assert.Equal(t, "oidc|live", cached[presetBackendKey])
+}
+
+func TestProcessUsers_groupMembershipScenarios(t *testing.T) {
+	const email = "ruagrawa@redhat.com"
+	const oldID = "samlp|old"
+	const liveID = "oidc|new"
+
+	tests := []struct {
+		name       string
+		onTeam     bool
+		inGroup    bool
+		cachedID   string
+		memberID   string
+		wantAdd    []string
+		wantRemove []string
+		wantCache  string
+	}{
+		{
+			name: "on team, not in group, scim id changed", onTeam: true, inGroup: false,
+			cachedID: oldID, memberID: liveID, wantRemove: []string{liveID}, wantCache: liveID,
+		},
+		{
+			name: "on team, in group, scim id changed", onTeam: true, inGroup: true,
+			cachedID: oldID, memberID: liveID, wantCache: liveID,
+		},
+		{
+			name: "not on team, in group, scim id changed", onTeam: false, inGroup: true,
+			cachedID: oldID, memberID: liveID, wantAdd: []string{oldID}, wantCache: oldID,
+		},
+		{
+			name: "on team, not in group, scim id unchanged", onTeam: true, inGroup: false,
+			cachedID: liveID, memberID: liveID, wantRemove: []string{liveID}, wantCache: liveID,
+		},
+		{
+			name: "on team, in group, scim id unchanged", onTeam: true, inGroup: true,
+			cachedID: liveID, memberID: liveID, wantCache: liveID,
+		},
+		{
+			name: "not on team, in group, scim id unchanged", onTeam: false, inGroup: true,
+			cachedID: liveID, memberID: liveID, wantAdd: []string{liveID}, wantCache: liveID,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newPresetReconciler(t)
+			ctx := t.Context()
+			require.NoError(t, r.Store.User.SetBackend(ctx, email, presetBackendKey, tt.cachedID))
+
+			members := map[string]*structs.User{}
+			if tt.onTeam {
+				members[tt.memberID] = &structs.User{ID: tt.memberID, Email: email}
+			}
+			var groupUsers []string
+			if tt.inGroup {
+				groupUsers = []string{"ruagrawa"}
+			}
+
+			add, remove, err := r.processUsers(ctx, groupUsers, members, "preset", "preset",
+				logrus.NewEntry(logrus.New()), presetLDAPUser())
+			require.NoError(t, err)
+			assertIDs(t, tt.wantAdd, addedIDs(add))
+			assertIDs(t, tt.wantRemove, remove)
+
+			cached, err := r.Store.User.GetBackends(ctx, email)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCache, cached[presetBackendKey])
+		})
+	}
 }

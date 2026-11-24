@@ -265,7 +265,7 @@ func (pc *PresetClient) FetchUserDetailsByEmail(ctx context.Context, email strin
 	return user, nil
 }
 
-func (pc *PresetClient) FetchUserIDListByEmail(ctx context.Context, users []*structs.Member) ([]string, error) {
+func (pc *PresetClient) FetchUserIDListByEmail(ctx context.Context, users []*structs.User) ([]string, error) {
 	liveIDList := make([]string, 0, len(users))
 	for _, user := range users {
 		if user == nil {
@@ -275,7 +275,7 @@ func (pc *PresetClient) FetchUserIDListByEmail(ctx context.Context, users []*str
 		if err != nil {
 			return nil, err
 		}
-		id := strings.TrimSpace(user.GetUserID())
+		id := strings.TrimSpace(user.GetID())
 		if found != nil {
 			liveID := strings.TrimSpace(found.GetID())
 			if liveID != "" && liveID != id {
