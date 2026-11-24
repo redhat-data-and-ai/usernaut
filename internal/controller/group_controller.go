@@ -959,8 +959,8 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	// An email with no ID for backendKey is left unchanged so SetBackend cannot
 	// create a cache entry for a user Usernaut does not manage.
 	for _, member := range existingTeamMembers {
-		email := member.GetEmail()
-		updatedID := member.GetID()
+		email := strings.ToLower(member.GetEmail())
+		updatedID := strings.ToLower(member.GetID())
 		if email == "" || updatedID == "" {
 			continue
 		}

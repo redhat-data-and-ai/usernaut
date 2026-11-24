@@ -311,6 +311,29 @@ func TestProcessUsersForAllBackends(t *testing.T) {
 	}
 }
 
+func TestProcessUsers_lowerEmailMatchesCachedKey(t *testing.T) {
+	r := newPresetReconciler(t)
+	ctx := t.Context()
+	const email = "ruagrawa@redhat.com"
+	require.NoError(t, r.Store.User.SetBackend(ctx, email, presetBackendKey, "samlp|old"))
+
+	members := map[string]*structs.User{
+		"oidc|new": {ID: "oidc|new", Email: "Ruagrawa@RedHat.com"},
+	}
+	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
+		logrus.NewEntry(logrus.New()), presetLDAPUser())
+	require.NoError(t, err)
+	assert.Empty(t, add)
+	assert.Empty(t, remove)
+
+	cached, err := r.Store.User.GetBackends(ctx, email)
+	require.NoError(t, err)
+	assert.Equal(t, "oidc|new", cached[presetBackendKey])
+	exists, err := r.Store.User.Exists(ctx, "Ruagrawa@RedHat.com")
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
 func TestProcessUsers_missingBackendKeyDoesNotCreateCache(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
