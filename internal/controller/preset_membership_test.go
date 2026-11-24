@@ -310,3 +310,24 @@ func TestProcessUsersForAllBackends(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessUsers_missingBackendKeyDoesNotCreateCache(t *testing.T) {
+	r := newPresetReconciler(t)
+	ctx := t.Context()
+	const email = "ruagrawa@redhat.com"
+	require.NoError(t, r.Store.User.SetBackend(ctx, email, "gitlab_gitlab", "100"))
+
+	members := map[string]*structs.User{
+		"oidc|live": {ID: "oidc|live", Email: email},
+	}
+	add, remove, err := r.processUsers(ctx, nil, members, "preset", "preset",
+		logrus.NewEntry(logrus.New()), presetLDAPUser())
+	require.NoError(t, err)
+	assert.Empty(t, add)
+	assert.Equal(t, []string{"oidc|live"}, remove)
+
+	cached, err := r.Store.User.GetBackends(ctx, email)
+	require.NoError(t, err)
+	assert.Equal(t, "100", cached["gitlab_gitlab"])
+	assert.Empty(t, cached[presetBackendKey])
+}

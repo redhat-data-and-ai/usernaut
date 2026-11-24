@@ -19,6 +19,7 @@ package preset
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,6 +28,10 @@ import (
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
 	"github.com/sirupsen/logrus"
 )
+
+// ErrUserNotFound means a Preset SCIM query succeeded and the account is absent.
+// Deletion treats it as success. Callers that require the account still return it.
+var ErrUserNotFound = errors.New("SCIM user not found by email")
 
 // FetchAllUsers retrieves all users via SCIM and returns maps keyed by email and SCIM ID
 func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
@@ -203,6 +208,10 @@ func (pc *PresetClient) deleteUserByEmail(ctx context.Context, email string) err
 		"email":       email,
 	})
 	userDetail, err := pc.FetchUserDetailsByEmail(ctx, email)
+	if errors.Is(err, ErrUserNotFound) {
+		log.Info("SCIM user does not exist in Preset, nothing to delete")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -229,7 +238,7 @@ func (pc *PresetClient) FetchUserDetailsByEmail(ctx context.Context, email strin
 
 	email = strings.TrimSpace(email)
 	if email == "" {
-		return nil, fmt.Errorf("Email is required")
+		return nil, fmt.Errorf("email is required")
 	}
 
 	filter := fmt.Sprintf(`emails.value eq "%s"`, escapeSCIMLiteral(email))
@@ -245,7 +254,7 @@ func (pc *PresetClient) FetchUserDetailsByEmail(ctx context.Context, email strin
 	}
 	if len(scimResp.Resources) == 0 {
 		log.Warn("SCIM user not found by email")
-		return nil, fmt.Errorf("SCIM user not found by email")
+		return nil, ErrUserNotFound
 	}
 
 	user := scimUserToStruct(&scimResp.Resources[0])

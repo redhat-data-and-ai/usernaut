@@ -955,7 +955,9 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 	usersToRemove := make([]string, 0)
 
 	backendKey := backendName + "_" + backendType
-	// Refresh the cache from current team members only when their backend ID differs.
+	// Replace this backend's cached user ID when the live team member ID differs.
+	// An email with no ID for backendKey is left unchanged so SetBackend cannot
+	// create a cache entry for a user Usernaut does not manage.
 	for _, member := range existingTeamMembers {
 		email := member.GetEmail()
 		updatedID := member.GetID()
@@ -968,7 +970,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 		if cacheErr == nil {
 			previousID = backends[backendKey]
 		}
-		if cacheErr == nil && previousID != updatedID {
+		if cacheErr == nil && previousID != "" && previousID != updatedID {
 			cacheErr = r.Store.User.SetBackend(ctx, email, backendKey, updatedID)
 		}
 		r.CacheMutex.Unlock()
@@ -977,7 +979,7 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 				"error updating user details in cache from group member email")
 			return nil, nil, cacheErr
 		}
-		if previousID == updatedID {
+		if previousID == "" || previousID == updatedID {
 			continue
 		}
 		backendLogger.WithFields(logrus.Fields{

@@ -181,6 +181,33 @@ func TestDeleteNotFoundIsIdempotent(t *testing.T) {
 	assert.True(t, strings.HasPrefix(requests[2], http.MethodDelete+" "+testSCIMPath("/Users/"+liveID)))
 }
 
+func TestDeleteUser_absentByIDAndEmail(t *testing.T) {
+	const staleID = "missing-user"
+	const email = "missing@redhat.com"
+
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == testSCIMPath("/Users/"+staleID):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == testSCIMPath("/Users"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	require.NoError(t, pc.DeleteUser(context.Background(), &structs.User{ID: staleID, Email: email}))
+	assert.Equal(t, []string{
+		http.MethodDelete + " " + testSCIMPath("/Users/"+staleID),
+		http.MethodGet + " " + testSCIMPath("/Users"),
+	}, requests)
+}
+
 func TestRemoveUserFromTeam_notFoundReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPatch, r.Method)
@@ -523,7 +550,7 @@ func TestFetchUserDetailsByEmail(t *testing.T) {
 	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filter)
 
 	missing, err := pc.FetchUserDetailsByEmail(context.Background(), "missing@redhat.com")
-	require.EqualError(t, err, "SCIM user not found by email")
+	require.ErrorIs(t, err, ErrUserNotFound)
 	assert.Nil(t, missing)
 }
 
@@ -560,7 +587,7 @@ func TestFetchUserIDListByEmail(t *testing.T) {
 	_, err = pc.FetchUserIDListByEmail(context.Background(), []*structs.Member{
 		{UserID: "cached-id", Email: "missing@redhat.com"},
 	})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrUserNotFound)
 }
 
 func TestFetchAllTeams_paginates(t *testing.T) {
