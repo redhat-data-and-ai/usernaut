@@ -229,15 +229,6 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 
 // mergeBackends merges supplied fields for matching (name, type) entries.
 // Unmatched defaults retain their order; new backends are appended in file order.
-// Map fields use a shallow merge: connection.path is inherited when omitted,
-// but a supplied connection.options map replaces the default options entirely.
-// Examples for the connection map of backends with the same name and type
-// (default + environment => result, using JSON notation):
-//
-//	{"path": "/default", "token": "old"} + {"token": "new"}
-//	  => {"path": "/default", "token": "new"}
-//	{"options": {"timeout": 30, "region": "us"}} + {"options": {"timeout": 10}}
-//	  => {"options": {"timeout": 10}} // region is not inherited
 func mergeBackends(defaultBackends, envBackends []map[string]interface{}) ([]map[string]interface{}, error) {
 	var merged []map[string]interface{}
 	type identity struct{ Name, Type string }
@@ -254,23 +245,37 @@ func mergeBackends(defaultBackends, envBackends []map[string]interface{}) ([]map
 				positions[key] = index
 				merged = append(merged, nil)
 			}
-			fields := make(map[string]interface{})
-			maps.Copy(fields, merged[index])
-			for name, value := range backend {
-				if overrides, ok := value.(map[string]interface{}); ok {
-					inherited, _ := fields[name].(map[string]interface{})
-					combined := make(map[string]interface{})
-					maps.Copy(combined, inherited)
-					maps.Copy(combined, overrides)
-					fields[name] = combined
-				} else {
-					fields[name] = value
-				}
-			}
-			merged[index] = fields
+			merged[index] = mergeBackendFields(merged[index], backend)
 		}
 	}
 	return merged, nil
+}
+
+// mergeBackendFields overlays supplied fields without modifying the input maps.
+// Map fields use a shallow merge: connection.path is inherited when omitted,
+// but a supplied connection.options map replaces the default options entirely.
+// Examples for the connection map of backends with the same name and type
+// (default + environment => result, using JSON notation):
+//
+//	{"path": "/default", "token": "old"} + {"token": "new"}
+//	  => {"path": "/default", "token": "new"}
+//	{"options": {"timeout": 30, "region": "us"}} + {"options": {"timeout": 10}}
+//	  => {"options": {"timeout": 10}} // region is not inherited
+func mergeBackendFields(base, override map[string]interface{}) map[string]interface{} {
+	fields := make(map[string]interface{})
+	maps.Copy(fields, base)
+	for name, value := range override {
+		if overrides, ok := value.(map[string]interface{}); ok {
+			inherited, _ := fields[name].(map[string]interface{})
+			combined := make(map[string]interface{})
+			maps.Copy(combined, inherited)
+			maps.Copy(combined, overrides)
+			fields[name] = combined
+		} else {
+			fields[name] = value
+		}
+	}
+	return fields
 }
 
 // getConfigHTTPClient returns a shared HTTP client for config loading.
