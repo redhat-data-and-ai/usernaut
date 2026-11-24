@@ -591,9 +591,10 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 		userIDStr, exists := userData[backendKey]
 		if !exists {
 			uoj.logger.WithFields(logrus.Fields{
-				"userKey": userKey,
-				"backend": backendKey,
-				"type":    backendType,
+				"userKey":   userKey,
+				"backend":   backendKey,
+				"type":      backendType,
+				"userEmail": userEmail,
 			}).Info("User not found in backend, skipping")
 			continue
 		}
@@ -624,7 +625,7 @@ func (uoj *UserOffboardingJob) offboardUserFromAllBackends(
 			"type":          backendType,
 		}).Info("Starting user offboarding from backend")
 
-		err := client.DeleteUser(ctx, userIDStr)
+		err := client.DeleteUser(ctx, &structs.User{ID: userIDStr, Email: userEmail})
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("backend %s: %v", backendKey, err))
 			uoj.logger.WithFields(logrus.Fields{

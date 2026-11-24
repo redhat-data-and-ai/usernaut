@@ -94,17 +94,17 @@ func (mr *MockClientMockRecorder) DeleteTeamByID(ctx, teamID interface{}) *gomoc
 }
 
 // DeleteUser mocks base method.
-func (m *MockClient) DeleteUser(ctx context.Context, userID string) error {
+func (m *MockClient) DeleteUser(ctx context.Context, u *structs.User) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteUser", ctx, userID)
+	ret := m.ctrl.Call(m, "DeleteUser", ctx, u)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteUser indicates an expected call of DeleteUser.
-func (mr *MockClientMockRecorder) DeleteUser(ctx, userID interface{}) *gomock.Call {
+func (mr *MockClientMockRecorder) DeleteUser(ctx, u interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUser", reflect.TypeOf((*MockClient)(nil).DeleteUser), ctx, userID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUser", reflect.TypeOf((*MockClient)(nil).DeleteUser), ctx, u)
 }
 
 // FetchAllTeams mocks base method.
@@ -181,6 +181,21 @@ func (m *MockClient) FetchUserDetails(ctx context.Context, userID string) (*stru
 func (mr *MockClientMockRecorder) FetchUserDetails(ctx, userID interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchUserDetails", reflect.TypeOf((*MockClient)(nil).FetchUserDetails), ctx, userID)
+}
+
+// FetchUserIDListByEmail mocks base method.
+func (m *MockClient) FetchUserIDListByEmail(ctx context.Context, users []*structs.Member) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchUserIDListByEmail", ctx, users)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchUserIDListByEmail indicates an expected call of FetchUserIDListByEmail.
+func (mr *MockClientMockRecorder) FetchUserIDListByEmail(ctx, users interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchUserIDListByEmail", reflect.TypeOf((*MockClient)(nil).FetchUserIDListByEmail), ctx, users)
 }
 
 // ReconcileGroupParams mocks base method.

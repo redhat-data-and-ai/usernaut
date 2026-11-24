@@ -127,7 +127,7 @@ func TestDeleteUser_retriesOnRateLimit(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.DeleteUser(context.Background(), "user-1"))
+	require.NoError(t, pc.DeleteUser(context.Background(), &structs.User{ID: "user-1"}))
 	assert.Equal(t, 3, requestCount)
 }
 
@@ -139,20 +139,46 @@ func TestDeleteUser_rateLimitExhausted(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	err := pc.DeleteUser(context.Background(), "user-1")
+	err := pc.DeleteUser(context.Background(), &structs.User{ID: "user-1"})
 	require.Error(t, err)
 	assert.True(t, isResponseStatus(err, http.StatusTooManyRequests))
 }
 
 func TestDeleteNotFoundIsIdempotent(t *testing.T) {
+	const staleID = "missing-user"
+	const liveID = "live-user"
+	const email = "missing@redhat.com"
+
+	var requests []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodDelete, r.Method)
-		w.WriteHeader(http.StatusNotFound)
+		requests = append(requests, r.Method+" "+r.URL.RequestURI())
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == testSCIMPath("/Users/"+staleID):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == testSCIMPath("/Users"):
+			assert.Equal(t, `emails.value eq "`+email+`"`, r.URL.Query().Get("filter"))
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{
+				TotalResults: 1,
+				Resources: []scimUser{{
+					ID:     liveID,
+					Emails: []scimEmailValue{{Value: email}},
+				}},
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == testSCIMPath("/Users/"+liveID):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
 	}))
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	require.NoError(t, pc.DeleteUser(context.Background(), "missing-user"))
+	require.NoError(t, pc.DeleteUser(context.Background(), &structs.User{ID: staleID, Email: email}))
+	require.Len(t, requests, 3)
+	assert.True(t, strings.HasPrefix(requests[0], http.MethodDelete+" "+testSCIMPath("/Users/"+staleID)))
+	assert.True(t, strings.HasPrefix(requests[1], http.MethodGet+" "+testSCIMPath("/Users")+"?"))
+	assert.True(t, strings.HasPrefix(requests[2], http.MethodDelete+" "+testSCIMPath("/Users/"+liveID)))
 }
 
 func TestRemoveUserFromTeam_notFoundReturnsError(t *testing.T) {
@@ -497,8 +523,44 @@ func TestFetchUserDetailsByEmail(t *testing.T) {
 	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filter)
 
 	missing, err := pc.FetchUserDetailsByEmail(context.Background(), "missing@redhat.com")
-	require.NoError(t, err)
+	require.EqualError(t, err, "SCIM user not found by email")
 	assert.Nil(t, missing)
+}
+
+func TestFetchUserIDListByEmail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filter := r.URL.Query().Get("filter")
+		w.WriteHeader(http.StatusOK)
+		id := ""
+		switch {
+		case strings.Contains(filter, "ruagrawa@"):
+			id = "oidc|new"
+		case strings.Contains(filter, "same@"):
+			id = "same-id"
+		default:
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(scimUsersResponse{
+			TotalResults: 1,
+			Resources:    []scimUser{{ID: id, Emails: []scimEmailValue{{Value: "ignored"}}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	ids, err := pc.FetchUserIDListByEmail(context.Background(), []*structs.Member{
+		{UserID: "samlp|old", Email: "ruagrawa@redhat.com"},
+		nil,
+		{UserID: "same-id", Email: "same@redhat.com"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"oidc|new", "same-id"}, ids)
+
+	_, err = pc.FetchUserIDListByEmail(context.Background(), []*structs.Member{
+		{UserID: "cached-id", Email: "missing@redhat.com"},
+	})
+	require.Error(t, err)
 }
 
 func TestFetchAllTeams_paginates(t *testing.T) {

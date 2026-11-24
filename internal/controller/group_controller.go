@@ -744,9 +744,15 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	backendLogger.WithField("team_members_count", len(members)).Info("fetched team members successfully")
 
 	// Process users (determine who to add/remove)
-	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type, backendClient, backendLogger, allLdapUserData)
+	usersToAdd, usersToRemove, err := r.processUsers(ctx, uniqueMembers, members, backend.Name, backend.Type, backendLogger, allLdapUserData)
 	if err != nil {
 		backendLogger.WithError(err).Error("error processing users")
+		return err
+	}
+
+	userIDsToAdd, err := backendClient.FetchUserIDListByEmail(ctx, usersToAdd)
+	if err != nil {
+		backendLogger.WithError(err).Error("error fetching user IDs by email")
 		return err
 	}
 
@@ -754,7 +760,7 @@ func (r *GroupReconciler) processSingleBackend(ctx context.Context,
 	if !isLdapSync {
 		if len(usersToAdd) > 0 {
 			backendLogger.WithField("user_count", len(usersToAdd)).Info("Adding users to the team")
-			if err := backendClient.AddUserToTeam(ctx, teamID, usersToAdd); err != nil {
+			if err := backendClient.AddUserToTeam(ctx, teamID, userIDsToAdd); err != nil {
 				backendLogger.WithError(err).Error("error while adding users to the team")
 				return err
 			}
@@ -937,37 +943,49 @@ func (r *GroupReconciler) deleteBackendsTeam(ctx context.Context, groupCR *usern
 	return nil
 }
 
-// memberIDByEmail returns the group member id for an email.
-// An empty result means the email is not on the group.
-func (r *GroupReconciler) memberIDByEmail(members map[string]*structs.User, email string) string {
-	trimmedEmail := strings.TrimSpace(email)
-	if trimmedEmail == "" {
-		return ""
-	}
-	for _, member := range members {
-		if member == nil || !strings.EqualFold(strings.TrimSpace(member.Email), trimmedEmail) {
-			continue
-		}
-		memberID := strings.TrimSpace(member.ID)
-		if memberID == "" {
-			continue
-		}
-		return memberID
-	}
-	return ""
-}
-
 func (r *GroupReconciler) processUsers(ctx context.Context,
 	groupUsers []string,
 	existingTeamMembers map[string]*structs.User,
 	backendName, backendType string,
-	backendClient clients.Client,
 	backendLogger *logrus.Entry,
-	allLdapUserData map[string]*structs.LDAPUser) ([]string, []string, error) {
+	allLdapUserData map[string]*structs.LDAPUser) ([]*structs.Member, []string, error) {
 
-	userIDsToSync := make([]string, 0)
-	usersToAdd := make([]string, 0)
+	usersToSync := make(map[string]*structs.Member, 0)
+	usersToAdd := make([]*structs.Member, 0)
 	usersToRemove := make([]string, 0)
+
+	backendKey := backendName + "_" + backendType
+	// Refresh the cache from current team members only when their backend ID differs.
+	for _, member := range existingTeamMembers {
+		email := member.GetEmail()
+		updatedID := member.GetID()
+		if email == "" || updatedID == "" {
+			continue
+		}
+		r.CacheMutex.Lock()
+		backends, cacheErr := r.Store.User.GetBackends(ctx, email)
+		previousID := ""
+		if cacheErr == nil {
+			previousID = backends[backendKey]
+		}
+		if cacheErr == nil && previousID != updatedID {
+			cacheErr = r.Store.User.SetBackend(ctx, email, backendKey, updatedID)
+		}
+		r.CacheMutex.Unlock()
+		if cacheErr != nil {
+			backendLogger.WithField("user", email).WithError(cacheErr).Error(
+				"error updating user details in cache from group member email")
+			return nil, nil, cacheErr
+		}
+		if previousID == updatedID {
+			continue
+		}
+		backendLogger.WithFields(logrus.Fields{
+			"user":       logger.MaskEmail(email),
+			"previousID": previousID,
+			"newID":      updatedID,
+		}).Info("updated stale SCIM ID with updated user details")
+	}
 
 	for _, user := range groupUsers {
 		userDetails := allLdapUserData[user]
@@ -989,64 +1007,34 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 			return nil, nil, err
 		}
 
-		backendKey := backendName + "_" + backendType
 		userID := userBackends[backendKey]
 		if userID == "" {
 			backendLogger.WithField("user", user).Warn("user ID not found in cache, will create user in backend")
 			return nil, nil, errors.New("user ID not found in cache")
 		}
-		// A cached ID missing from the team may be stale. Only clients that can
-		// resolve a user by email may replace it: first from a member email, then
-		// from FetchUserDetailsByEmail. Other backends keep the cached ID.
-		liveID := ""
-		if _, onTeam := existingTeamMembers[userID]; !onTeam {
-			if lookupclient, ok := backendClient.(interface {
-				FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error)
-			}); ok {
-				liveID = r.memberIDByEmail(existingTeamMembers, userDetails.GetEmail())
-				if liveID == "" {
-					found, lookupErr := lookupclient.FetchUserDetailsByEmail(ctx, userDetails.GetEmail())
-					if lookupErr != nil {
-						backendLogger.WithField("user", user).WithError(lookupErr).Error("error fetching user details by email")
-						return nil, nil, lookupErr
-					}
-					if found != nil {
-						liveID = strings.TrimSpace(found.GetID())
-					}
-				}
-			}
+
+		usersToSync[userID] = &structs.Member{
+			UserID: userID,
+			Email:  userDetails.GetEmail(),
 		}
-		if liveID != "" && liveID != userID {
-			r.CacheMutex.Lock()
-			cacheErr := r.Store.User.SetBackend(ctx, userDetails.GetEmail(), backendKey, liveID)
-			r.CacheMutex.Unlock()
-			if cacheErr != nil {
-				backendLogger.WithField("user", user).WithError(cacheErr).Error(
-					"error updating user details in cache from group member email")
-				return nil, nil, cacheErr
-			}
-			backendLogger.WithFields(logrus.Fields{
-				"user":  logger.MaskEmail(user),
-				"oldID": userID,
-				"newID": liveID,
-			}).Info("updated stale SCIM ID with updated user details")
-			userID = liveID
-		}
-		userIDsToSync = append(userIDsToSync, userID)
+
 	}
 
 	// process existing team members to find users to remove
-	for userID := range existingTeamMembers {
-		if !slices.Contains(userIDsToSync, userID) {
-			usersToRemove = append(usersToRemove, userID)
+	for memberID := range existingTeamMembers {
+		if _, keep := usersToSync[memberID]; !keep {
+			usersToRemove = append(usersToRemove, memberID)
 		}
 	}
 
 	// process group users to find users to add
 	// if user is not present in existing team members, then add the user to the team
-	for _, userID := range userIDsToSync {
-		if _, exists := existingTeamMembers[userID]; !exists {
-			usersToAdd = append(usersToAdd, userID)
+	for _, member := range usersToSync {
+		if member == nil {
+			continue
+		}
+		if _, exists := existingTeamMembers[member.GetUserID()]; !exists {
+			usersToAdd = append(usersToAdd, member)
 		}
 	}
 

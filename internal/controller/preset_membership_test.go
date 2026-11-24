@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-	"errors"
 	"sync"
 	"testing"
 
@@ -11,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/cache/inmemory"
-	"github.com/redhat-data-and-ai/usernaut/pkg/clients"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/store"
 )
@@ -34,27 +31,6 @@ func presetLDAPUser() map[string]*structs.LDAPUser {
 	}
 }
 
-type emailLookup struct {
-	clients.Client
-	found *structs.User
-	err   error
-	calls int
-}
-
-func (b *emailLookup) FetchUserDetailsByEmail(context.Context, string) (*structs.User, error) {
-	b.calls++
-	return b.found, b.err
-}
-
-func TestMemberIDByEmail(t *testing.T) {
-	r := newPresetReconciler(t)
-	members := map[string]*structs.User{
-		"oidc|new": {ID: "oidc|new", Email: "ruagrawa@redhat.com"},
-	}
-	assert.Equal(t, "oidc|new", r.memberIDByEmail(members, "ruagrawa@redhat.com"))
-	assert.Empty(t, r.memberIDByEmail(members, "other@redhat.com"))
-}
-
 func TestProcessUsers_memberEmailReplacesStaleID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
@@ -63,13 +39,11 @@ func TestProcessUsers_memberEmailReplacesStaleID(t *testing.T) {
 	members := map[string]*structs.User{
 		"oidc|new": {ID: "oidc|new", Email: "ruagrawa@redhat.com"},
 	}
-	backend := &emailLookup{found: &structs.User{ID: "should-not-be-used"}}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
-		backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
-	assert.Zero(t, backend.calls)
 
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
 	require.NoError(t, err)
@@ -84,68 +58,34 @@ func TestProcessUsers_keepsCachedMemberWhenEmailMatches(t *testing.T) {
 	members := map[string]*structs.User{
 		"samlp|old": {ID: "samlp|old", Email: "ruagrawa@redhat.com"},
 	}
-	backend := &emailLookup{found: &structs.User{ID: "should-not-be-used"}}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
-		backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
-	assert.Zero(t, backend.calls)
 
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|old", cached[presetBackendKey])
 }
 
-func TestProcessUsers_noMemberEmailUsesLookedUpID(t *testing.T) {
+func TestProcessUsers_noMemberEmailKeepsCachedID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
 	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
 
-	backend := &emailLookup{found: &structs.User{ID: "oidc|new", Email: "ruagrawa@redhat.com"}}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{}, "preset", "preset",
-		backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"oidc|new"}, add)
+	assert.Equal(t, []string{"samlp|old"}, addedIDs(add))
 	assert.Empty(t, remove)
-	assert.Equal(t, 1, backend.calls)
-
-	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
-	require.NoError(t, err)
-	assert.Equal(t, "oidc|new", cached[presetBackendKey])
-}
-
-func TestProcessUsers_emailLookupMissKeepsCachedID(t *testing.T) {
-	r := newPresetReconciler(t)
-	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
-
-	backend := &emailLookup{}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{}, "preset", "preset",
-		backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
-	require.NoError(t, err)
-	assert.Equal(t, []string{"samlp|old"}, add)
-	assert.Empty(t, remove)
-	assert.Equal(t, 1, backend.calls)
 
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|old", cached[presetBackendKey])
 }
 
-func TestProcessUsers_emailLookupErrorStopsBackend(t *testing.T) {
-	r := newPresetReconciler(t)
-	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
-
-	backend := &emailLookup{err: errors.New("preset unavailable")}
-	_, _, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{}, "preset", "preset",
-		backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
-	require.Error(t, err)
-	assert.Equal(t, 1, backend.calls)
-}
-
-func TestProcessUsers_cachedMemberSkipsEmailLookup(t *testing.T) {
+func TestProcessUsers_matchingMemberWithoutEmailKeepsCachedID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
 	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
@@ -153,20 +93,18 @@ func TestProcessUsers_cachedMemberSkipsEmailLookup(t *testing.T) {
 	members := map[string]*structs.User{
 		"samlp|old": {ID: "samlp|old"},
 	}
-	backend := &emailLookup{found: &structs.User{ID: "oidc|new", Email: "ruagrawa@redhat.com"}}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
-		backend, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
-	assert.Zero(t, backend.calls)
 
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|old", cached[presetBackendKey])
 }
 
-func TestProcessUsers_withoutEmailLookupIgnoresMemberEmail(t *testing.T) {
+func TestProcessUsers_memberEmailReplacesCachedID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
 	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", "gitlab_gitlab", "100"))
@@ -175,14 +113,25 @@ func TestProcessUsers_withoutEmailLookupIgnoresMemberEmail(t *testing.T) {
 		"200": {ID: "200", Email: "ruagrawa@redhat.com"},
 	}
 	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "gitlab", "gitlab",
-		nil, logrus.NewEntry(logrus.New()), presetLDAPUser())
+		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"100"}, add)
-	assert.Equal(t, []string{"200"}, remove)
+	assert.Empty(t, add)
+	assert.Empty(t, remove)
 
 	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
 	require.NoError(t, err)
-	assert.Equal(t, "100", cached["gitlab_gitlab"])
+	assert.Equal(t, "200", cached["gitlab_gitlab"])
+}
+
+func addedIDs(pairs []*structs.Member) []string {
+	ids := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		if pair == nil {
+			continue
+		}
+		ids = append(ids, pair.GetUserID())
+	}
+	return ids
 }
 
 func assertIDs(t *testing.T, want, got []string) {
@@ -202,30 +151,26 @@ func TestPresetGroupScenarios(t *testing.T) {
 		name       string
 		desired    []string
 		members    map[string]*structs.User
-		lookupID   string
 		wantAdd    []string
 		wantRemove []string
 		wantCache  string
-		wantCalls  int
 	}{
 		{
-			name:    "user on group and scim id changed",
+			name:    "member without email keeps cached ID",
 			desired: []string{"ruagrawa"},
 			members: map[string]*structs.User{
 				"oidc|new": {ID: "oidc|new"},
 			},
-			lookupID:  "oidc|new",
-			wantCache: "oidc|new",
-			wantCalls: 1,
+			wantAdd:    []string{"samlp|old"},
+			wantRemove: []string{"oidc|new"},
+			wantCache:  "samlp|old",
 		},
 		{
-			name:      "user not on group and scim id changed",
+			name:      "user not on group keeps cached ID",
 			desired:   []string{"ruagrawa"},
 			members:   map[string]*structs.User{},
-			lookupID:  "oidc|new",
-			wantAdd:   []string{"oidc|new"},
-			wantCache: "oidc|new",
-			wantCalls: 1,
+			wantAdd:   []string{"samlp|old"},
+			wantCache: "samlp|old",
 		},
 		{
 			name:    "user on group and scim id unchanged",
@@ -233,38 +178,23 @@ func TestPresetGroupScenarios(t *testing.T) {
 			members: map[string]*structs.User{
 				"samlp|old": {ID: "samlp|old"},
 			},
-			lookupID:  "oidc|new",
 			wantCache: "samlp|old",
-			wantCalls: 0,
-		},
-		{
-			name:      "user not on group and scim id unchanged",
-			desired:   []string{"ruagrawa"},
-			members:   map[string]*structs.User{},
-			lookupID:  "samlp|old",
-			wantAdd:   []string{"samlp|old"},
-			wantCache: "samlp|old",
-			wantCalls: 1,
 		},
 		{
 			name: "user removed from group and scim id changed",
 			members: map[string]*structs.User{
 				"oidc|new": {ID: "oidc|new", Email: email},
 			},
-			lookupID:   "oidc|new",
 			wantRemove: []string{"oidc|new"},
-			wantCache:  "samlp|old",
-			wantCalls:  0,
+			wantCache:  "oidc|new",
 		},
 		{
 			name: "user removed from group and scim id unchanged",
 			members: map[string]*structs.User{
 				"samlp|old": {ID: "samlp|old", Email: email},
 			},
-			lookupID:   "samlp|old",
 			wantRemove: []string{"samlp|old"},
 			wantCache:  "samlp|old",
-			wantCalls:  0,
 		},
 	}
 
@@ -274,13 +204,11 @@ func TestPresetGroupScenarios(t *testing.T) {
 			ctx := t.Context()
 			require.NoError(t, r.Store.User.SetBackend(ctx, email, presetBackendKey, "samlp|old"))
 
-			backend := &emailLookup{found: &structs.User{ID: tt.lookupID, Email: email}}
 			add, remove, err := r.processUsers(ctx, tt.desired, tt.members, "preset", "preset",
-				backend, logrus.NewEntry(logrus.New()), ldapUsers)
+				logrus.NewEntry(logrus.New()), ldapUsers)
 			require.NoError(t, err)
-			assertIDs(t, tt.wantAdd, add)
+			assertIDs(t, tt.wantAdd, addedIDs(add))
 			assertIDs(t, tt.wantRemove, remove)
-			assert.Equal(t, tt.wantCalls, backend.calls)
 
 			cached, err := r.Store.User.GetBackends(ctx, email)
 			require.NoError(t, err)
@@ -289,13 +217,24 @@ func TestPresetGroupScenarios(t *testing.T) {
 	}
 }
 
-func TestOtherBackendGroupScenarios(t *testing.T) {
+func TestProcessUsersForAllBackends(t *testing.T) {
 	const (
-		email      = "ruagrawa@redhat.com"
-		backendKey = "snowflake_snowflake"
-		userID     = "ruagrawa"
+		email    = "ruagrawa@redhat.com"
+		cachedID = "cached-id"
+		liveID   = "live-id"
 	)
 	ldapUsers := presetLDAPUser()
+	backends := []struct {
+		name string
+		typ  string
+	}{
+		{name: "preset", typ: "preset"},
+		{name: "gitlab", typ: "gitlab"},
+		{name: "snowflake", typ: "snowflake"},
+		{name: "fivetran", typ: "fivetran"},
+		{name: "astro", typ: "astro"},
+		{name: "rover", typ: "rover"},
+	}
 
 	tests := []struct {
 		name       string
@@ -303,44 +242,71 @@ func TestOtherBackendGroupScenarios(t *testing.T) {
 		members    map[string]*structs.User
 		wantAdd    []string
 		wantRemove []string
+		wantCache  string
 	}{
 		{
 			name:    "user in group and id unchanged",
 			desired: []string{"ruagrawa"},
 			members: map[string]*structs.User{
-				userID: {ID: userID},
+				cachedID: {ID: cachedID, Email: email},
 			},
+			wantCache: cachedID,
 		},
 		{
-			name:    "user not in group and needs to be added",
-			desired: []string{"ruagrawa"},
-			members: map[string]*structs.User{},
-			wantAdd: []string{userID},
+			name:      "user not in group and needs to be added",
+			desired:   []string{"ruagrawa"},
+			members:   map[string]*structs.User{},
+			wantAdd:   []string{cachedID},
+			wantCache: cachedID,
 		},
 		{
-			name: "user removed from group and id unchanged",
+			name: "user removed from group",
 			members: map[string]*structs.User{
-				userID: {ID: userID, Email: email},
+				cachedID: {ID: cachedID, Email: email},
 			},
-			wantRemove: []string{userID},
+			wantRemove: []string{cachedID},
+			wantCache:  cachedID,
+		},
+		{
+			name:    "member email replaces stale id",
+			desired: []string{"ruagrawa"},
+			members: map[string]*structs.User{
+				liveID: {ID: liveID, Email: email},
+			},
+			wantCache: liveID,
+		},
+		{
+			name:    "member without email keeps stale id",
+			desired: []string{"ruagrawa"},
+			members: map[string]*structs.User{
+				liveID: {ID: liveID},
+			},
+			wantAdd:    []string{cachedID},
+			wantRemove: []string{liveID},
+			wantCache:  cachedID,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := newPresetReconciler(t)
-			ctx := t.Context()
-			require.NoError(t, r.Store.User.SetBackend(ctx, email, backendKey, userID))
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			backendKey := backend.name + "_" + backend.typ
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					r := newPresetReconciler(t)
+					ctx := t.Context()
+					require.NoError(t, r.Store.User.SetBackend(ctx, email, backendKey, cachedID))
 
-			add, remove, err := r.processUsers(ctx, tt.desired, tt.members, "snowflake", "snowflake",
-				nil, logrus.NewEntry(logrus.New()), ldapUsers)
-			require.NoError(t, err)
-			assertIDs(t, tt.wantAdd, add)
-			assertIDs(t, tt.wantRemove, remove)
+					add, remove, err := r.processUsers(ctx, tt.desired, tt.members, backend.name, backend.typ,
+						logrus.NewEntry(logrus.New()), ldapUsers)
+					require.NoError(t, err)
+					assertIDs(t, tt.wantAdd, addedIDs(add))
+					assertIDs(t, tt.wantRemove, remove)
 
-			cached, err := r.Store.User.GetBackends(ctx, email)
-			require.NoError(t, err)
-			assert.Equal(t, userID, cached[backendKey])
+					cached, err := r.Store.User.GetBackends(ctx, email)
+					require.NoError(t, err)
+					assert.Equal(t, tt.wantCache, cached[backendKey])
+				})
+			}
 		})
 	}
 }

@@ -18,6 +18,7 @@ package redhatrover
 
 import (
 	"context"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 )
@@ -40,7 +41,22 @@ func (rC *RoverClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 	}, nil
 }
 
-func (rC *RoverClient) DeleteUser(ctx context.Context, userID string) error {
+func (rC *RoverClient) DeleteUser(ctx context.Context, user *structs.User) error {
 	// this doesn't need any implementation as Rover is the LDAP
 	return nil
+}
+
+func (rC *RoverClient) FetchUserIDListByEmail(_ context.Context, users []*structs.Member) ([]string, error) {
+	liveIDList := make([]string, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		id := strings.TrimSpace(user.GetUserID())
+		if id == "" {
+			continue
+		}
+		liveIDList = append(liveIDList, id)
+	}
+	return liveIDList, nil
 }

@@ -188,14 +188,14 @@ func (c *AstroClient) CreateUser(ctx context.Context, user *structs.User) (*stru
 
 // DeleteUser removes a user from Astro by setting their organization role to null
 // Astro doesn't have a direct delete endpoint; instead, we remove the org-level role
-func (c *AstroClient) DeleteUser(ctx context.Context, userID string) error {
+func (c *AstroClient) DeleteUser(ctx context.Context, user *structs.User) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
-		"userID":      userID,
+		"userID":      user.ID,
 	})
 
 	log.Info("deleting user (removing organization role)")
-	endpoint := fmt.Sprintf("/users/%s/roles", userID)
+	endpoint := fmt.Sprintf("/users/%s/roles", user.ID)
 
 	// Set organizationRole to null to remove the user
 	payload := UpdateUserRoleRequest{
@@ -215,4 +215,19 @@ func (c *AstroClient) DeleteUser(ctx context.Context, userID string) error {
 
 	log.Info("user deleted successfully")
 	return nil
+}
+
+func (c *AstroClient) FetchUserIDListByEmail(_ context.Context, users []*structs.Member) ([]string, error) {
+	liveIDList := make([]string, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		id := strings.TrimSpace(user.GetUserID())
+		if id == "" {
+			continue
+		}
+		liveIDList = append(liveIDList, id)
+	}
+	return liveIDList, nil
 }

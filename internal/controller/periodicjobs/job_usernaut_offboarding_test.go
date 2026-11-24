@@ -139,7 +139,7 @@ func TestUserOffboardingJob(t *testing.T) {
 
 		// Setup: Backend client should be called to delete the user
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), testUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: testUser.ID, Email: testUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -248,7 +248,7 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 
 		// Backend delete fails
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), testUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: testUser.ID, Email: testUser.Email}).
 			Return(errors.New("backend service unavailable")).
 			Times(1)
 
@@ -352,12 +352,12 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 
 	// Both backends should be called to delete the user
 	mockFivetranClient.EXPECT().
-		DeleteUser(gomock.Any(), "fivetran_id_123").
+		DeleteUser(gomock.Any(), &structs.User{ID: "fivetran_id_123", Email: testUser.Email}).
 		Return(nil).
 		Times(1)
 
 	mockSnowflakeClient.EXPECT().
-		DeleteUser(gomock.Any(), "snowflake_id_456").
+		DeleteUser(gomock.Any(), &structs.User{ID: "snowflake_id_456", Email: testUser.Email}).
 		Return(nil).
 		Times(1)
 
@@ -483,7 +483,7 @@ func TestUserOffboardingJobEmptyUserKey(t *testing.T) {
 			Times(1)
 
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), testUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: testUser.ID, Email: testUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -573,7 +573,7 @@ func TestUserOffboardingJobExclusionList(t *testing.T) {
 			Times(1)
 
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), normalUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: normalUser.ID, Email: normalUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -692,7 +692,7 @@ offboardUserExclusionListConfigPath: "` + server.URL + `/config/exclusion_list.y
 			Times(1)
 
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), normalUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: normalUser.ID, Email: normalUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -753,7 +753,7 @@ func TestUserOffboardingJobPresetEmailFallback(t *testing.T) {
 		GetUserLDAPDataByEmail(gomock.Any(), email).
 		Return(nil, ldap.ErrNoUserFound)
 	mockBackendClient.EXPECT().
-		DeleteUser(gomock.Any(), "oidc|live").
+		DeleteUser(gomock.Any(), &structs.User{ID: "oidc|live", Email: email}).
 		Return(nil)
 
 	require.NoError(t, job.Run(ctx))
@@ -828,7 +828,7 @@ func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
 				GetUserLDAPDataByEmail(gomock.Any(), email).
 				Return(nil, ldap.ErrNoUserFound)
 			mockBackendClient.EXPECT().
-				DeleteUser(gomock.Any(), tt.deleteID).
+				DeleteUser(gomock.Any(), &structs.User{ID: tt.deleteID, Email: email}).
 				Return(nil)
 
 			require.NoError(t, job.Run(ctx))

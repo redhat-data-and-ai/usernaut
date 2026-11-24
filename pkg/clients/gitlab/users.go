@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
 	"github.com/redhat-data-and-ai/usernaut/pkg/logger"
@@ -175,10 +176,10 @@ func (g *GitlabClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 	return userDetails(user), nil
 }
 
-func (g *GitlabClient) DeleteUser(ctx context.Context, userID string) error {
+func (g *GitlabClient) DeleteUser(ctx context.Context, user *structs.User) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
-		"userID":      userID,
+		"userID":      user.ID,
 	})
 	log.Info("deleting user")
 
@@ -186,7 +187,7 @@ func (g *GitlabClient) DeleteUser(ctx context.Context, userID string) error {
 		return nil
 	}
 
-	userIDInt, err := strconv.Atoi(userID)
+	userIDInt, err := strconv.Atoi(user.ID)
 	if err != nil {
 		log.WithError(err).Error("Failed to convert userID to int")
 		return err
@@ -207,4 +208,19 @@ func userDetails(u *gitlab.User) *structs.User {
 		UserName:    u.Username,
 		DisplayName: u.Name,
 	}
+}
+
+func (g *GitlabClient) FetchUserIDListByEmail(_ context.Context, users []*structs.Member) ([]string, error) {
+	liveIDList := make([]string, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		id := strings.TrimSpace(user.GetUserID())
+		if id == "" {
+			continue
+		}
+		liveIDList = append(liveIDList, id)
+	}
+	return liveIDList, nil
 }
