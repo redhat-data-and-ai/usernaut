@@ -147,6 +147,10 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
+.PHONY: build-sync
+build-sync: ## Build the usernaut-sync CLI (renders and applies dataproduct-config groups).
+	go build -mod=vendor -o bin/usernaut-sync ./cmd/usernaut-sync
+
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
