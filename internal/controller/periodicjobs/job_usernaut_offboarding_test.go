@@ -757,7 +757,7 @@ func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
 		{
 			name:       "other backend id unchanged",
 			backendKey: "snowflake_snowflake",
-			cachedID:   "ruagrawa",
+			cachedID:   "testuser",
 		},
 	}
 
@@ -772,7 +772,7 @@ func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
 			dataStore := store.New(inMemCache)
 
 			ctx := context.Background()
-			const email = "ruagrawa@redhat.com"
+			const email = "testuser@example.com"
 			require.NoError(t, dataStore.User.SetBackend(ctx, email, tt.backendKey, tt.cachedID))
 
 			job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
@@ -806,7 +806,7 @@ func TestOffboardingPresetUserAlreadyAbsent(t *testing.T) {
 	dataStore := store.New(inMemCache)
 
 	ctx := context.Background()
-	const email = "ruagrawa@redhat.com"
+	const email = "testuser@example.com"
 	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
 
 	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
@@ -838,7 +838,7 @@ func TestOffboardingPresetDeleteFailureRetainsCache(t *testing.T) {
 	dataStore := store.New(inMemCache)
 
 	ctx := context.Background()
-	const email = "ruagrawa@redhat.com"
+	const email = "testuser@example.com"
 	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
 
 	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
@@ -856,4 +856,40 @@ func TestOffboardingPresetDeleteFailureRetainsCache(t *testing.T) {
 	exists, err := dataStore.User.Exists(ctx, email)
 	require.NoError(t, err)
 	assert.True(t, exists)
+}
+
+func TestOffboardingPresetDeletesReplacementID(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
+	require.NoError(t, err)
+	dataStore := store.New(inMemCache)
+
+	ctx := context.Background()
+	const (
+		email   = "testuser@example.com"
+		staleID = "samlp|old"
+	)
+	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", staleID))
+
+	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
+		"preset_preset": mockBackendClient,
+	})
+
+	mockLDAPClient.EXPECT().
+		GetUserLDAPDataByEmail(gomock.Any(), email).
+		Return(nil, ldap.ErrNoUserFound)
+	// The Preset client resolves a replaced SCIM ID from this email. The job only supplies the cached user.
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), &structs.User{ID: staleID, Email: email}).
+		Return(nil)
+
+	require.NoError(t, job.Run(ctx))
+	exists, err := dataStore.User.Exists(ctx, email)
+	require.NoError(t, err)
+	assert.False(t, exists)
 }

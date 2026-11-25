@@ -282,9 +282,6 @@ func (pc *PresetClient) FetchUserIDListByEmail(ctx context.Context, users []*str
 				id = liveID
 			}
 		}
-		if id == "" {
-			continue
-		}
 		liveIDList = append(liveIDList, id)
 	}
 	return liveIDList, nil

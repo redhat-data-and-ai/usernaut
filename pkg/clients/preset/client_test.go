@@ -147,7 +147,7 @@ func TestDeleteUser_rateLimitExhausted(t *testing.T) {
 func TestDeleteNotFoundIsIdempotent(t *testing.T) {
 	const staleID = "missing-user"
 	const liveID = "live-user"
-	const email = "missing@redhat.com"
+	const email = "missing@example.com"
 
 	var requests []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,9 +181,47 @@ func TestDeleteNotFoundIsIdempotent(t *testing.T) {
 	assert.True(t, strings.HasPrefix(requests[2], http.MethodDelete+" "+testSCIMPath("/Users/"+liveID)))
 }
 
+func TestDeleteUser_deletesReplacementID(t *testing.T) {
+	const staleID = "samlp|old"
+	const liveID = "oidc|new"
+	const email = "testuser@example.com"
+
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == testSCIMPath("/Users/"+staleID):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodGet && r.URL.Path == testSCIMPath("/Users"):
+			assert.Equal(t, `emails.value eq "`+email+`"`, r.URL.Query().Get("filter"))
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(scimUsersResponse{
+				TotalResults: 1,
+				Resources: []scimUser{{
+					ID:     liveID,
+					Emails: []scimEmailValue{{Value: email}},
+				}},
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == testSCIMPath("/Users/"+liveID):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	pc := newTestPresetClient(t, srv.URL)
+	require.NoError(t, pc.DeleteUser(context.Background(), &structs.User{ID: staleID, Email: email}))
+	assert.Equal(t, []string{
+		http.MethodDelete + " " + testSCIMPath("/Users/"+staleID),
+		http.MethodGet + " " + testSCIMPath("/Users"),
+		http.MethodDelete + " " + testSCIMPath("/Users/"+liveID),
+	}, requests)
+}
+
 func TestDeleteUser_absentByIDAndEmail(t *testing.T) {
 	const staleID = "missing-user"
-	const email = "missing@redhat.com"
+	const email = "missing@example.com"
 
 	var requests []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -323,16 +361,16 @@ func TestCreateUser_conflictResolvesExistingUser(t *testing.T) {
 
 func TestCreateUser_requiresEmailAndUsername(t *testing.T) {
 	pc := newTestPresetClient(t, "https://example.com")
-	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "ctolosa"})
+	_, err := pc.CreateUser(context.Background(), &structs.User{UserName: "testuser"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email and username are required")
-	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com"})
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "testuser@example.com"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email and username are required")
-	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "  ", UserName: "ctolosa"})
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "  ", UserName: "testuser"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email and username are required")
-	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "ctolosa@redhat.com", UserName: "  "})
+	_, err = pc.CreateUser(context.Background(), &structs.User{Email: "testuser@example.com", UserName: "  "})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email and username are required")
 }
@@ -500,7 +538,7 @@ func TestFetchTeamMembersByTeamID(t *testing.T) {
 			ID: "group-1",
 			Members: []scimMember{
 				{Value: "user-1", Display: "User One", Emails: []scimEmailValue{{
-					Value: " user-1@redhat.com ",
+					Value: " user-1@example.com ",
 				}}},
 				{Value: "user-2", Display: "User Two"},
 			},
@@ -513,7 +551,7 @@ func TestFetchTeamMembersByTeamID(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, members, 2)
 	assert.Equal(t, "User One", members["user-1"].DisplayName)
-	assert.Equal(t, "user-1@redhat.com", members["user-1"].Email)
+	assert.Equal(t, "user-1@example.com", members["user-1"].Email)
 	assert.Equal(t, "user-2", members["user-2"].ID)
 	assert.Empty(t, members["user-2"].Email)
 }
@@ -534,22 +572,22 @@ func TestFetchUserDetailsByEmail(t *testing.T) {
 			TotalResults: 1,
 			Resources: []scimUser{{
 				ID:       "oidc|redhat-prod|new",
-				UserName: "ruagrawa",
-				Emails:   []scimEmailValue{{Value: "ruagrawa@redhat.com"}},
+				UserName: "testuser",
+				Emails:   []scimEmailValue{{Value: "testuser@example.com"}},
 			}},
 		})
 	}))
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	user, err := pc.FetchUserDetailsByEmail(context.Background(), " ruagrawa@redhat.com ")
+	user, err := pc.FetchUserDetailsByEmail(context.Background(), " testuser@example.com ")
 	require.NoError(t, err)
 	require.NotNil(t, user)
 	assert.Equal(t, "oidc|redhat-prod|new", user.ID)
-	assert.Equal(t, "ruagrawa@redhat.com", user.Email)
-	assert.Equal(t, `emails.value eq "ruagrawa@redhat.com"`, filter)
+	assert.Equal(t, "testuser@example.com", user.Email)
+	assert.Equal(t, `emails.value eq "testuser@example.com"`, filter)
 
-	missing, err := pc.FetchUserDetailsByEmail(context.Background(), "missing@redhat.com")
+	missing, err := pc.FetchUserDetailsByEmail(context.Background(), "missing@example.com")
 	require.ErrorIs(t, err, ErrUserNotFound)
 	assert.Nil(t, missing)
 }
@@ -560,7 +598,7 @@ func TestFetchUserIDListByEmail(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		id := ""
 		switch {
-		case strings.Contains(filter, "ruagrawa@"):
+		case strings.Contains(filter, "testuser@"):
 			id = "oidc|new"
 		case strings.Contains(filter, "same@"):
 			id = "same-id"
@@ -577,15 +615,15 @@ func TestFetchUserIDListByEmail(t *testing.T) {
 
 	pc := newTestPresetClient(t, srv.URL)
 	ids, err := pc.FetchUserIDListByEmail(context.Background(), []*structs.User{
-		{ID: "samlp|old", Email: "ruagrawa@redhat.com"},
+		{ID: "samlp|old", Email: "testuser@example.com"},
 		nil,
-		{ID: "same-id", Email: "same@redhat.com"},
+		{ID: "same-id", Email: "same@example.com"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"oidc|new", "same-id"}, ids)
 
 	_, err = pc.FetchUserIDListByEmail(context.Background(), []*structs.User{
-		{ID: "cached-id", Email: "missing@redhat.com"},
+		{ID: "cached-id", Email: "missing@example.com"},
 	})
 	require.ErrorIs(t, err, ErrUserNotFound)
 }

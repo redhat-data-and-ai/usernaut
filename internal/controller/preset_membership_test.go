@@ -27,25 +27,25 @@ func newPresetReconciler(t *testing.T) *GroupReconciler {
 
 func presetLDAPUser() map[string]*structs.LDAPUser {
 	return map[string]*structs.LDAPUser{
-		"ruagrawa": {Email: "ruagrawa@redhat.com", UID: "ruagrawa"},
+		"testuser": {Email: "testuser@example.com", UID: "testuser"},
 	}
 }
 
 func TestProcessUsers_memberEmailReplacesStaleID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
+	require.NoError(t, r.Store.User.SetBackend(ctx, "testuser@example.com", presetBackendKey, "samlp|old"))
 
 	members := map[string]*structs.User{
-		"oidc|new": {ID: "oidc|new", Email: "ruagrawa@redhat.com"},
+		"oidc|new": {ID: "oidc|new", Email: "testuser@example.com"},
 	}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
+	add, remove, err := r.processUsers(ctx, []string{"testuser"}, members, "preset", "preset",
 		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
 
-	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	cached, err := r.Store.User.GetBackends(ctx, "testuser@example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "oidc|new", cached[presetBackendKey])
 }
@@ -53,18 +53,18 @@ func TestProcessUsers_memberEmailReplacesStaleID(t *testing.T) {
 func TestProcessUsers_keepsCachedMemberWhenEmailMatches(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
+	require.NoError(t, r.Store.User.SetBackend(ctx, "testuser@example.com", presetBackendKey, "samlp|old"))
 
 	members := map[string]*structs.User{
-		"samlp|old": {ID: "samlp|old", Email: "ruagrawa@redhat.com"},
+		"samlp|old": {ID: "samlp|old", Email: "testuser@example.com"},
 	}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
+	add, remove, err := r.processUsers(ctx, []string{"testuser"}, members, "preset", "preset",
 		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
 
-	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	cached, err := r.Store.User.GetBackends(ctx, "testuser@example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|old", cached[presetBackendKey])
 }
@@ -72,15 +72,15 @@ func TestProcessUsers_keepsCachedMemberWhenEmailMatches(t *testing.T) {
 func TestProcessUsers_noMemberEmailKeepsCachedID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
+	require.NoError(t, r.Store.User.SetBackend(ctx, "testuser@example.com", presetBackendKey, "samlp|old"))
 
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, map[string]*structs.User{}, "preset", "preset",
+	add, remove, err := r.processUsers(ctx, []string{"testuser"}, map[string]*structs.User{}, "preset", "preset",
 		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Equal(t, []string{"samlp|old"}, addedIDs(add))
 	assert.Empty(t, remove)
 
-	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	cached, err := r.Store.User.GetBackends(ctx, "testuser@example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|old", cached[presetBackendKey])
 }
@@ -88,18 +88,18 @@ func TestProcessUsers_noMemberEmailKeepsCachedID(t *testing.T) {
 func TestProcessUsers_matchingMemberWithoutEmailKeepsCachedID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", presetBackendKey, "samlp|old"))
+	require.NoError(t, r.Store.User.SetBackend(ctx, "testuser@example.com", presetBackendKey, "samlp|old"))
 
 	members := map[string]*structs.User{
 		"samlp|old": {ID: "samlp|old"},
 	}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
+	add, remove, err := r.processUsers(ctx, []string{"testuser"}, members, "preset", "preset",
 		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
 
-	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	cached, err := r.Store.User.GetBackends(ctx, "testuser@example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "samlp|old", cached[presetBackendKey])
 }
@@ -107,18 +107,18 @@ func TestProcessUsers_matchingMemberWithoutEmailKeepsCachedID(t *testing.T) {
 func TestProcessUsers_memberEmailReplacesCachedID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
-	require.NoError(t, r.Store.User.SetBackend(ctx, "ruagrawa@redhat.com", "gitlab_gitlab", "100"))
+	require.NoError(t, r.Store.User.SetBackend(ctx, "testuser@example.com", "gitlab_gitlab", "100"))
 
 	members := map[string]*structs.User{
-		"200": {ID: "200", Email: "ruagrawa@redhat.com"},
+		"200": {ID: "200", Email: "testuser@example.com"},
 	}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "gitlab", "gitlab",
+	add, remove, err := r.processUsers(ctx, []string{"testuser"}, members, "gitlab", "gitlab",
 		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
 	assert.Empty(t, remove)
 
-	cached, err := r.Store.User.GetBackends(ctx, "ruagrawa@redhat.com")
+	cached, err := r.Store.User.GetBackends(ctx, "testuser@example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "200", cached["gitlab_gitlab"])
 }
@@ -144,7 +144,7 @@ func assertIDs(t *testing.T, want, got []string) {
 }
 
 func TestPresetGroupScenarios(t *testing.T) {
-	const email = "ruagrawa@redhat.com"
+	const email = "testuser@example.com"
 	ldapUsers := presetLDAPUser()
 
 	tests := []struct {
@@ -157,7 +157,7 @@ func TestPresetGroupScenarios(t *testing.T) {
 	}{
 		{
 			name:    "member without email keeps cached ID",
-			desired: []string{"ruagrawa"},
+			desired: []string{"testuser"},
 			members: map[string]*structs.User{
 				"oidc|new": {ID: "oidc|new"},
 			},
@@ -167,14 +167,14 @@ func TestPresetGroupScenarios(t *testing.T) {
 		},
 		{
 			name:      "user not on group keeps cached ID",
-			desired:   []string{"ruagrawa"},
+			desired:   []string{"testuser"},
 			members:   map[string]*structs.User{},
 			wantAdd:   []string{"samlp|old"},
 			wantCache: "samlp|old",
 		},
 		{
 			name:    "user on group and scim id unchanged",
-			desired: []string{"ruagrawa"},
+			desired: []string{"testuser"},
 			members: map[string]*structs.User{
 				"samlp|old": {ID: "samlp|old"},
 			},
@@ -219,7 +219,7 @@ func TestPresetGroupScenarios(t *testing.T) {
 
 func TestProcessUsersForAllBackends(t *testing.T) {
 	const (
-		email    = "ruagrawa@redhat.com"
+		email    = "testuser@example.com"
 		cachedID = "cached-id"
 		liveID   = "live-id"
 	)
@@ -246,7 +246,7 @@ func TestProcessUsersForAllBackends(t *testing.T) {
 	}{
 		{
 			name:    "user in group and id unchanged",
-			desired: []string{"ruagrawa"},
+			desired: []string{"testuser"},
 			members: map[string]*structs.User{
 				cachedID: {ID: cachedID, Email: email},
 			},
@@ -254,7 +254,7 @@ func TestProcessUsersForAllBackends(t *testing.T) {
 		},
 		{
 			name:      "user not in group and needs to be added",
-			desired:   []string{"ruagrawa"},
+			desired:   []string{"testuser"},
 			members:   map[string]*structs.User{},
 			wantAdd:   []string{cachedID},
 			wantCache: cachedID,
@@ -269,7 +269,7 @@ func TestProcessUsersForAllBackends(t *testing.T) {
 		},
 		{
 			name:    "member email replaces stale id",
-			desired: []string{"ruagrawa"},
+			desired: []string{"testuser"},
 			members: map[string]*structs.User{
 				liveID: {ID: liveID, Email: email},
 			},
@@ -277,7 +277,7 @@ func TestProcessUsersForAllBackends(t *testing.T) {
 		},
 		{
 			name:    "member without email keeps stale id",
-			desired: []string{"ruagrawa"},
+			desired: []string{"testuser"},
 			members: map[string]*structs.User{
 				liveID: {ID: liveID},
 			},
@@ -314,13 +314,13 @@ func TestProcessUsersForAllBackends(t *testing.T) {
 func TestProcessUsers_lowerEmailMatchesCachedKey(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
-	const email = "ruagrawa@redhat.com"
+	const email = "testuser@example.com"
 	require.NoError(t, r.Store.User.SetBackend(ctx, email, presetBackendKey, "samlp|old"))
 
 	members := map[string]*structs.User{
-		"oidc|new": {ID: "oidc|new", Email: "Ruagrawa@RedHat.com"},
+		"oidc|new": {ID: "oidc|new", Email: "TestUser@Example.com"},
 	}
-	add, remove, err := r.processUsers(ctx, []string{"ruagrawa"}, members, "preset", "preset",
+	add, remove, err := r.processUsers(ctx, []string{"testuser"}, members, "preset", "preset",
 		logrus.NewEntry(logrus.New()), presetLDAPUser())
 	require.NoError(t, err)
 	assert.Empty(t, add)
@@ -329,7 +329,7 @@ func TestProcessUsers_lowerEmailMatchesCachedKey(t *testing.T) {
 	cached, err := r.Store.User.GetBackends(ctx, email)
 	require.NoError(t, err)
 	assert.Equal(t, "oidc|new", cached[presetBackendKey])
-	exists, err := r.Store.User.Exists(ctx, "Ruagrawa@RedHat.com")
+	exists, err := r.Store.User.Exists(ctx, "TestUser@Example.com")
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
@@ -337,7 +337,7 @@ func TestProcessUsers_lowerEmailMatchesCachedKey(t *testing.T) {
 func TestProcessUsers_missingBackendKeyStoresLiveID(t *testing.T) {
 	r := newPresetReconciler(t)
 	ctx := t.Context()
-	const email = "ruagrawa@redhat.com"
+	const email = "testuser@example.com"
 	require.NoError(t, r.Store.User.SetBackend(ctx, email, "gitlab_gitlab", "100"))
 
 	members := map[string]*structs.User{
@@ -356,7 +356,7 @@ func TestProcessUsers_missingBackendKeyStoresLiveID(t *testing.T) {
 }
 
 func TestProcessUsers_groupMembershipScenarios(t *testing.T) {
-	const email = "ruagrawa@redhat.com"
+	const email = "testuser@example.com"
 	const oldID = "samlp|old"
 	const liveID = "oidc|new"
 
@@ -408,7 +408,7 @@ func TestProcessUsers_groupMembershipScenarios(t *testing.T) {
 			}
 			var groupUsers []string
 			if tt.inGroup {
-				groupUsers = []string{"ruagrawa"}
+				groupUsers = []string{"testuser"}
 			}
 
 			add, remove, err := r.processUsers(ctx, groupUsers, members, "preset", "preset",
