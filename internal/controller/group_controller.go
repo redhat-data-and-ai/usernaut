@@ -963,29 +963,29 @@ func (r *GroupReconciler) processUsers(ctx context.Context,
 		if email == "" || updatedID == "" {
 			continue
 		}
-		r.CacheMutex.Lock()
 		backends, cacheErr := r.Store.User.GetBackends(ctx, email)
-		previousID := ""
-		if cacheErr == nil {
-			previousID = backends[backendKey]
-		}
-		if cacheErr == nil && previousID != updatedID {
-			cacheErr = r.Store.User.SetBackend(ctx, email, backendKey, updatedID)
-		}
-		r.CacheMutex.Unlock()
 		if cacheErr != nil {
-			backendLogger.WithField("user", email).WithError(cacheErr).Error(
-				"error updating user details in cache from group member email")
+			backendLogger.WithField("user", logger.MaskEmail(email)).WithError(cacheErr).Error(
+				"error fetching user details from cache")
 			return nil, nil, cacheErr
 		}
-		if previousID == "" || previousID == updatedID {
-			continue
+		previousID := backends[backendKey]
+		if previousID != updatedID {
+			r.CacheMutex.Lock()
+			cacheErr = r.Store.User.SetBackend(ctx, email, backendKey, updatedID)
+			r.CacheMutex.Unlock()
+			if cacheErr != nil {
+				backendLogger.WithField("user", logger.MaskEmail(email)).WithError(cacheErr).Error(
+					"error updating user details in cache from group member email")
+				return nil, nil, cacheErr
+			}
+			backendLogger.WithFields(logrus.Fields{
+				"user":       logger.MaskEmail(email),
+				"previousID": previousID,
+				"newID":      updatedID,
+			}).Info("updated stale SCIM ID with updated user details in cache")
 		}
-		backendLogger.WithFields(logrus.Fields{
-			"user":       logger.MaskEmail(email),
-			"previousID": previousID,
-			"newID":      updatedID,
-		}).Info("updated stale SCIM ID with updated user details")
+
 	}
 
 	for _, user := range groupUsers {
