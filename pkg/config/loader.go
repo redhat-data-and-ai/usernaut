@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/spf13/viper"
 )
@@ -102,8 +104,36 @@ func (c *Config) Load(env string, config interface{}) error {
 	if err := c.loadByConfigName(c.opts.defaultConfigFileName, config); err != nil {
 		return err
 	}
+	appConfig, isAppConfig := config.(*AppConfig)
+	var defaultBackends []map[string]interface{}
+	if isAppConfig {
+		// Retain field presence so omitted values differ from explicit false or "".
+		if err := c.viper.UnmarshalKey("backends", &defaultBackends); err != nil {
+			return err
+		}
+		// Decode environment entries independently, never over defaults by position.
+		appConfig.Backends = nil
+	}
 	if err := c.loadByConfigName(env, config); err != nil {
 		return err
+	}
+	if isAppConfig {
+		var envBackends []map[string]interface{}
+		if err := c.viper.UnmarshalKey("backends", &envBackends); err != nil {
+			return err
+		}
+		backends, err := mergeBackends(defaultBackends, envBackends)
+		if err != nil {
+			return err
+		}
+		// Merge into current file data so overrides do not persist across loads.
+		if err := c.viper.MergeConfigMap(map[string]interface{}{"backends": backends}); err != nil {
+			return err
+		}
+		appConfig.Backends = nil
+		if err := c.viper.UnmarshalKey("backends", &appConfig.Backends); err != nil {
+			return err
+		}
 	}
 	SubstituteConfigValues(reflect.ValueOf(config))
 	return nil
@@ -194,10 +224,58 @@ func (c *Config) loadByConfigName(configName string, config interface{}) error {
 	if err := c.viper.ReadInConfig(); err != nil {
 		return err
 	}
-	if err := c.viper.Unmarshal(config); err != nil {
-		return err
+	return c.viper.Unmarshal(config)
+}
+
+// mergeBackends merges supplied fields for matching (name, type) entries.
+// Unmatched defaults retain their order; new backends are appended in file order.
+func mergeBackends(defaultBackends, envBackends []map[string]interface{}) ([]map[string]interface{}, error) {
+	var merged []map[string]interface{}
+	type identity struct{ Name, Type string }
+	positions := make(map[identity]int)
+	for _, backends := range [][]map[string]interface{}{defaultBackends, envBackends} {
+		for _, backend := range backends {
+			var key identity
+			if err := mapstructure.WeakDecode(backend, &key); err != nil {
+				return nil, err
+			}
+			index, ok := positions[key]
+			if !ok {
+				index = len(merged)
+				positions[key] = index
+				merged = append(merged, nil)
+			}
+			merged[index] = mergeBackendFields(merged[index], backend)
+		}
 	}
-	return nil
+	return merged, nil
+}
+
+// mergeBackendFields overlays supplied fields without modifying the input maps.
+// Map fields use a shallow merge: connection.path is inherited when omitted,
+// but a supplied connection.options map replaces the default options entirely.
+// Examples for the connection map of backends with the same name and type
+// (default + environment => result, using JSON notation):
+//
+//	{"path": "/default", "token": "old"} + {"token": "new"}
+//	  => {"path": "/default", "token": "new"}
+//	{"options": {"timeout": 30, "region": "us"}} + {"options": {"timeout": 10}}
+//	  => {"options": {"timeout": 10}} // region is not inherited
+func mergeBackendFields(base, override map[string]interface{}) map[string]interface{} {
+	fields := make(map[string]interface{})
+	maps.Copy(fields, base)
+	for name, value := range override {
+		if overrides, ok := value.(map[string]interface{}); ok {
+			inherited, _ := fields[name].(map[string]interface{})
+			combined := make(map[string]interface{})
+			maps.Copy(combined, inherited)
+			maps.Copy(combined, overrides)
+			fields[name] = combined
+		} else {
+			fields[name] = value
+		}
+	}
+	return fields
 }
 
 // getConfigHTTPClient returns a shared HTTP client for config loading.
