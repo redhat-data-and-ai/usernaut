@@ -25,7 +25,6 @@ EXCLUDED_PATTERNS=(
     "*.pb.go"
     "*_test.go"
     "test/"
-    "pkg/clients/gitlab/users.go"
 )
 
 # Function to check if a file should be excluded
@@ -35,8 +34,6 @@ should_exclude_file() {
         # Check for path prefix or filename glob match
         if [[ "$pattern" == */ && "$file" == "$pattern"* ]]; then
             return 0 # Path prefix match
-        elif [[ "$file" == "$pattern" ]]; then
-            return 0 # Exact path match
         elif [[ "$pattern" != */ && "$(basename -- "$file")" == $pattern ]]; then
             return 0 # Filename glob match
         fi

@@ -155,12 +155,12 @@ func (g *GitlabClient) CreateUser(ctx context.Context, u *structs.User) (*struct
 	}
 
 	// Use Gitlab SDK to create a user
-	resetPassword := true // Still required by GitLab API, but user will auth via LDAP
+	pwFlg := true // Still required by GitLab API, but user will auth via LDAP
 	createUserOptions := &gitlab.CreateUserOptions{
 		Email:         &u.Email,
 		Username:      &u.UserName,
 		Name:          &u.FirstName,
-		ResetPassword: &resetPassword, // Required by API, but unused with LDAP
+		ResetPassword: &pwFlg, // Required by API, but unused with LDAP
 	}
 	user, resp, err := g.gitlabClient.Users.CreateUser(createUserOptions)
 	if err != nil {

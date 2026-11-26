@@ -580,14 +580,14 @@ func TestFetchUserDetailsByEmail(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pc := newTestPresetClient(t, srv.URL)
-	user, err := pc.FetchUserDetailsByEmail(context.Background(), " testuser@example.com ")
+	user, err := pc.fetchUserDetailsByEmail(context.Background(), " testuser@example.com ")
 	require.NoError(t, err)
 	require.NotNil(t, user)
 	assert.Equal(t, "oidc|redhat-prod|new", user.ID)
 	assert.Equal(t, "testuser@example.com", user.Email)
 	assert.Equal(t, `emails.value eq "testuser@example.com"`, filter)
 
-	missing, err := pc.FetchUserDetailsByEmail(context.Background(), "missing@example.com")
+	missing, err := pc.fetchUserDetailsByEmail(context.Background(), "missing@example.com")
 	require.ErrorIs(t, err, ErrUserNotFound)
 	assert.Nil(t, missing)
 }

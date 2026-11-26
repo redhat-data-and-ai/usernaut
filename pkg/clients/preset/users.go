@@ -111,7 +111,15 @@ func (pc *PresetClient) FetchUserDetails(ctx context.Context, userID string) (*s
 func scimUserToStruct(su *scimUser) *structs.User {
 	email := ""
 	if len(su.Emails) > 0 {
-		email = strings.TrimSpace(su.Emails[0].Value)
+		for _, e := range su.Emails {
+			if e.Primary {
+				email = strings.TrimSpace(e.Value)
+				break
+			}
+		}
+		if email == "" {
+			email = strings.TrimSpace(su.Emails[0].Value)
+		}
 	}
 	return &structs.User{
 		ID:          su.ID,
@@ -155,7 +163,7 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 	if err != nil {
 		if isResponseStatus(err, http.StatusConflict) {
 			log.WithField("status", http.StatusConflict).Info("user already exists, fetching user details")
-			existing, lookupErr := pc.FetchUserDetailsByEmail(ctx, email)
+			existing, lookupErr := pc.fetchUserDetailsByEmail(ctx, email)
 			if lookupErr != nil {
 				return nil, lookupErr
 			}
@@ -207,7 +215,7 @@ func (pc *PresetClient) deleteUserByEmail(ctx context.Context, email string) err
 		logKeyService: serviceName,
 		"email":       email,
 	})
-	userDetail, err := pc.FetchUserDetailsByEmail(ctx, email)
+	userDetail, err := pc.fetchUserDetailsByEmail(ctx, email)
 	if errors.Is(err, ErrUserNotFound) {
 		log.Info("SCIM user does not exist in Preset, nothing to delete")
 		return nil
@@ -229,8 +237,8 @@ func (pc *PresetClient) deleteUserByEmail(ctx context.Context, email string) err
 	return nil
 }
 
-// FetchUserDetailsByEmail returns the Preset user for an email. A missing user returns an error.
-func (pc *PresetClient) FetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error) {
+// fetchUserDetailsByEmail returns the Preset user for an email. A missing user returns an error.
+func (pc *PresetClient) fetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
 		"email":       email,
@@ -271,7 +279,7 @@ func (pc *PresetClient) FetchUserIDListByEmail(ctx context.Context, users []*str
 		if user == nil {
 			continue
 		}
-		found, err := pc.FetchUserDetailsByEmail(ctx, user.Email)
+		found, err := pc.fetchUserDetailsByEmail(ctx, user.Email)
 		if err != nil {
 			return nil, err
 		}
