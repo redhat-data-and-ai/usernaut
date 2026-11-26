@@ -47,7 +47,9 @@ type Client interface {
 	// Onboards the user on the backend
 	CreateUser(ctx context.Context, u *structs.User) (*structs.User, error)
 	// Drop User from the backend
-	DeleteUser(ctx context.Context, userID string) error
+	DeleteUser(ctx context.Context, u *structs.User) error
+	// Fetches the list of user IDs by email
+	FetchUserIDListByEmail(ctx context.Context, users []*structs.User) ([]string, error)
 
 	// Fetches all the teams on the backend
 	FetchAllTeams(ctx context.Context) (map[string]structs.Team, error)

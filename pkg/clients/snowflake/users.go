@@ -246,15 +246,15 @@ func (c *SnowflakeClient) FetchUserDetails(ctx context.Context, userID string) (
 }
 
 // DeleteUser deletes a user from Snowflake using REST API
-func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
+func (c *SnowflakeClient) DeleteUser(ctx context.Context, user *structs.User) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
-		"userID":      userID,
+		"userID":      user.ID,
 	})
 
 	log.Debug("deleting user")
 
-	userName := sanitizeUserNameForAPI(userID)
+	userName := sanitizeUserNameForAPI(user.ID)
 	endpoint := fmt.Sprintf("/api/v2/users/%s", quoteSnowflakeIdentifier(userName, true))
 
 	resp, _, status, err := c.makeRequestWithPolling(ctx, endpoint, http.MethodDelete, nil)
@@ -268,7 +268,7 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 	}
 
 	log.WithFields(logrus.Fields{
-		"userID": userID,
+		"userID": user.ID,
 		"status": status,
 	}).Info("user deleted successfully")
 	return nil
@@ -277,4 +277,19 @@ func (c *SnowflakeClient) DeleteUser(ctx context.Context, userID string) error {
 // sanitizeUserNameForAPI replaces characters in a username that are not allowed in Snowflake API paths.
 func sanitizeUserNameForAPI(userName string) string {
 	return strings.ReplaceAll(userName, "-", "_")
+}
+
+func (c *SnowflakeClient) FetchUserIDListByEmail(_ context.Context, users []*structs.User) ([]string, error) {
+	liveIDList := make([]string, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		id := strings.TrimSpace(user.GetID())
+		if id == "" {
+			continue
+		}
+		liveIDList = append(liveIDList, id)
+	}
+	return liveIDList, nil
 }

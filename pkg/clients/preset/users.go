@@ -29,7 +29,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var errUserNotFound = errors.New("user not found")
+// ErrUserNotFound means a Preset SCIM query succeeded and the account is absent.
+// Deletion treats it as success. Callers that require the account still return it.
+var ErrUserNotFound = errors.New("SCIM user not found by email")
 
 // FetchAllUsers retrieves all users via SCIM and returns maps keyed by email and SCIM ID
 func (pc *PresetClient) FetchAllUsers(ctx context.Context) (map[string]*structs.User, map[string]*structs.User, error) {
@@ -111,15 +113,14 @@ func scimUserToStruct(su *scimUser) *structs.User {
 	if len(su.Emails) > 0 {
 		for _, e := range su.Emails {
 			if e.Primary {
-				email = e.Value
+				email = strings.TrimSpace(e.Value)
 				break
 			}
 		}
 		if email == "" {
-			email = su.Emails[0].Value
+			email = strings.TrimSpace(su.Emails[0].Value)
 		}
 	}
-
 	return &structs.User{
 		ID:          su.ID,
 		Email:       email,
@@ -162,7 +163,14 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 	if err != nil {
 		if isResponseStatus(err, http.StatusConflict) {
 			log.WithField("status", http.StatusConflict).Info("user already exists, fetching user details")
-			return pc.findUserByUserName(ctx, userName)
+			existing, lookupErr := pc.fetchUserDetailsByEmail(ctx, email)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			if existing == nil {
+				return nil, fmt.Errorf("preset user already exists but was not found by email %s", email)
+			}
+			return existing, nil
 		}
 		log.WithError(err).Error("error creating user")
 		return nil, err
@@ -180,15 +188,43 @@ func (pc *PresetClient) CreateUser(ctx context.Context, user *structs.User) (*st
 }
 
 // DeleteUser removes a user via SCIM
-func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
+func (pc *PresetClient) DeleteUser(ctx context.Context, user *structs.User) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
-		"userID":      userID,
+		"userID":      user.ID,
 	})
 	log.Info("deleting SCIM user from Preset")
 
-	reqURL := pc.userURL(userID)
+	reqURL := pc.userURL(user.ID)
 	_, err := pc.sendRequest(ctx, reqURL, http.MethodDelete, nil)
+	if err != nil {
+		if isResponseStatus(err, http.StatusNotFound) {
+			return pc.deleteUserByEmail(ctx, user.Email)
+		}
+		log.WithError(err).Error("failed to delete SCIM user from Preset")
+		return fmt.Errorf("failed to delete SCIM user from Preset: %w", err)
+	}
+
+	log.Info("successfully deleted SCIM user from Preset by ID")
+	return nil
+}
+
+// Fuction to delete user by email
+func (pc *PresetClient) deleteUserByEmail(ctx context.Context, email string) error {
+	log := logger.Logger(ctx).WithFields(logrus.Fields{
+		logKeyService: serviceName,
+		"email":       email,
+	})
+	userDetail, err := pc.fetchUserDetailsByEmail(ctx, email)
+	if errors.Is(err, ErrUserNotFound) {
+		log.Info("SCIM user does not exist in Preset, nothing to delete")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	reqURL := pc.userURL(userDetail.GetID())
+	_, err = pc.sendRequest(ctx, reqURL, http.MethodDelete, nil)
 	if err != nil {
 		if isResponseStatus(err, http.StatusNotFound) {
 			log.Info("SCIM user does not exist in Preset, nothing to delete")
@@ -197,33 +233,64 @@ func (pc *PresetClient) DeleteUser(ctx context.Context, userID string) error {
 		log.WithError(err).Error("failed to delete SCIM user from Preset")
 		return fmt.Errorf("failed to delete SCIM user from Preset: %w", err)
 	}
-
-	log.Info("successfully deleted SCIM user from Preset")
+	log.Info("successfully deleted SCIM user from Preset by email")
 	return nil
 }
 
-func (pc *PresetClient) findUserByUserName(ctx context.Context, userName string) (*structs.User, error) {
+// fetchUserDetailsByEmail returns the Preset user for an email. A missing user returns an error.
+func (pc *PresetClient) fetchUserDetailsByEmail(ctx context.Context, email string) (*structs.User, error) {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
-		"username":    userName,
+		"email":       email,
 	})
 
-	filter := fmt.Sprintf(`userName eq "%s"`, escapeSCIMLiteral(userName))
-	response, err := pc.querySCIMByFilter(ctx, "Users", filter, "username", userName)
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return nil, fmt.Errorf("email is required")
+	}
+
+	filter := fmt.Sprintf(`emails.value eq "%s"`, escapeSCIMLiteral(email))
+	response, err := pc.querySCIMByFilter(ctx, "Users", filter, "email", email)
 	if err != nil {
 		return nil, err
 	}
 
 	var scimResp scimUsersResponse
 	if err := json.Unmarshal(response, &scimResp); err != nil {
-		log.WithError(err).Error("failed to parse SCIM user lookup response")
+		log.WithError(err).Error("failed to parse SCIM user email lookup response")
 		return nil, err
 	}
-
 	if len(scimResp.Resources) == 0 {
-		log.Warn("SCIM user not found by userName")
-		return nil, fmt.Errorf("%w: %s", errUserNotFound, userName)
+		log.Warn("SCIM user not found by email")
+		return nil, ErrUserNotFound
 	}
 
-	return scimUserToStruct(&scimResp.Resources[0]), nil
+	user := scimUserToStruct(&scimResp.Resources[0])
+	if user.ID == "" {
+		return nil, fmt.Errorf("preset user lookup for %s did not return a SCIM id", email)
+	}
+	log.WithField("userID", user.ID).Info("found SCIM user by email")
+	return user, nil
+}
+
+func (pc *PresetClient) FetchUserIDListByEmail(ctx context.Context, users []*structs.User) ([]string, error) {
+	liveIDList := make([]string, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		found, err := pc.fetchUserDetailsByEmail(ctx, user.Email)
+		if err != nil {
+			return nil, err
+		}
+		id := strings.TrimSpace(user.GetID())
+		if found != nil {
+			liveID := strings.TrimSpace(found.GetID())
+			if liveID != "" && liveID != id {
+				id = liveID
+			}
+		}
+		liveIDList = append(liveIDList, id)
+	}
+	return liveIDList, nil
 }

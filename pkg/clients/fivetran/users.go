@@ -3,6 +3,7 @@ package fivetran
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fivetran/go-fivetran/users"
 	"github.com/redhat-data-and-ai/usernaut/pkg/common/structs"
@@ -118,15 +119,15 @@ func (fc *FivetranClient) UpdateUser(ctx context.Context, u *structs.User) (*str
 }
 
 // Offboards the user from fivetran based on userID (fivetran ID)
-func (fc *FivetranClient) DeleteUser(ctx context.Context, userID string) error {
+func (fc *FivetranClient) DeleteUser(ctx context.Context, user *structs.User) error {
 	log := logger.Logger(ctx).WithFields(logrus.Fields{
 		logKeyService: serviceName,
-		"userID":      userID,
+		"userID":      user.ID,
 	})
 
 	log.Info("dropping the user")
 
-	resp, err := fc.fivetranClient.NewUserDelete().UserID(userID).Do(ctx)
+	resp, err := fc.fivetranClient.NewUserDelete().UserID(user.ID).Do(ctx)
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"code":    resp.Code,
@@ -148,4 +149,19 @@ func userDetailsFromResponse(u users.UserDetailsData) *structs.User {
 		DisplayName: fmt.Sprintf("%s %s", u.GivenName, u.FamilyName),
 		Role:        u.Role,
 	}
+}
+
+func (fc *FivetranClient) FetchUserIDListByEmail(_ context.Context, users []*structs.User) ([]string, error) {
+	liveIDList := make([]string, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		id := strings.TrimSpace(user.GetID())
+		if id == "" {
+			continue
+		}
+		liveIDList = append(liveIDList, id)
+	}
+	return liveIDList, nil
 }

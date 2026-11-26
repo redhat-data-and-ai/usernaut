@@ -139,7 +139,7 @@ func TestUserOffboardingJob(t *testing.T) {
 
 		// Setup: Backend client should be called to delete the user
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), testUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: testUser.ID, Email: testUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -248,7 +248,7 @@ func TestUserOffboardingJobBackendErrors(t *testing.T) {
 
 		// Backend delete fails
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), testUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: testUser.ID, Email: testUser.Email}).
 			Return(errors.New("backend service unavailable")).
 			Times(1)
 
@@ -352,12 +352,12 @@ func TestUserOffboardingJobMultipleBackends(t *testing.T) {
 
 	// Both backends should be called to delete the user
 	mockFivetranClient.EXPECT().
-		DeleteUser(gomock.Any(), "fivetran_id_123").
+		DeleteUser(gomock.Any(), &structs.User{ID: "fivetran_id_123", Email: testUser.Email}).
 		Return(nil).
 		Times(1)
 
 	mockSnowflakeClient.EXPECT().
-		DeleteUser(gomock.Any(), "snowflake_id_456").
+		DeleteUser(gomock.Any(), &structs.User{ID: "snowflake_id_456", Email: testUser.Email}).
 		Return(nil).
 		Times(1)
 
@@ -483,7 +483,7 @@ func TestUserOffboardingJobEmptyUserKey(t *testing.T) {
 			Times(1)
 
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), testUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: testUser.ID, Email: testUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -573,7 +573,7 @@ func TestUserOffboardingJobExclusionList(t *testing.T) {
 			Times(1)
 
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), normalUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: normalUser.ID, Email: normalUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -692,7 +692,7 @@ offboardUserExclusionListConfigPath: "` + server.URL + `/config/exclusion_list.y
 			Times(1)
 
 		mockBackendClient.EXPECT().
-			DeleteUser(gomock.Any(), normalUser.ID).
+			DeleteUser(gomock.Any(), &structs.User{ID: normalUser.ID, Email: normalUser.Email}).
 			Return(nil).
 			Times(1)
 
@@ -709,4 +709,187 @@ offboardUserExclusionListConfigPath: "` + server.URL + `/config/exclusion_list.y
 		require.NoError(t, err)
 		assert.False(t, exists, "Normal user should be removed from cache")
 	})
+}
+
+func TestUserOffboardingJobPresetDeletesCachedID(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
+	require.NoError(t, err)
+	dataStore := store.New(inMemCache)
+
+	ctx := context.Background()
+	const email = "testuser@example.com"
+	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
+
+	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
+		"preset_preset": mockBackendClient,
+	})
+
+	mockLDAPClient.EXPECT().
+		GetUserLDAPDataByEmail(gomock.Any(), email).
+		Return(nil, ldap.ErrNoUserFound)
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), &structs.User{ID: "samlp|old", Email: email}).
+		Return(nil)
+
+	require.NoError(t, job.Run(ctx))
+}
+
+func TestOffboardingWhenUserLeftRedHat(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	tests := []struct {
+		name       string
+		backendKey string
+		cachedID   string
+	}{
+		{
+			name:       "preset deletes cached scim id",
+			backendKey: "preset_preset",
+			cachedID:   "samlp|old",
+		},
+		{
+			name:       "other backend id unchanged",
+			backendKey: "snowflake_snowflake",
+			cachedID:   "testuser",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+			mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+			inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
+			require.NoError(t, err)
+			dataStore := store.New(inMemCache)
+
+			ctx := context.Background()
+			const email = "testuser@example.com"
+			require.NoError(t, dataStore.User.SetBackend(ctx, email, tt.backendKey, tt.cachedID))
+
+			job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
+				tt.backendKey: mockBackendClient,
+			})
+
+			mockLDAPClient.EXPECT().
+				GetUserLDAPDataByEmail(gomock.Any(), email).
+				Return(nil, ldap.ErrNoUserFound)
+			mockBackendClient.EXPECT().
+				DeleteUser(gomock.Any(), &structs.User{ID: tt.cachedID, Email: email}).
+				Return(nil)
+
+			require.NoError(t, job.Run(ctx))
+			exists, err := dataStore.User.Exists(ctx, email)
+			require.NoError(t, err)
+			assert.False(t, exists)
+		})
+	}
+}
+
+func TestOffboardingPresetUserAlreadyAbsent(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
+	require.NoError(t, err)
+	dataStore := store.New(inMemCache)
+
+	ctx := context.Background()
+	const email = "testuser@example.com"
+	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
+
+	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
+		"preset_preset": mockBackendClient,
+	})
+
+	mockLDAPClient.EXPECT().
+		GetUserLDAPDataByEmail(gomock.Any(), email).
+		Return(nil, ldap.ErrNoUserFound)
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), &structs.User{ID: "samlp|old", Email: email}).
+		Return(nil)
+
+	require.NoError(t, job.Run(ctx))
+	exists, err := dataStore.User.Exists(ctx, email)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
+func TestOffboardingPresetDeleteFailureRetainsCache(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
+	require.NoError(t, err)
+	dataStore := store.New(inMemCache)
+
+	ctx := context.Background()
+	const email = "testuser@example.com"
+	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", "samlp|old"))
+
+	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
+		"preset_preset": mockBackendClient,
+	})
+
+	mockLDAPClient.EXPECT().
+		GetUserLDAPDataByEmail(gomock.Any(), email).
+		Return(nil, ldap.ErrNoUserFound)
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), &structs.User{ID: "samlp|old", Email: email}).
+		Return(errors.New("preset unavailable"))
+
+	require.Error(t, job.Run(ctx))
+	exists, err := dataStore.User.Exists(ctx, email)
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
+
+func TestOffboardingPresetDeletesReplacementID(t *testing.T) {
+	defer setupTestConfig(t)()
+
+	ctrl := gomock.NewController(t)
+	mockLDAPClient := ldapmocks.NewMockLDAPClient(ctrl)
+	mockBackendClient := clientmocks.NewMockClient(ctrl)
+
+	inMemCache, err := inmemory.NewCache(&inmemory.Config{DefaultExpiration: 60, CleanupInterval: 120})
+	require.NoError(t, err)
+	dataStore := store.New(inMemCache)
+
+	ctx := context.Background()
+	const (
+		email   = "testuser@example.com"
+		staleID = "samlp|old"
+	)
+	require.NoError(t, dataStore.User.SetBackend(ctx, email, "preset_preset", staleID))
+
+	job := NewUserOffboardingJob(&sync.RWMutex{}, dataStore, mockLDAPClient, map[string]clients.Client{
+		"preset_preset": mockBackendClient,
+	})
+
+	mockLDAPClient.EXPECT().
+		GetUserLDAPDataByEmail(gomock.Any(), email).
+		Return(nil, ldap.ErrNoUserFound)
+	// The Preset client resolves a replaced SCIM ID from this email. The job only supplies the cached user.
+	mockBackendClient.EXPECT().
+		DeleteUser(gomock.Any(), &structs.User{ID: staleID, Email: email}).
+		Return(nil)
+
+	require.NoError(t, job.Run(ctx))
+	exists, err := dataStore.User.Exists(ctx, email)
+	require.NoError(t, err)
+	assert.False(t, exists)
 }

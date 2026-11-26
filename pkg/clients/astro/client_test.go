@@ -229,7 +229,7 @@ func TestDeleteUser(t *testing.T) {
 		client, server := createTestClient(t, handler)
 		defer server.Close()
 
-		err := client.DeleteUser(ctx, "user-to-delete")
+		err := client.DeleteUser(ctx, &structs.User{ID: "user-to-delete"})
 		require.NoError(t, err)
 	})
 
@@ -242,7 +242,7 @@ func TestDeleteUser(t *testing.T) {
 		client, server := createTestClient(t, handler)
 		defer server.Close()
 
-		err := client.DeleteUser(ctx, "nonexistent-user")
+		err := client.DeleteUser(ctx, &structs.User{ID: "nonexistent-user"})
 		assert.Error(t, err)
 	})
 }
@@ -525,6 +525,17 @@ func testPoolConfig() httpclient.ConnectionPoolConfig {
 		KeepAliveTimeout:   60000,
 		MaxIdleConnections: 10,
 	}
+}
+
+func TestFetchUserIDListByEmailKeepsPairID(t *testing.T) {
+	ids, err := (&AstroClient{}).FetchUserIDListByEmail(context.Background(), []*structs.User{
+		{ID: " user-1 ", Email: "a@redhat.com"},
+		nil,
+		{ID: "   ", Email: "blank@redhat.com"},
+		{ID: "user-2", Email: "b@redhat.com"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user-1", "user-2"}, ids)
 }
 
 func testHystrixConfig() httpclient.HystrixResiliencyConfig {
