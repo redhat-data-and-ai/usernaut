@@ -23,7 +23,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	gitlab.com/gitlab-org/api/client-go v0.145.0
 	golang.org/x/sync v0.22.0
-	k8s.io/apimachinery v0.35.8
+	k8s.io/apimachinery v0.35.10
 	k8s.io/client-go v0.35.8
 	sigs.k8s.io/controller-runtime v0.23.3
 )
