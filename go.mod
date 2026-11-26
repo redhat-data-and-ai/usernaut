@@ -11,7 +11,7 @@ require (
 	github.com/gojek/heimdall/v7 v7.2.0
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
-	github.com/onsi/ginkgo/v2 v2.28.2
+	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.40.0
 	github.com/opentracing-contrib/go-stdlib v1.1.1
 	github.com/opentracing/opentracing-go v1.2.0
@@ -70,7 +70,7 @@ require (
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
-	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
+	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
 	github.com/gopherjs/gopherjs v1.20.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
