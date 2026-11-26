@@ -223,7 +223,7 @@ github.com/goccy/go-yaml/parser
 github.com/goccy/go-yaml/printer
 github.com/goccy/go-yaml/scanner
 github.com/goccy/go-yaml/token
-# github.com/gojek/heimdall/v7 v7.2.0
+# github.com/gojek/heimdall/v7 v7.3.1
 ## explicit; go 1.24
 github.com/gojek/heimdall/v7
 github.com/gojek/heimdall/v7/httpclient

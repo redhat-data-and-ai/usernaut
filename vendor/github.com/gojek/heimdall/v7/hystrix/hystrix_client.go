@@ -5,11 +5,10 @@ import (
 	goerrors "errors"
 	"io"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/afex/hystrix-go/hystrix"
-	metricCollector "github.com/afex/hystrix-go/hystrix/metric_collector"
-	"github.com/afex/hystrix-go/plugins"
 	"github.com/gojek/heimdall/v7"
 	"github.com/gojek/heimdall/v7/httpclient"
 	"github.com/gojek/heimdall/v7/internal"
@@ -23,22 +22,22 @@ type fallbackCtxFunc func(context.Context, error) error
 type Client struct {
 	client *httpclient.Client
 
-	timeout                time.Duration
 	hystrixTimeout         time.Duration
 	hystrixCommandName     string
 	maxConcurrentRequests  int
 	requestVolumeThreshold int
 	sleepWindow            int
 	errorPercentThreshold  int
-	retryCount             int
-	retrier                heimdall.Retriable
 	fallbackFunc           func(ctx context.Context, err error) error
-	statsD                 *plugins.StatsdCollectorConfig
+
+	retrier          heimdall.Retriable
+	retryCount       int
+	retryableCodes   []int
+	retryErrorBudget *internal.ErrorBudget
 }
 
 const (
 	defaultHystrixRetryCount      = 0
-	defaultHTTPTimeout            = 30 * time.Second
 	defaultHystrixTimeout         = 30 * time.Second
 	defaultMaxConcurrentRequests  = 100
 	defaultErrorPercentThreshold  = 25
@@ -50,13 +49,12 @@ const (
 )
 
 var _ heimdall.Client = (*Client)(nil)
-var err5xx = goerrors.New("server returned 5xx status code")
+var errRetryableCode = goerrors.New("server returned status code to retry")
 
 // NewClient returns a new instance of hystrix Client
 func NewClient(opts ...Option) *Client {
 	client := Client{
 		client:                 httpclient.NewClient(),
-		timeout:                defaultHTTPTimeout,
 		hystrixTimeout:         defaultHystrixTimeout,
 		maxConcurrentRequests:  defaultMaxConcurrentRequests,
 		errorPercentThreshold:  defaultErrorPercentThreshold,
@@ -68,15 +66,6 @@ func NewClient(opts ...Option) *Client {
 
 	for _, opt := range opts {
 		opt(&client)
-	}
-
-	if client.statsD != nil {
-		c, err := plugins.InitializeStatsdCollector(client.statsD)
-		if err != nil {
-			panic(err)
-		}
-
-		metricCollector.Registry.Register(c.NewStatsdCollector)
 	}
 
 	hystrix.ConfigureCommand(client.hystrixCommandName, hystrix.CommandConfig{
@@ -208,12 +197,17 @@ func (hhc *Client) Do(request *http.Request) (*http.Response, error) {
 
 		response, err = hhc.hystrixDo(request)
 		if err == nil || internal.IsCtxDone(request.Context()) {
+			_ = hhc.retryErrorBudget.Success()
+			break
+		}
+
+		if hhc.retryErrorBudget.Failure() {
 			break
 		}
 	}
 
 	if err != nil {
-		if errors.Is(err, err5xx) {
+		if errors.Is(err, errRetryableCode) {
 			return response, nil
 		}
 
@@ -232,13 +226,14 @@ func (hhc *Client) hystrixDo(request *http.Request) (*http.Response, error) {
 		}
 		response = resp
 
-		if response.StatusCode >= http.StatusInternalServerError {
-			return err5xx
+		if _, ok := slices.BinarySearch(hhc.retryableCodes, response.StatusCode); ok ||
+			response.StatusCode >= http.StatusInternalServerError {
+			return errRetryableCode
 		}
 
 		return nil
 	}, hhc.fallbackFunc)
-	if err != nil && !errors.Is(err, err5xx) { // Special handling to avoid data race conditions
+	if err != nil && !errors.Is(err, errRetryableCode) { // Special handling to avoid data race conditions
 		return nil, err
 	}
 
