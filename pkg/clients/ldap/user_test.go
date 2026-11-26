@@ -655,8 +655,7 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_DiagnosticMessage_Fails() {
 	assertions.Empty(resp)
 }
 
-// Diagnostic with entries present should log but NOT abort — data is still returned.
-func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_DiagnosticWithEntries_Succeeds() {
+func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_DiagnosticWithEntries_Fails() {
 	assertions := assert.New(suite.T())
 
 	ldapConn := &LDAPConn{
@@ -684,7 +683,6 @@ func (suite *LDAPTestSuite) TestGetBulkUserLDAPData_DiagnosticWithEntries_Succee
 
 	resp, err := ldapConn.GetBulkUserLDAPData(suite.ctx, []string{"testuser", "missinguser"})
 
-	assertions.NoError(err)
-	assertions.Len(resp, 1)
-	assertions.Contains(resp, "testuser")
+	assertions.ErrorIs(err, ErrLDAPDiagnosticMessage)
+	assertions.Empty(resp)
 }

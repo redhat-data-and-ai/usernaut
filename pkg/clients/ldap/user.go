@@ -71,7 +71,7 @@ func (l *LDAPConn) executeSearch(ctx context.Context,
 		return nil, err
 	}
 
-	if err := checkDiagnostic(log, resp); err != nil {
+	if err := validateSearchResultResponse(ctx, resp); err != nil {
 		return nil, err
 	}
 
@@ -212,8 +212,7 @@ func (l *LDAPConn) getBulkUserLDAPData(
 			)
 		}
 
-		batchLog := log.WithField("batch", fmt.Sprintf("%d/%d", batchNum, totalBatches))
-		if err := checkDiagnostic(batchLog, resp); err != nil {
+		if err := validateSearchResultResponse(ctx, resp); err != nil {
 			return result, err
 		}
 

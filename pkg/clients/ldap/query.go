@@ -43,7 +43,7 @@ func (l *LDAPConn) GetQueryMembers(ctx context.Context, query string) ([]string,
 		log.WithError(err).Error("failed to search LDAP for query members")
 		return nil, err
 	}
-	if err := checkDiagnostic(log, resp); err != nil {
+	if err := validateSearchResultResponse(ctx, resp); err != nil {
 		return nil, err
 	}
 
