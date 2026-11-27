@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/redis/go-redis/v9/internal/proto"
@@ -35,6 +36,7 @@ type JSONCmdable interface {
 	JSONObjLen(ctx context.Context, key, path string) *IntPointerSliceCmd
 	JSONSet(ctx context.Context, key, path string, value interface{}) *StatusCmd
 	JSONSetMode(ctx context.Context, key, path string, value interface{}, mode string) *StatusCmd
+	JSONSetWithArgs(ctx context.Context, key, path string, value interface{}, options *JSONSetArgsOptions) *StatusCmd
 	JSONStrAppend(ctx context.Context, key, path, value string) *IntPointerSliceCmd
 	JSONStrLen(ctx context.Context, key, path string) *IntPointerSliceCmd
 	JSONToggle(ctx context.Context, key, path string) *IntPointerSliceCmd
@@ -57,6 +59,25 @@ type JSONArrTrimArgs struct {
 	Stop  *int
 }
 
+// FPHAType is the floating-point type used for storing FP homogeneous arrays
+// in JSON.SET (Redis 8.8+).
+type FPHAType string
+
+const (
+	FPHATypeBF16 FPHAType = "BF16"
+	FPHATypeFP16 FPHAType = "FP16"
+	FPHATypeFP32 FPHAType = "FP32"
+	FPHATypeFP64 FPHAType = "FP64"
+)
+
+// JSONSetArgsOptions are the optional arguments for JSONSetWithArgs.
+// Mode is "NX" or "XX" (case-insensitive). FPHA, when set, forces Redis to
+// store all FP homogeneous arrays using the specified floating-point type.
+type JSONSetArgsOptions struct {
+	Mode string
+	FPHA FPHAType
+}
+
 type JSONCmd struct {
 	baseCmd
 	val      string
@@ -76,6 +97,7 @@ func newJSONCmd(ctx context.Context, args ...interface{}) *JSONCmd {
 }
 
 func (cmd *JSONCmd) String() string {
+	cmd.await()
 	return cmdString(cmd, cmd.val)
 }
 
@@ -85,6 +107,7 @@ func (cmd *JSONCmd) SetVal(val string) {
 
 // Val returns the result of the JSON.GET command as a string.
 func (cmd *JSONCmd) Val() string {
+	cmd.await()
 	if len(cmd.val) == 0 && cmd.expanded != nil {
 		val, err := json.Marshal(cmd.expanded)
 		if err != nil {
@@ -99,11 +122,13 @@ func (cmd *JSONCmd) Val() string {
 }
 
 func (cmd *JSONCmd) Result() (string, error) {
+	cmd.await()
 	return cmd.Val(), cmd.Err()
 }
 
 // Expanded returns the result of the JSON.GET command as unmarshalled JSON.
 func (cmd *JSONCmd) Expanded() (interface{}, error) {
+	cmd.await()
 	if len(cmd.val) != 0 && cmd.expanded == nil {
 		err := json.Unmarshal([]byte(cmd.val), &cmd.expanded)
 		if err != nil {
@@ -116,15 +141,18 @@ func (cmd *JSONCmd) Expanded() (interface{}, error) {
 
 func (cmd *JSONCmd) readReply(rd *proto.Reader) error {
 	// nil response from JSON.(M)GET (cmd.baseCmd.err will be "redis: nil")
-	// This happens when the key doesn't exist
-	if cmd.baseCmd.Err() == Nil {
+	// This happens when the key doesn't exist.
+	// Use rawErr() (not Err()): readReply runs inside the batch's Exec, before
+	// the autopipeline batch's done channel is closed, so Err()->await() would
+	// deadlock on the very Exec that is calling readReply.
+	if cmd.baseCmd.rawErr() == Nil {
 		cmd.val = ""
 		return Nil
 	}
 
 	// Handle other base command errors
-	if cmd.baseCmd.Err() != nil {
-		return cmd.baseCmd.Err()
+	if cmd.baseCmd.rawErr() != nil {
+		return cmd.baseCmd.rawErr()
 	}
 
 	if readType, err := rd.PeekReplyType(); err != nil {
@@ -146,7 +174,10 @@ func (cmd *JSONCmd) readReply(rd *proto.Reader) error {
 		expanded := make([]interface{}, size)
 
 		for i := 0; i < size; i++ {
-			if expanded[i], err = rd.ReadReply(); err != nil {
+			// A null element is a value, not a missing reply. With RESP3,
+			// JSON.NUMINCRBY reports null for each match that is not a
+			// number.
+			if expanded[i], err = rd.ReadReply(); err != nil && err != Nil {
 				return err
 			}
 		}
@@ -192,6 +223,7 @@ func NewJSONSliceCmd(ctx context.Context, args ...interface{}) *JSONSliceCmd {
 }
 
 func (cmd *JSONSliceCmd) String() string {
+	cmd.await()
 	return cmdString(cmd, cmd.val)
 }
 
@@ -200,15 +232,19 @@ func (cmd *JSONSliceCmd) SetVal(val []interface{}) {
 }
 
 func (cmd *JSONSliceCmd) Val() []interface{} {
+	cmd.await()
 	return cmd.val
 }
 
 func (cmd *JSONSliceCmd) Result() ([]interface{}, error) {
+	cmd.await()
 	return cmd.val, cmd.err
 }
 
 func (cmd *JSONSliceCmd) readReply(rd *proto.Reader) error {
-	if cmd.baseCmd.Err() == Nil {
+	// rawErr(), not Err(): readReply runs inside Exec before the batch's done
+	// channel closes, so Err()->await() would deadlock (see JSONCmd.readReply).
+	if cmd.baseCmd.rawErr() == Nil {
 		cmd.val = nil
 		return Nil
 	}
@@ -218,11 +254,18 @@ func (cmd *JSONSliceCmd) readReply(rd *proto.Reader) error {
 	} else if readType == proto.RespArray {
 		response, err := rd.ReadReply()
 		if err != nil {
-			return nil
+			return err
 		} else {
 			cmd.val = response.([]interface{})
 		}
-
+	} else if readType == proto.RespString {
+		// With RESP2 a legacy path (one that does not start with "$") gets
+		// a single value instead of an array.
+		s, err := rd.ReadString()
+		if err != nil {
+			return err
+		}
+		cmd.val = []interface{}{s}
 	} else {
 		n, err := rd.ReadArrayLen()
 		if err != nil {
@@ -279,6 +322,7 @@ func NewIntPointerSliceCmd(ctx context.Context, args ...interface{}) *IntPointer
 }
 
 func (cmd *IntPointerSliceCmd) String() string {
+	cmd.await()
 	return cmdString(cmd, cmd.val)
 }
 
@@ -287,14 +331,48 @@ func (cmd *IntPointerSliceCmd) SetVal(val []*int64) {
 }
 
 func (cmd *IntPointerSliceCmd) Val() []*int64 {
+	cmd.await()
 	return cmd.val
 }
 
 func (cmd *IntPointerSliceCmd) Result() ([]*int64, error) {
+	cmd.await()
 	return cmd.val, cmd.err
 }
 
 func (cmd *IntPointerSliceCmd) readReply(rd *proto.Reader) error {
+	// A legacy path (one that does not start with "$") gets a single value
+	// instead of an array with one value per match.
+	readType, err := rd.PeekReplyType()
+	if err != nil {
+		return err
+	}
+	switch readType {
+	case proto.RespInt:
+		val, err := rd.ReadInt()
+		if err != nil {
+			return err
+		}
+		cmd.val = []*int64{&val}
+		return nil
+	case proto.RespString:
+		// JSON.TOGGLE replies with the new value as "true" or "false".
+		s, err := rd.ReadString()
+		if err != nil {
+			return err
+		}
+		var val int64
+		switch s {
+		case "true":
+			val = 1
+		case "false":
+		default:
+			return fmt.Errorf("redis: can't parse int reply: %.100q", s)
+		}
+		cmd.val = []*int64{&val}
+		return nil
+	}
+
 	n, err := rd.ReadArrayLen()
 	if err != nil {
 		return err
@@ -393,28 +471,26 @@ func (c cmdable) JSONArrPop(ctx context.Context, key, path string, index int) *S
 	return cmd
 }
 
-// JSONArrTrim trims an array to contain only the specified inclusive range of elements.
+// JSONArrTrim keeps the whole array (start 0, stop -1) and returns its length.
+// Use JSONArrTrimWithArgs to trim to a range.
 // For more information, see https://redis.io/commands/json.arrtrim
 func (c cmdable) JSONArrTrim(ctx context.Context, key, path string) *IntSliceCmd {
-	args := []interface{}{"JSON.ARRTRIM", key, path}
-	cmd := NewIntSliceCmd(ctx, args...)
-	_ = c(ctx, cmd)
-	return cmd
+	return c.JSONArrTrimWithArgs(ctx, key, path, nil)
 }
 
 // JSONArrTrimWithArgs trims an array to contain only the specified inclusive range of elements.
+// Start defaults to 0 and Stop to -1 (the last element).
 // For more information, see https://redis.io/commands/json.arrtrim
 func (c cmdable) JSONArrTrimWithArgs(ctx context.Context, key, path string, options *JSONArrTrimArgs) *IntSliceCmd {
-	args := []interface{}{"JSON.ARRTRIM", key, path}
-
+	// The server requires both start and stop.
+	start, stop := 0, -1
 	if options != nil {
-		args = append(args, options.Start)
-
+		start = options.Start
 		if options.Stop != nil {
-			args = append(args, *options.Stop)
+			stop = *options.Stop
 		}
 	}
-	cmd := NewIntSliceCmd(ctx, args...)
+	cmd := NewIntSliceCmd(ctx, "JSON.ARRTRIM", key, path, start, stop)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -490,9 +566,9 @@ func (c cmdable) JSONGetWithArgs(ctx context.Context, key string, options *JSONG
 		if options.Space != "" {
 			args = append(args, "SPACE", options.Space)
 		}
-		for _, path := range paths {
-			args = append(args, path)
-		}
+	}
+	for _, path := range paths {
+		args = append(args, path)
 	}
 	cmd := newJSONCmd(ctx, args...)
 	_ = c(ctx, cmd)
@@ -584,6 +660,15 @@ func (c cmdable) JSONSet(ctx context.Context, key, path string, value interface{
 // the argument is a string or []byte when we assume that it can be passed directly as JSON.
 // For more information, see https://redis.io/commands/json.set
 func (c cmdable) JSONSetMode(ctx context.Context, key, path string, value interface{}, mode string) *StatusCmd {
+	return c.JSONSetWithArgs(ctx, key, path, value, &JSONSetArgsOptions{Mode: mode})
+}
+
+// JSONSetWithArgs sets the JSON value at the given path in the given key with optional arguments
+// for setting mode (NX/XX) and the FPHA (Floating-Point Homogeneous Array) type used for storing
+// FP arrays. The value must be something that can be marshaled to JSON (using encoding/JSON) unless
+// the argument is a string or []byte when we assume that it can be passed directly as JSON.
+// For more information, see https://redis.io/commands/json.set
+func (c cmdable) JSONSetWithArgs(ctx context.Context, key, path string, value interface{}, options *JSONSetArgsOptions) *StatusCmd {
 	var bytes []byte
 	var err error
 	switch v := value.(type) {
@@ -595,13 +680,17 @@ func (c cmdable) JSONSetMode(ctx context.Context, key, path string, value interf
 		bytes, err = json.Marshal(v)
 	}
 	args := []interface{}{"JSON.SET", key, path, util.BytesToString(bytes)}
-	if mode != "" {
-		switch strings.ToUpper(mode) {
-		case "XX", "NX":
-			args = append(args, strings.ToUpper(mode))
-
-		default:
-			panic("redis: JSON.SET mode must be NX or XX")
+	if options != nil {
+		if options.Mode != "" {
+			switch strings.ToUpper(options.Mode) {
+			case "XX", "NX":
+				args = append(args, strings.ToUpper(options.Mode))
+			default:
+				panic("redis: JSON.SET mode must be NX or XX")
+			}
+		}
+		if options.FPHA != "" {
+			args = append(args, "FPHA", string(options.FPHA))
 		}
 	}
 	cmd := NewStatusCmd(ctx, args...)

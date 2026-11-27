@@ -60,6 +60,19 @@ func (c cmdable) eval(ctx context.Context, name, payload string, keys []string, 
 		cmd.SetFirstKeyPos(3)
 	}
 	_ = c(ctx, cmd)
+	// Normalize NOSCRIPT to ErrNoScript for Script.Run/RunRO's EVAL fallback,
+	// but only when the result is already readable: on the deferred
+	// autopipeline face the call above merely enqueues, and reading the outcome
+	// here would await execution — making the whole Eval family synchronous on
+	// a face whose contract is to return immediately (review finding by codex
+	// on #3942). When the result is still pending the normalization is skipped;
+	// Script.Run/RunRO also match the raw NOSCRIPT prefix, so the fallback
+	// keeps working on that face.
+	if cmd.resultReady() {
+		if err := cmd.rawErr(); err != nil && HasErrorPrefix(err, "NOSCRIPT") {
+			cmd.SetErr(ErrNoScript)
+		}
+	}
 	return cmd
 }
 
@@ -210,6 +223,18 @@ func fcallArgs(command string, function string, keys []string, args ...interface
 		cmdArgs[3+i] = key
 	}
 
-	cmdArgs = append(cmdArgs, args...)
-	return cmdArgs
+	// Like eval, a single slice argument is expanded into its elements.
+	// Any other argument, a nil one included, is sent as it is.
+	if len(args) == 1 {
+		switch arg := args[0].(type) {
+		case []string:
+			for _, s := range arg {
+				cmdArgs = append(cmdArgs, s)
+			}
+			return cmdArgs
+		case []interface{}:
+			return append(cmdArgs, arg...)
+		}
+	}
+	return append(cmdArgs, args...)
 }
