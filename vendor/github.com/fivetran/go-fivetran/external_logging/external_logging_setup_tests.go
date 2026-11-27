@@ -7,8 +7,6 @@ import (
 	httputils "github.com/fivetran/go-fivetran/http_utils"
 )
 
-// ExternalLoggingSetupTestsService implements the Log Management, Run Log service setup tests API.
-// Ref. https://fivetran.com/docs/rest-api/log-service-management#runlogservicesetuptests
 type ExternalLoggingSetupTestsService struct {
 	httputils.HttpService
 	externalLoggingId *string
@@ -20,6 +18,14 @@ func (s *ExternalLoggingSetupTestsService) ExternalLoggingId(value string) *Exte
 }
 
 func (s *ExternalLoggingSetupTestsService) Do(ctx context.Context) (ExternalLoggingSetupTestsResponse, error) {
+	return s.do(ctx, nil)
+}
+
+func (s *ExternalLoggingSetupTestsService) DoWithUserAgentSuffix(ctx context.Context, userAgentSuffix string) (ExternalLoggingSetupTestsResponse, error) {
+	return s.do(ctx, &userAgentSuffix)
+}
+
+func (s *ExternalLoggingSetupTestsService) do(ctx context.Context, userAgentSuffix *string) (ExternalLoggingSetupTestsResponse, error) {
 	var response ExternalLoggingSetupTestsResponse
 
 	if s.externalLoggingId == nil {
@@ -27,6 +33,6 @@ func (s *ExternalLoggingSetupTestsService) Do(ctx context.Context) (ExternalLogg
 	}
 
 	url := fmt.Sprintf("/external-logging/%v/test", *s.externalLoggingId)
-	err := s.HttpService.Do(ctx, "POST", url, nil, nil, 200, &response)
+	err := send(ctx, s.HttpService, userAgentSuffix, "POST", url, nil, nil, 200, &response)
 	return response, err
 }

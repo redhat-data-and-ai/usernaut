@@ -49,18 +49,18 @@ type externalLoggingCustomCreateRequest struct {
 	Config *map[string]interface{} `json:"config,omitempty"`
 }
 
-type externalLoggingModifyRequestBase struct {
+type externalLoggingUpdateRequestBase struct {
 	Enabled       *bool `json:"enabled,omitempty"`
 	RunSetupTests *bool `json:"run_setup_tests,omitempty"`
 }
 
-type externalLoggingModifyRequest struct {
-	externalLoggingModifyRequestBase
+type externalLoggingUpdateRequest struct {
+	externalLoggingUpdateRequestBase
 	Config any `json:"config,omitempty"`
 }
 
-type externalLoggingCustomModifyRequest struct {
-	externalLoggingModifyRequestBase
+type externalLoggingCustomUpdateRequest struct {
+	externalLoggingUpdateRequestBase
 	Config *map[string]interface{} `json:"config,omitempty"`
 }
 
@@ -94,7 +94,8 @@ type ExternalLoggingResponse struct {
 	Message string `json:"message"`
 	Data    struct {
 		ExternalLoggingResponseBase
-		Config ExternalLoggingConfigResponse `json:"config"`
+		SetupTests []common.SetupTestResponse    `json:"setup_tests"`
+		Config     ExternalLoggingConfigResponse `json:"config"`
 	} `json:"data"`
 }
 
@@ -103,7 +104,8 @@ type ExternalLoggingCustomResponse struct {
 	Message string `json:"message"`
 	Data    struct {
 		ExternalLoggingResponseBase
-		Config map[string]interface{} `json:"config"`
+		SetupTests []common.SetupTestResponse `json:"setup_tests"`
+		Config     map[string]interface{}     `json:"config"`
 	} `json:"data"`
 }
 
@@ -112,6 +114,7 @@ type ExternalLoggingCustomMergedResponse struct {
 	Message string `json:"message"`
 	Data    struct {
 		ExternalLoggingResponseBase
+		SetupTests   []common.SetupTestResponse    `json:"setup_tests"`
 		CustomConfig map[string]interface{}        `json:"config"`
 		Config       ExternalLoggingConfigResponse // no mapping here
 	} `json:"data"`
@@ -124,36 +127,39 @@ type externalLoggingCreateRequestBase struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 }
 
-type ExternalLoggingModifyResponseDataBased struct {
+type ExternalLoggingUpdateResponseDataBased struct {
 	Id      string `json:"id"`
 	Service string `json:"service"`
 	Enabled bool   `json:"enabled"`
 }
 
-type ExternalLoggingModifyResponse struct {
+type ExternalLoggingUpdateResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		ExternalLoggingModifyResponseDataBased
-		Config ExternalLoggingConfigResponse `json:"config"`
+		ExternalLoggingUpdateResponseDataBased
+		SetupTests []common.SetupTestResponse    `json:"setup_tests"`
+		Config     ExternalLoggingConfigResponse `json:"config"`
 	} `json:"data"`
 }
 
-type ExternalLoggingModifyCustomResponse struct {
+type ExternalLoggingUpdateCustomResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		ExternalLoggingModifyResponseDataBased
-		Config map[string]interface{} `json:"config"`
+		ExternalLoggingUpdateResponseDataBased
+		SetupTests []common.SetupTestResponse `json:"setup_tests"`
+		Config     map[string]interface{}     `json:"config"`
 	} `json:"data"`
 }
 
-type ExternalLoggingModifyCustomMergedResponse struct {
+type ExternalLoggingUpdateCustomMergedResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		ExternalLoggingModifyResponseDataBased
-		CustomConfig map[string]interface{}                        `json:"config"`
+		ExternalLoggingUpdateResponseDataBased
+		SetupTests   []common.SetupTestResponse    `json:"setup_tests"`
+		CustomConfig map[string]interface{}        `json:"config"`
 		Config       ExternalLoggingConfigResponse // no mapping here
 	} `json:"data"`
 }
@@ -166,9 +172,9 @@ type ExternalLoggingSetupTestsResponse struct {
 }
 
 type ExternalLoggingListResponse struct {
-    common.CommonResponse
-    Data struct {
-        Items      []ExternalLoggingResponseBase `json:"items"`
-        NextCursor string                   	 `json:"next_cursor"`
-    } `json:"data"`
+	common.CommonResponse
+	Data struct {
+		Items      []ExternalLoggingResponseBase `json:"items"`
+		NextCursor string                        `json:"next_cursor"`
+	} `json:"data"`
 }

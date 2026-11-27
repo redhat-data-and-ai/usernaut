@@ -5,6 +5,7 @@ type PrivateLinkResponseBase struct {
     Name            string `json:"name"`
     Region          string `json:"region"`
     Service         string `json:"service"`
+    Host            string `json:"host"`
     AccountId       string `json:"account_id"`
     CloudProvider   string `json:"cloud_provider"`
     State           string `json:"state"`
@@ -65,10 +66,10 @@ type privateLinkCustomCreateRequest struct {
     Config *map[string]interface{} `json:"config,omitempty"`
 }
 
-type privateLinkModifyRequest struct {
+type privateLinkUpdateRequest struct {
     Config          any     `json:"config,omitempty"`
 }
 
-type privateLinkCustomModifyRequest struct {
+type privateLinkCustomUpdateRequest struct {
     Config *map[string]interface{} `json:"config,omitempty"`
 }

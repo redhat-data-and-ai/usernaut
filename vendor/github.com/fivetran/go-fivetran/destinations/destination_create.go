@@ -6,8 +6,6 @@ import (
     httputils "github.com/fivetran/go-fivetran/http_utils"
 )
 
-// DestinationCreateService implements the Destination Management, Create a Destination API.
-// Ref. https://fivetran.com/docs/rest-api/destinations#createadestination
 type DestinationCreateService struct {
     httputils.HttpService
     groupID                     *string
@@ -23,6 +21,7 @@ type DestinationCreateService struct {
     hybridDeploymentAgentId     *string
     networkingMethod            *string
     privateLinkId               *string
+    proxyAgentId                *string
 }
 
 func (s *DestinationCreateService) GroupID(value string) *DestinationCreateService {
@@ -85,6 +84,11 @@ func (s *DestinationCreateService) PrivateLinkId(value string) *DestinationCreat
     return s
 }
 
+func (s *DestinationCreateService) ProxyAgentId(value string) *DestinationCreateService {
+    s.proxyAgentId = &value
+    return s
+}
+
 func (s *DestinationCreateService) NetworkingMethod(value string) *DestinationCreateService {
     s.networkingMethod = &value
     return s
@@ -99,6 +103,12 @@ func (s *DestinationCreateService) Do(ctx context.Context) (DestinationDetailsWi
 func (s *DestinationCreateService) DoCustom(ctx context.Context) (DestinationDetailsWithSetupTestsCustomResponse, error) {
     var response DestinationDetailsWithSetupTestsCustomResponse
     err := s.HttpService.Do(ctx, "POST", "/destinations", s.requestCustom(), nil, 201, &response)
+    return response, err
+}
+
+func (s *DestinationCreateService) DoCustomWithUserAgentSuffix(ctx context.Context, userAgentSuffix string) (DestinationDetailsWithSetupTestsCustomResponse, error) {
+    var response DestinationDetailsWithSetupTestsCustomResponse
+    err := s.HttpService.DoWithUserAgentSuffix(ctx, userAgentSuffix, "POST", "/destinations", s.requestCustom(), nil, 201, &response)
     return response, err
 }
 
@@ -121,6 +131,7 @@ func (s *DestinationCreateService) request() *destinationCreateRequest {
         PrivateLinkId:                  s.privateLinkId,
         HybridDeploymentAgentId:        s.hybridDeploymentAgentId,
         NetworkingMethod:               s.networkingMethod,
+        ProxyAgentId:                   s.proxyAgentId,
     }
 }
 
@@ -138,5 +149,6 @@ func (s *DestinationCreateService) requestCustom() *destinationCreateRequest {
         PrivateLinkId:                  s.privateLinkId,
         HybridDeploymentAgentId:        s.hybridDeploymentAgentId,
         NetworkingMethod:               s.networkingMethod,
+        ProxyAgentId:                   s.proxyAgentId,
     }
 }
