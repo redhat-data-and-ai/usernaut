@@ -2,11 +2,14 @@ package hystrix
 
 import (
 	"context"
+	"slices"
 	"time"
 
+	metricCollector "github.com/afex/hystrix-go/hystrix/metric_collector"
 	"github.com/afex/hystrix-go/plugins"
 	"github.com/gojek/heimdall/v7"
 	"github.com/gojek/heimdall/v7/httpclient"
+	"github.com/gojek/heimdall/v7/internal"
 )
 
 // Option represents the hystrix client options
@@ -19,10 +22,10 @@ func WithCommandName(name string) Option {
 	}
 }
 
-// WithHTTPTimeout sets hystrix timeout
+// WithHTTPTimeout sets timeout for http.Client
 func WithHTTPTimeout(timeout time.Duration) Option {
 	return func(c *Client) {
-		c.timeout = timeout
+		httpclient.WithHTTPTimeout(timeout)(c.client)
 	}
 }
 
@@ -101,8 +104,60 @@ func WithHTTPClient(client heimdall.Doer) Option {
 }
 
 // WithStatsDCollector exports hystrix metrics to a statsD backend
+//
+// Deprecated: hystrix plugin should only be registered once before any hystrix command is executed.
+// Register plugins.InitializeStatsdCollector directly to continue using the functionality
 func WithStatsDCollector(addr, prefix string) Option {
+	collector, err := plugins.InitializeStatsdCollector(&plugins.StatsdCollectorConfig{
+		StatsdAddr: addr,
+		Prefix:     prefix,
+	})
+	if err != nil {
+		panic(err)
+	}
+	metricCollector.Registry.Register(collector.NewStatsdCollector)
+
+	return func(_ *Client) {}
+}
+
+// WithRetryableStatusCodes sets status codes to be retried
+// Note: All 5xx status codes are always eligible for retry, thus not required for WithRetryableStatusCodes option.
+func WithRetryableStatusCodes(statusCodes ...int) Option {
 	return func(c *Client) {
-		c.statsD = &plugins.StatsdCollectorConfig{StatsdAddr: addr, Prefix: prefix}
+		codes := append(c.retryableCodes, statusCodes...)
+		slices.Sort(codes)
+
+		c.retryableCodes = codes
+	}
+}
+
+// WithRetryErrorBudgetToken creates a weighted token retry error budget with the following token details.
+//
+//	maxToken: The maximum/initial token value which is used to calculate token threshold(i.e. maxToken/2)
+//	tokenRatio: The allowed ratio of failure in comparison to success.
+func WithRetryErrorBudgetToken(maxToken int32, tokenRatio float32) Option {
+	return func(c *Client) {
+		c.retryErrorBudget = internal.NewTokenErrorBudget(maxToken, tokenRatio)
+	}
+}
+
+// WithRetryErrorBudgetPercent creates a weighted token retry error budget with the following failure details.
+//
+//	minFailureVolume: The minimum failure required.
+//	failurePercent: The failure percentage (0-100).
+//
+// Note: To determine if budget is exceeded we use recent event which satisfies following
+//
+//	failureEvent <= maxFailureEvent
+//	successEvent = (maxFailureEvent-failureEvent) / allowedSuccessPerFailure
+//	totalEvent = failureEvent + successEvent
+//
+// Where
+//
+//	maxFailureEvent = minFailureVolume * 2
+//	allowedSuccessPerFailure = (100 - failurePercent) / failurePercent
+func WithRetryErrorBudgetPercent(minFailureVolume int32, failurePercent float32) Option {
+	return func(c *Client) {
+		c.retryErrorBudget = internal.NewPercentErrorBudget(minFailureVolume, failurePercent)
 	}
 }

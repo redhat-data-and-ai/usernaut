@@ -1,8 +1,10 @@
 package httpclient
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/gojek/heimdall/v7"
@@ -12,11 +14,14 @@ import (
 
 // Client is the http client implementation
 type Client struct {
-	client     heimdall.Doer
-	retrier    heimdall.Retriable
-	plugins    []heimdall.Plugin
-	timeout    time.Duration
-	retryCount int
+	client  heimdall.Doer
+	plugins []heimdall.Plugin
+	timeout *time.Duration
+
+	retrier          heimdall.Retriable
+	retryCount       int
+	retryableCodes   []int
+	retryErrorBudget *internal.ErrorBudget
 }
 
 const (
@@ -29,7 +34,7 @@ var _ heimdall.Client = (*Client)(nil)
 // NewClient returns a new instance of http Client
 func NewClient(opts ...Option) *Client {
 	client := Client{
-		timeout:    defaultHTTPTimeout,
+		client:     &http.Client{Timeout: defaultHTTPTimeout},
 		retryCount: defaultRetryCount,
 		retrier:    heimdall.NewNoRetrier(),
 	}
@@ -38,11 +43,7 @@ func NewClient(opts ...Option) *Client {
 		opt(&client)
 	}
 
-	if client.client == nil {
-		client.client = &http.Client{
-			Timeout: client.timeout,
-		}
-	}
+	client.updateHTTPTimeout()
 
 	return &client
 }
@@ -168,26 +169,36 @@ func (c *Client) Do(request *http.Request) (*http.Response, error) {
 		if err != nil {
 			errs = append(errs, err)
 			c.reportError(request, err)
-			if internal.IsCtxDone(request.Context()) {
+			if c.skipRetry(request.Context()) {
 				break
 			}
 			continue
 		}
 		c.reportRequestEnd(request, response)
 
-		if response.StatusCode >= http.StatusInternalServerError {
-			if internal.IsCtxDone(request.Context()) {
+		if _, ok := slices.BinarySearch(c.retryableCodes, response.StatusCode); ok ||
+			response.StatusCode >= http.StatusInternalServerError {
+			if c.skipRetry(request.Context()) {
 				break
 			}
-
 			continue
 		}
 
 		errs = nil // Clear errors if any iteration succeeds
+		_ = c.retryErrorBudget.Success()
 		break
 	}
 
 	return response, internal.BuildMultiError(errs)
+}
+
+func (c *Client) skipRetry(ctx context.Context) bool {
+	if internal.IsCtxDone(ctx) {
+		_ = c.retryErrorBudget.Success()
+		return true
+	}
+
+	return c.retryErrorBudget.Failure()
 }
 
 func (c *Client) reportRequestStart(request *http.Request) {
@@ -205,5 +216,15 @@ func (c *Client) reportError(request *http.Request, err error) {
 func (c *Client) reportRequestEnd(request *http.Request, response *http.Response) {
 	for _, plugin := range c.plugins {
 		plugin.OnRequestEnd(request, response)
+	}
+}
+
+func (c *Client) updateHTTPTimeout() {
+	if c.timeout == nil {
+		return
+	}
+
+	if client, ok := c.client.(*http.Client); ok && client != nil {
+		client.Timeout = *c.timeout
 	}
 }
