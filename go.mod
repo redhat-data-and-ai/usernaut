@@ -22,7 +22,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
 	gitlab.com/gitlab-org/api/client-go v0.145.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.25.0
 	k8s.io/apimachinery v0.35.11
 	k8s.io/client-go v0.35.10
 	sigs.k8s.io/controller-runtime v0.23.3
