@@ -2,8 +2,6 @@ package redis
 
 import (
 	"context"
-
-	"github.com/redis/go-redis/v9/internal/otel"
 )
 
 type PubSubCmdable interface {
@@ -20,20 +18,14 @@ type PubSubCmdable interface {
 func (c cmdable) Publish(ctx context.Context, channel string, message interface{}) *IntCmd {
 	cmd := NewIntCmd(ctx, "publish", channel, message)
 	_ = c(ctx, cmd)
-	// Record PubSub message sent (if command succeeded)
-	if cmd.Err() == nil {
-		otel.RecordPubSubMessage(ctx, nil, "sent", channel, false)
-	}
+	// The "sent" Pub/Sub metric is recorded after the reply is read
+	// (baseClient.recordCommandSamples), on every execution path.
 	return cmd
 }
 
 func (c cmdable) SPublish(ctx context.Context, channel string, message interface{}) *IntCmd {
 	cmd := NewIntCmd(ctx, "spublish", channel, message)
 	_ = c(ctx, cmd)
-	// Record PubSub message sent (if command succeeded)
-	if cmd.Err() == nil {
-		otel.RecordPubSubMessage(ctx, nil, "sent", channel, true)
-	}
 	return cmd
 }
 
