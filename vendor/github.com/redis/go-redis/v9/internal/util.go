@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -9,6 +10,29 @@ import (
 
 	"github.com/redis/go-redis/v9/internal/util"
 )
+
+// String representations of special float values.
+// Values are lowercase for consistency with Redis RESP2 protocol responses.
+const (
+	NaN  = "nan"  // Not a Number
+	Inf  = "inf"  // Positive infinity
+	NInf = "-inf" // Negative infinity
+)
+
+// FormatFloat formats a float64 to string, normalizing special values
+// (NaN, Inf) to lowercase for consistency with Redis RESP2 protocol.
+func FormatFloat(f float64) string {
+	switch {
+	case math.IsNaN(f):
+		return NaN
+	case math.IsInf(f, 1):
+		return Inf
+	case math.IsInf(f, -1):
+		return NInf
+	default:
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+}
 
 func Sleep(ctx context.Context, dur time.Duration) error {
 	t := time.NewTimer(dur)
@@ -58,11 +82,9 @@ func GetAddr(addr string) string {
 		return ""
 	}
 
-	if strings.IndexByte(addr, '.') != -1 {
-		return addr
-	}
-
-	if addr[0] == '[' {
+	// Only a bare IPv6 host needs brackets. A dot does not rule one out:
+	// "::ffff:10.0.0.1" is IPv6 too.
+	if addr[0] == '[' || strings.IndexByte(addr[:ind], ':') == -1 {
 		return addr
 	}
 	return net.JoinHostPort(addr[:ind], addr[ind+1:])

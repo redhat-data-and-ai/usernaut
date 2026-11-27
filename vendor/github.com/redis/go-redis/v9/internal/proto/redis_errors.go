@@ -132,6 +132,9 @@ func NewMasterDownError(msg string) *MasterDownError {
 	return &MasterDownError{msg: msg}
 }
 
+// maxClientsPrefix is common to both max clients messages, see parseTypedRedisError.
+const maxClientsPrefix = "ERR max number of clients"
+
 // MaxClientsError is returned when the maximum number of clients has been reached.
 type MaxClientsError struct {
 	msg string
@@ -256,7 +259,9 @@ func parseTypedRedisError(msg string) error {
 		return NewMasterDownError(msg)
 	case strings.HasPrefix(msg, "NOREPLICAS "):
 		return NewNoReplicasError(msg)
-	case msg == "ERR max number of clients reached":
+	// A cluster node says "ERR max number of clients + cluster connections
+	// reached" instead of "ERR max number of clients reached".
+	case strings.HasPrefix(msg, maxClientsPrefix):
 		return NewMaxClientsError(msg)
 	case strings.HasPrefix(msg, "NOAUTH "), strings.HasPrefix(msg, "WRONGPASS "), strings.Contains(msg, "unauthenticated"):
 		return NewAuthError(msg)
@@ -309,13 +314,25 @@ func IsReadOnlyError(err error) bool {
 	if errors.As(err, &readOnlyErr) {
 		return true
 	}
-	// Check if wrapped error is a RedisError with READONLY prefix
+	// Check if wrapped error is a RedisError with READONLY prefix or Lua script READONLY
 	var redisErr RedisError
-	if errors.As(err, &redisErr) && strings.HasPrefix(redisErr.Error(), "READONLY ") {
-		return true
+	if errors.As(err, &redisErr) {
+		s := redisErr.Error()
+		if strings.HasPrefix(s, "READONLY ") {
+			return true
+		}
+		// Lua script wrapped READONLY errors:
+		//   "ERR Error running script (call to f_<sha>): @user_script:N: -READONLY You can't write against a read only replica."
+		if strings.Contains(s, "-READONLY You can't write against a read only replica") {
+			return true
+		}
 	}
 	// Fallback to string checking for backward compatibility
-	return strings.HasPrefix(err.Error(), "READONLY ")
+	s := err.Error()
+	if strings.HasPrefix(s, "READONLY ") {
+		return true
+	}
+	return strings.Contains(s, "-READONLY You can't write against a read only replica")
 }
 
 // IsMovedError checks if an error is a MovedError, even if wrapped.
@@ -427,11 +444,11 @@ func IsMaxClientsError(err error) bool {
 	}
 	// Check if wrapped error is a RedisError with max clients prefix
 	var redisErr RedisError
-	if errors.As(err, &redisErr) && strings.HasPrefix(redisErr.Error(), "ERR max number of clients reached") {
+	if errors.As(err, &redisErr) && strings.HasPrefix(redisErr.Error(), maxClientsPrefix) {
 		return true
 	}
 	// Fallback to string checking for backward compatibility
-	return strings.HasPrefix(err.Error(), "ERR max number of clients reached")
+	return strings.HasPrefix(err.Error(), maxClientsPrefix)
 }
 
 // IsAuthError checks if an error is an AuthError, even if wrapped.
